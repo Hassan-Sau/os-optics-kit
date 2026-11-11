@@ -7,7 +7,8 @@ import csv
 import json
 import unittest
 
-from tests.workflow_fixtures import TempDir, by_id, expander, invoke, quiet_environment, requires_engine
+from tests.workflow_fixtures import (HAS_MATPLOTLIB, TempDir, by_id, expander, invoke, quiet_environment,
+                                     requires_engine)
 
 quiet_environment()
 
@@ -144,6 +145,46 @@ class SweepSpecTests(unittest.TestCase):
         self.assertEqual((rows[-1.0]["outcome"], rows[-1.0]["error_stage"], rows[-1.0]["error_code"]),
                          ("ERROR", "build", "INPUT_INVALID"))
         self.assertNotEqual(rows[100.0]["outcome"], "ERROR")
+
+    def test_three_parameter_grid(self):
+        spec = {"parameters": [
+            {"name": "l2_x", "unit": "mm", "values": [200.0, 201.0],
+             "ops": [{"op": "set_component_pose", "instance_id": "L2", "position_mm": ["$value", 0, 0]}]},
+            {"name": "l3_x", "unit": "mm", "values": [300.0, 302.0],
+             "ops": [{"op": "set_component_pose", "instance_id": "L3", "position_mm": ["$value", 0, 0]}]},
+            {"name": "wavelength", "unit": "nm", "values": [780.0, 800.0],
+             "ops": [{"op": "set_source_model", "instance_id": "SRC", "changes": {"wavelength_nm": "$value"}}]}],
+            "objective": {"column": "target:spot_radius", "sense": "minimize"}}
+        summary = sp.run_sweep(spec, self.dir / "study", base=expander())
+        rows = summary["rows"]
+        self.assertEqual(len(rows), 8)
+        grid = [(r["param:l2_x"], r["param:l3_x"], r["param:wavelength"]) for r in rows]
+        self.assertEqual(grid, [(a, b, c) for a in (200.0, 201.0) for b in (300.0, 302.0) for c in (780.0, 800.0)])
+        self.assertEqual([r["sample_id"] for r in rows], [f"s{i:04d}" for i in range(1, 9)])
+        valued = [r for r in rows if isinstance(r.get("target:spot_radius"), float) and r["feasible"]]
+        best = min(valued, key=lambda r: r["target:spot_radius"])
+        self.assertEqual(summary["best"]["sample_id"], best["sample_id"])
+        with open(self.dir / "study" / "table.csv", newline="", encoding="utf-8") as handle:
+            header = next(csv.reader(handle))
+        self.assertEqual([c for c in header if c.startswith("param:") and c.count(":") == 1],
+                         ["param:l2_x", "param:l3_x", "param:wavelength"])
+        if not HAS_MATPLOTLIB:
+            return
+        from os_optics_kit import plot_results as pr
+
+        with self.assertRaises(wc.WorkflowError) as caught:
+            pr.plot_sweep(self.dir / "study", "target:spot_radius")
+        self.assertEqual(caught.exception.code, "PLOT_NEEDS_SLICE")
+        self.assertEqual([f["name"] for f in caught.exception.details["free"]], ["l2_x", "l3_x", "wavelength"])
+        result = pr.plot_sweep(self.dir / "study", "target:spot_radius", fix={"wavelength": 800.0, "l3_x": 302})
+        self.assertEqual(result["fixed"], {"l3_x": 302.0, "wavelength": 800.0})
+        sliced = [r for r in rows if r["param:wavelength"] == 800.0 and r["param:l3_x"] == 302.0]
+        self.assertEqual(result["points"], len(sliced))
+        heatmap = pr.plot_sweep(self.dir / "study", "target:spot_radius", fix={"wavelength": 780.0})
+        self.assertIn("heatmap_", heatmap["out"]["png"])
+        code, _out, err = invoke(pr.main, ["sweep", str(self.dir / "study"), "--y", "target:spot_radius",
+                                           "--fix", "wavelength=780", "--fix", "l2_x=200", "--name", "cli"])
+        self.assertEqual(code, 0, err)
 
     def test_unit_error_is_refused_before_running(self):
         spec = {"parameters": [{"name": "w", "unit": "deg", "values": [1.0],

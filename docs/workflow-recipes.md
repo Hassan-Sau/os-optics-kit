@@ -298,7 +298,7 @@ os-optics-kit sweep SPEC.json [--base BASE.json] --out STUDY_DIR [--workers N|au
 | Key | Meaning |
 | --- | --- |
 | `base_project` | Project file relative to the spec; `--base` overrides |
-| `parameters` | 1 or 2 entries `{name, unit?, values \| range {start, stop, count}, ops}`; two give the full grid, first outermost |
+| `parameters` | one or more entries `{name, unit?, values \| range {start, stop, count}, ops}`; several give the full grid, first outermost |
 | `max_evaluations` | optional (default: no cap); a stated cap the sample count exceeds is refused with `BUDGET_EXCEEDED` before any run |
 | `targets` | ids deciding each sample's outcome (default all) |
 | `constraints` | all must hold: `{"outcome": [...]}`, `{"target": ID, "assessment": ["MET"]}`, `{"column": C, "min"?, "max"?}` (quantities convert to the column unit) |
@@ -357,7 +357,8 @@ os-optics-kit report RUN_A RUN_B --project CURRENT.json --out REPORT_DIR
 
 `plot` needs the plot extra: `python -m pip install "os-optics-kit[plot]"`.
 
-`sweep` draws a curve (one parameter) or heatmap (two) with axis units, the target
+`sweep` draws a curve (one free parameter) or heatmap (two; `--fix NAME=VALUE` selects a
+slice of a larger grid and the caption names the fixed values) with axis units, the target
 bounds (a band on the curve, dashed lines on the heatmap colour bar) and every sample's
 outcome marker; samples without an exact value are hollow markers on a dotted line labelled
 "samples without an exact value" below the lowest value (the position carries no value), with

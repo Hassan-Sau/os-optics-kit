@@ -330,8 +330,12 @@ def build_plot_sweep(asset, ctx, theme, out):
         raise pres.PresentationError("SPEC_INVALID", f"asset {asset['id']}: a sweep plot needs a study source")
     summary = wc.read_json(source.path / "summary.json")
     y = _required(asset, "y")
-    rows, unit, parameters = pr.study_column(summary, y)
-    data = {"study": source.id, "y": y, "unit": unit, "parameters": parameters,
+    fix = asset.get("fix")
+    if fix is not None and (not isinstance(fix, dict) or not all(isinstance(v, (int, float)) and not
+                                                                  isinstance(v, bool) for v in fix.values())):
+        raise pres.PresentationError("SPEC_INVALID", f"asset {asset['id']}: fix maps parameter names to numbers")
+    rows, unit, parameters = pr.study_column(summary, y, fix)
+    data = {"study": source.id, "y": y, "unit": unit, "parameters": parameters, "fix": fix,
             "rows": [{key: row.get(key) for key in row if key == "sample_id" or key == "outcome" or key == y
                       or key.startswith(f"{y}:") or key.startswith("param:")} for row in rows]}
     data_file = wc.write_json(out / "data.json", data)
@@ -342,7 +346,7 @@ def build_plot_sweep(asset, ctx, theme, out):
     title = {lang: pres.text("title.sweep", lang, y=names[lang][0], x=names[lang][1]) for lang in pres.LANGUAGES}
     caption = {lang: pr.sweep_caption(lang, rows, y, names[lang][0], names[lang][1]) for lang in pres.LANGUAGES}
     result = pr.plot_sweep(source.path, y, out_dir=out, name=asset["id"], style=style,
-                           caption_text=pres.caption_text(asset, theme, caption))
+                           caption_text=pres.caption_text(asset, theme, caption), fix=fix)
     files = {"image": Path(result["out"]["png"])}
     for kind in ("svg", "pdf"):
         if kind in result["out"]:

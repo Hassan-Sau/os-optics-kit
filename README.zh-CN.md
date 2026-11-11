@@ -99,7 +99,7 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 | --- | --- | --- |
 | `summary` | `os-optics-kit summary` | 把已保存的运行读成一个紧凑 JSON 文档，并按结果给出退出码 |
 | `edit` | `os-optics-kit edit` | 列出 Project 中的对象，按标识修改，由引擎检查并原子写入 |
-| `sweep` | `os-optics-kit sweep` | 运行有界的单参数或双参数扫描，保存并统计每个样本 |
+| `sweep` | `os-optics-kit sweep` | 运行参数网格扫描，保存并统计每个样本 |
 | `compare` | `os-optics-kit compare` | 按目标和平面标识比较已保存的运行或扫描样本，并给出时效 |
 | `plot` | `os-optics-kit plot` | 绘制扫描曲线、热图、功率分布、条形图和直方图 |
 | `report` | `os-optics-kit report` | 生成 Markdown 和 JSON 报告，含计数、诊断信息和产物哈希 |

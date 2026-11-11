@@ -24,7 +24,7 @@ DIR, the skills directory of your agent host; it never overwrites a different fi
 | Start from a worked design | `run-case`: `os-optics-kit cases list`, `cases copy NAME --dest .`, `cases verify NAME` |
 | Read a run before deciding | `summary RUN` |
 | Discover IDs, units, axes; edit by ID | `edit P.json --describe --ids ID`; `edit P.json --edits OPS.json --out NEW.json --run RUN` |
-| Explore one or two parameters | `sweep SPEC.json --base P.json --out STUDY` |
+| Explore a parameter grid | `sweep SPEC.json --base P.json --out STUDY` |
 | Explain what an edit changed | `compare RUN_A RUN_B --project CURRENT.json --out CMP` |
 | Plots and a report | `plot sweep STUDY --y target:ID`; `report STUDY --project CURRENT.json` |
 | Reproducible 3D figures | `render RUN --out FIGURES --camera 55,22 --background transparent` |

@@ -83,8 +83,8 @@
       "command": "os-optics-kit plot",
       "requires": "os-optics>=0.13,<0.14; os-optics-kit[plot]",
       "path": "skills/plot/SKILL.md",
-      "tokens": 652,
-      "sha256": "9c98e6d7aaba45f97965d453ab6e315e627a5c68de8c7b224b77986dc683a5f8"
+      "tokens": 682,
+      "sha256": "7ceee6dedfa34b1d0beadb78313d22c10477435dca7489d8e01cc869254277f8"
     },
     {
       "name": "present",
@@ -171,8 +171,8 @@
       "command": "os-optics-kit sweep",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sweep/SKILL.md",
-      "tokens": 721,
-      "sha256": "90e7e6d82700b8cb24dc2db9c68ea816205c75148a00f2077e02a5a76e45fc7d"
+      "tokens": 735,
+      "sha256": "d164e5262fe3bbf8500cfdbf3e3b8b136d99963d36bbbd1db4803f3b3bafbc98"
     },
     {
       "name": "tolerance",

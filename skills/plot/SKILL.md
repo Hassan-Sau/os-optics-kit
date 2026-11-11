@@ -22,7 +22,8 @@ kind: tool
 
 ## Inputs
 
-- `sweep STUDY_DIR --y COLUMN`: COLUMN is `target:<id>`, `derived:<name>` or `param:<name>`.
+- `sweep STUDY_DIR --y COLUMN [--fix NAME=VALUE ...]`: COLUMN is `target:<id>`, `derived:<name>` or
+  `param:<name>`; `--fix` selects a slice of a sweep over more than two parameters (`PLOT_NEEDS_SLICE` otherwise).
 - `power RUN_DIR`.
 - `bars DATA.json`: `{"labels", "values", "unit", "title", "ylabel"?}`.
 - `histogram DATA.json`: `{"values", "unit", "title", "xlabel"?, "bounds"?: {"minimum", "maximum"}, "bins"?}`.

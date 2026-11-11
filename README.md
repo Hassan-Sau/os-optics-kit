@@ -105,7 +105,7 @@ and `expected.json` (the verified outcome), plus its own scripts, study specs or
 | --- | --- | --- |
 | `summary` | `os-optics-kit summary` | Read a saved run into one compact JSON document with an exit code per outcome |
 | `edit` | `os-optics-kit edit` | List a Project's objects and apply edits by ID, checked by the engine and written atomically |
-| `sweep` | `os-optics-kit sweep` | Run a bounded one- or two-parameter sweep, every sample saved and counted |
+| `sweep` | `os-optics-kit sweep` | Run a parameter grid sweep, every sample saved and counted |
 | `compare` | `os-optics-kit compare` | Compare saved runs or sweep samples by target and plane ID, with freshness |
 | `plot` | `os-optics-kit plot` | Draw sweep curves, heatmaps, power distributions, bar charts and histograms |
 | `report` | `os-optics-kit report` | Assemble a Markdown and JSON report with counts, diagnostics and artifact hashes |

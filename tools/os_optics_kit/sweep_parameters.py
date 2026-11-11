@@ -1,4 +1,4 @@
-"""Run a bounded one- or two-parameter sweep of a Project; save every sample's Project and run.
+"""Run a grid sweep over one or more parameters of a Project; save every sample's Project and run.
 
 Usage:
   os-optics-kit sweep SPEC.json --out STUDY_DIR [--base BASE.json] [--overwrite]
@@ -8,7 +8,7 @@ Usage:
 SPEC.json (keys; units as in os-optics-kit edit):
   {
     "base_project": "base.json",                  # relative to SPEC.json; --base overrides
-    "parameters": [                               # 1 or 2 parameters; 2 give the full grid (first one outermost)
+    "parameters": [                               # 1 or more; several give the full grid (first one outermost)
       {"name": "l2_shift", "unit": "mm",          # unit of the values (nm/um/mm/m, deg/rad/mrad/urad, W/mW/uW,
                                                   # or omitted for a plain number)
        "values": [-2, 0, 2],                      # or "range": {"start": -2, "stop": 2, "count": 5} (inclusive)
@@ -135,8 +135,8 @@ def substitute(template, value, unit):
 def normalize_spec(spec, *, build=None):
     """Validated, normalized parameters and options; raises WorkflowError(SPEC_INVALID / BUDGET_EXCEEDED)."""
     parameters = spec.get("parameters")
-    if not isinstance(parameters, list) or not 1 <= len(parameters) <= 2:
-        raise wc.WorkflowError("SPEC_INVALID", "parameters must list one or two parameters")
+    if not isinstance(parameters, list) or not parameters:
+        raise wc.WorkflowError("SPEC_INVALID", "parameters must list at least one parameter")
     names = []
     out = []
     for parameter in parameters:

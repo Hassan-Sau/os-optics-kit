@@ -25,7 +25,7 @@ kind: tool
 
 - `base_project` (relative to the spec; `--base` overrides) and `max_evaluations` (optional cap on
   runs, checked before any run; default none).
-- `parameters`: 1 or 2 items `{name, unit, values | range {start, stop, count}, ops}`; `ops` use the
+- `parameters`: one or more items `{name, unit, values | range {start, stop, count}, ops}` (full grid); `ops` use the
   `edit` vocabulary with the placeholder `"$value"` (or `{"$value": {"scale", "offset"}}`).
 - Optional: `targets` (ids deciding outcomes), `constraints`, `objective` `{column, sense}`, `derived`,
   `stop_on`. Columns: `param:<name>`, `target:<id>`, `derived:<name>`.
@@ -62,7 +62,7 @@ os-optics-kit sweep sweep.json --out study
 
 ## Limits
 
-- At most two parameters; every sample is one full engine run.
+- Every grid point is one full engine run; a plot shows one or two parameters (`plot sweep --fix`).
 - Unknown target ids or columns refuse the spec before any run.
 - No sample is dropped: ERROR, UNKNOWN and OUT_OF_MODEL samples stay in the table.
 - `stop_on` acts in sample order: every sample after the first listed outcome is `STOPPED`.
