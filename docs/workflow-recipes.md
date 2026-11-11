@@ -75,8 +75,13 @@ Selected requirements determine a sample's class:
 6. `NOT_APPLICABLE`: no selected requirement applies, including a target-free run.
 
 Unrelated scope findings remain in the record without invalidating an otherwise
-usable selected quantity. A bounded quantity retains its interval and is not an exact
-objective or derivative input. `objective_valid` is separate from `feasible`: an exact
+usable selected quantity. Each target value has a `value_kind` (table column
+`target:<id>:value_kind`): `EXACT`, `BOUNDED`, `QUANTITY_UNKNOWN`, `OUTSIDE_MODEL`,
+`UNDECIDED` (the metric could not be graded) or `NO_VALUE`. By default (`value_use:
+"exact"`) only `EXACT` values are objectives, derivative inputs, statistics and compare
+deltas; `value_use: "reported"` (sweep, sensitivity and tolerance specs, `compare
+--value-use reported`) uses every finite value and counts the kinds used per target
+(`values_used`; a sensitivity estimate names the kind of each side). `objective_valid` is separate from `feasible`: an exact
 objective may be usable even when a requirement is unmet. Every requested sample stays
 in the table, including invalid edits, partial runs and indeterminate results.
 
@@ -304,6 +309,7 @@ os-optics-kit sweep SPEC.json [--base BASE.json] --out STUDY_DIR [--workers N|au
 | `constraints` | all must hold: `{"outcome": [...]}`, `{"target": ID, "assessment": ["MET"]}`, `{"column": C, "min"?, "max"?}` (quantities convert to the column unit) |
 | `objective` | `{"column": C, "sense": "minimize" \| "maximize"}` over feasible samples (finite exact objective with applicable dependencies, every explicit constraint met) |
 | `derived` | `{"name", "op": add \| sub \| mul \| div \| abs \| abs_diff, "a", "b", "unit"?}`; `unit` applies to its constraints, objective, table and plots |
+| `value_use` | `exact` (default) or `reported`: which target values are operands (Outcome classes) |
 | `stop_on` | outcome classes that stop the sweep; every sample after the first listed outcome in sample order becomes `ERROR` / `STOPPED` (default none); a sample stopped by the study's own cancellation (Ctrl-C, `cancel()`) does not count |
 
 Placeholders in `ops`: `"$value"` becomes `{"value": v, "unit": <parameter unit>}`;

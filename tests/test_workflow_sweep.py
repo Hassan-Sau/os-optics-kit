@@ -83,6 +83,28 @@ class MixedOutcomeSweepTests(unittest.TestCase):
         self.assertEqual(best["objective"]["unit"], "mm")
         self.assertEqual(self.summary["status"], "COMPLETED")
 
+    def test_reported_values_are_used_with_their_kind(self):
+        rows = [dict(r) for r in self.summary["rows"]]
+        for r in rows:
+            if "target:spot_radius:value_kind" in r:
+                self.assertEqual(r["target:spot_radius:exact"], r["target:spot_radius:value_kind"] == "EXACT")
+        self.assertNotIn("value_use", self.summary)  # the default leaves the summary as it was
+        objective = MIXED_SPEC["objective"]
+        _best, exact_count = sp.select_best(rows, [], objective)
+        _best, reported_count = sp.select_best(rows, [], objective, "reported")
+        used = wc.values_used(rows, ["target:spot_radius"], "reported")["target:spot_radius"]
+        self.assertEqual(sum(used.values()), reported_count)
+        self.assertGreater(reported_count, exact_count)
+        self.assertEqual(used.get("EXACT"), exact_count)
+        from os_optics_kit import compare_runs as cr
+
+        exact = cr.compare([self.dir / "study"])
+        reported = cr.compare([self.dir / "study"], value_use="reported")
+        self.assertNotIn("value_use", exact)
+        self.assertEqual(reported["value_use"], "reported")
+        spot = next(t for t in reported["targets"] if t["id"] == "spot_radius")
+        self.assertTrue(all("value_kind" in c for c in spot["runs"].values() if not c.get("missing")))
+
     def test_files_and_study_record(self):
         study = wc.read_json(self.dir / "study" / "study.json")
         self.assertEqual(study["base_project"]["project_hash"], wc.check(self.base)["project_hash"])

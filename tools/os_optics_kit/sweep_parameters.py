@@ -27,7 +27,9 @@ SPEC.json (keys; units as in os-optics-kit edit):
     ],
     "objective": {"column": "target:spot_radius", "sense": "minimize"},     # or "maximize"
     "derived": [{"name": "spot_um", "op": "mul", "a": "target:spot_radius", "b": 1000, "unit": "um"}],
-    "stop_on": []                                 # outcome classes that stop the sweep (default: never stop)
+    "stop_on": [],                                # outcome classes that stop the sweep (default: never stop)
+    "value_use": "exact"                          # target values used as operands: "exact" (default) or
+                                                  # "reported" (every finite value; summary counts their kinds)
   }
 
 Placeholder syntax in "ops": the string "$value" is replaced by the sample's value of that parameter, passed as
@@ -176,12 +178,13 @@ def normalize_spec(spec, *, build=None):
                 or any(item not in EXECUTION_OUTCOMES for item in rule["execution"])):
             raise wc.WorkflowError("SPEC_INVALID", f"constraint {rule!r}: execution lists outcomes of "
                                    f"{EXECUTION_OUTCOMES}")
+    value_use = wc.value_use_setting(spec.get("value_use"))
     stop_on = list(spec.get("stop_on") or [])
     if any(item not in wc.OUTCOMES for item in stop_on):
         raise wc.WorkflowError("SPEC_INVALID", f"stop_on lists outcome classes {wc.OUTCOMES}")
     return {"parameters": out, "samples": total, "max_evaluations": budget, "targets": spec.get("targets"),
             "constraints": spec.get("constraints") or [], "objective": objective, "derived": derived,
-            "stop_on": stop_on}
+            "stop_on": stop_on, "value_use": value_use}
 
 
 def known_columns(normalized, target_ids):
@@ -251,19 +254,22 @@ row_from_record = agg.row_from_record
 counts = agg.counts
 
 
-def _operand(row, item):
+def _operand(row, item, value_use="exact"):
     if isinstance(item, (int, float)) and not isinstance(item, bool):
         return float(item) if math.isfinite(item) else None
     value = row.get(item)
-    if isinstance(item, str) and item.startswith("target:") and row.get(f"{item}:exact") is False:
-        return None
+    if isinstance(item, str) and item.startswith("target:"):
+        kind = row.get(f"{item}:value_kind")
+        usable = row.get(f"{item}:exact") is not False if kind is None else wc.value_usable(kind, value_use)
+        if not usable:
+            return None
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
-def add_derived(row, derived):
+def add_derived(row, derived, value_use="exact"):
     for item in derived:
-        a = _operand(row, item.get("a"))
-        b = _operand(row, item.get("b")) if item["op"] not in ("abs",) else 0.0
+        a = _operand(row, item.get("a"), value_use)
+        b = _operand(row, item.get("b"), value_use) if item["op"] not in ("abs",) else 0.0
         value = None
         if a is not None and b is not None:
             op = item["op"]
@@ -301,7 +307,7 @@ def _bound(row, column, bound):
     return bound
 
 
-def constraint_failures(row, constraints):
+def constraint_failures(row, constraints, value_use="exact"):
     """Names of the explicit constraints a row does not meet; refused samples are always excluded."""
     failed = []
     if row["outcome"] == "ERROR":
@@ -320,7 +326,7 @@ def constraint_failures(row, constraints):
                 failed.append(f"target {rule['target']} assessment in {rule['assessment']}")
         else:
             column = rule["column"]
-            value = _operand(row, column)
+            value = _operand(row, column, value_use)
             low = _bound(row, column, rule.get("min")) if rule.get("min") is not None else None
             high = _bound(row, column, rule.get("max")) if rule.get("max") is not None else None
             if not isinstance(value, (int, float)) or (low is not None and value < low) or \
@@ -329,14 +335,17 @@ def constraint_failures(row, constraints):
     return failed
 
 
-def select_best(rows, constraints, objective):
-    """Mark ``feasible`` / ``constraint_failures`` on every row; return (best row or None, feasible count)."""
+def select_best(rows, constraints, objective, value_use="exact"):
+    """Mark ``feasible`` / ``constraint_failures`` on every row; return (best row or None, feasible count).
+    ``value_use``: which target values are operands (``workflow_common.VALUE_USES``)."""
     feasible = []
     for row in rows:
-        failures = constraint_failures(row, constraints)
-        row["objective_valid"] = None if objective is None else _operand(row, objective["column"]) is not None
+        failures = constraint_failures(row, constraints, value_use)
+        row["objective_valid"] = None if objective is None else \
+            _operand(row, objective["column"], value_use) is not None
         if objective is not None and not row["objective_valid"]:
-            failures.append(f"{objective['column']} has no exact usable value")
+            kind = row.get(f"{objective['column']}:value_kind")
+            failures.append(f"{objective['column']} has no usable value" + (f" ({kind})" if kind else ""))
         row["feasible"] = not failures
         row["constraint_failures"] = failures
         if not failures:
@@ -420,9 +429,11 @@ def aggregate_sweep(study_dir):
     normalized = study["normalized"]
     parameters = normalized["parameters"]
     pairs = agg.collect_records(study_dir)
-    rows = [add_derived(row, normalized["derived"]) for row in agg.rows_from_records(study_dir, pairs, parameters)]
+    value_use = normalized.get("value_use", "exact")
+    rows = [add_derived(row, normalized["derived"], value_use)
+            for row in agg.rows_from_records(study_dir, pairs, parameters)]
     stopped_by = (study.get("execution") or {}).get("stopped_by")  # what the execution's stop rule decided
-    best, feasible = select_best(rows, normalized["constraints"], normalized["objective"])
+    best, feasible = select_best(rows, normalized["constraints"], normalized["objective"], value_use)
     restricted = bool(normalized["constraints"]) or normalized["objective"] is not None
     status = "NO_FEASIBLE" if restricted and feasible == 0 else "COMPLETED"
     study = agg.finish_study(study_dir, rows)
@@ -439,6 +450,9 @@ def aggregate_sweep(study_dir):
         "paths": {"study_dir": study_dir.as_posix(), "study": "study.json", "table": "table.csv",
                   "summary": "summary.json", "samples": "samples"},
     }
+    if value_use != "exact":
+        summary["value_use"] = value_use
+        summary["values_used"] = wc.values_used(rows, [f"target:{t}" for t in summary["targets"]], value_use)
     agg.write_summary(study_dir, summary)
     return summary
 
@@ -505,6 +519,7 @@ def compact(summary, limit=TOP_ROWS):
             "best": summary["best"], "no_feasible": summary["no_feasible"], "stopped_by": summary["stopped_by"],
             "units": {"parameters": {p["name"]: p["unit"] for p in summary["parameters"]},
                       "targets": summary["targets"]},
+            **{key: summary[key] for key in ("value_use", "values_used") if key in summary},
             "top_rows": top, "rows_omitted": max(0, len(rows) - limit),
             "execution": opts.execution_brief((summary.get("paths") or {}).get("study_dir")), "paths": summary["paths"]}
 

@@ -28,7 +28,8 @@ kind: tool
 - `parameters`: one or more items `{name, unit, values | range {start, stop, count}, ops}` (full grid); `ops` use the
   `edit` vocabulary with the placeholder `"$value"` (or `{"$value": {"scale", "offset"}}`).
 - Optional: `targets` (ids deciding outcomes), `constraints`, `objective` `{column, sense}`, `derived`,
-  `stop_on`. Columns: `param:<name>`, `target:<id>`, `derived:<name>`.
+  `stop_on`, `value_use` (`exact` default, or `reported`: every finite target value, counted by kind).
+  Columns: `param:<name>`, `target:<id>` (with `:value_kind`), `derived:<name>`.
 
 Options: `--out STUDY_DIR` (new or empty), `--overwrite`.
 Execution (`study` skill): `--workers N|auto` (worker processes, same results as one), `--resume`

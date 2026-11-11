@@ -430,17 +430,68 @@ def record_outcome(record):
                                record.get("out_of_model_issues") or [])
 
 
-def target_value_is_exact(target):
-    """Whether this target's numeric value can be used as an exact study operand.
+#: What a reported target value is, as a study operand (``target_value_use``).
+VALUE_KINDS = ("EXACT", "BOUNDED", "QUANTITY_UNKNOWN", "OUTSIDE_MODEL", "UNDECIDED", "NO_VALUE")
+#: Which values a study uses: ``exact`` (EXACT only, the default) or ``reported`` (every finite value).
+VALUE_USES = ("exact", "reported")
 
-    Bounds and dependency-specific applicability stay in the record even when
-    they cannot be ranked or differentiated as exact scalar values.
-    """
-    return (isinstance(target.get("value"), (int, float)) and not isinstance(target.get("value"), bool)
-            and math.isfinite(target["value"]) and not target.get("applicability_issue_codes")
-            and target.get("status") in ("PASS", "WARNING", "FAIL")
-            and target.get("assessment") in ("MET", "UNMET")
-            and target.get("quantity_state") not in ("BOUNDED", "UNKNOWN", "OUT_OF_MODEL_SCOPE"))
+
+def target_value_use(target):
+    """``{usable, kind, codes}`` of a target row's value as a study operand under the default ``exact`` rule.
+
+    ``kind``: ``NO_VALUE`` (no finite number), ``OUTSIDE_MODEL`` (model-applicability codes or status / quantity
+    state ``OUT_OF_MODEL_SCOPE``), ``BOUNDED`` or ``QUANTITY_UNKNOWN`` (the quantity state), ``UNDECIDED`` (the
+    target's status is not PASS / WARNING / FAIL: the metric could not be graded) or ``EXACT``. ``codes``: the
+    target's applicability and issue codes. Bounds and applicability stay in the record whatever the kind."""
+    value = target.get("value")
+    codes = sorted({*(target.get("applicability_issue_codes") or []), *(target.get("issue_codes") or [])})
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        kind = "NO_VALUE"
+    elif target.get("applicability_issue_codes") or "OUT_OF_MODEL_SCOPE" in (target.get("status"),
+                                                                             target.get("quantity_state")):
+        kind = "OUTSIDE_MODEL"
+    elif target.get("quantity_state") == "BOUNDED":
+        kind = "BOUNDED"
+    elif target.get("quantity_state") == "UNKNOWN":
+        kind = "QUANTITY_UNKNOWN"
+    elif target.get("status") not in ("PASS", "WARNING", "FAIL"):
+        kind = "UNDECIDED"
+    else:
+        kind = "EXACT"
+    return {"usable": kind == "EXACT", "kind": kind, "codes": codes}
+
+
+def value_usable(kind, value_use="exact"):
+    """Whether a value of ``kind`` is used under ``value_use`` (``VALUE_USES``)."""
+    return kind == "EXACT" if value_use == "exact" else kind not in (None, "NO_VALUE")
+
+
+def value_use_setting(value):
+    """The validated ``value_use`` of a spec or option (``None`` -> ``exact``)."""
+    if value is None:
+        return "exact"
+    if value not in VALUE_USES:
+        raise WorkflowError("SPEC_INVALID", f"value_use must be one of {list(VALUE_USES)}", value_use=value)
+    return value
+
+
+def values_used(rows, columns, value_use):
+    """``{column: {kind: count}}`` of the rows whose value of each ``target:`` column is used under ``value_use``."""
+    out = {}
+    for column in columns:
+        counts = {}
+        for row in rows:
+            kind = row.get(f"{column}:value_kind")
+            if value_usable(kind, value_use):
+                counts[kind] = counts.get(kind, 0) + 1
+        out[column] = dict(sorted(counts.items()))
+    return out
+
+
+def target_value_is_exact(target):
+    """Whether this target's numeric value can be used as an exact study operand (``target_value_use`` kind
+    ``EXACT``)."""
+    return target_value_use(target)["kind"] == "EXACT"
 
 
 def error_record(stage, code, problems, *, sample_dir=None, project_file=None, seconds=0.0, selected=None):

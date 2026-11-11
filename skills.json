@@ -28,8 +28,8 @@
       "command": "os-optics-kit compare",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/compare/SKILL.md",
-      "tokens": 525,
-      "sha256": "7a26feb61835cb83f92fbed33f85a0518dfd7aaccce1a45850deafec21813024"
+      "tokens": 548,
+      "sha256": "bc42b5bce4ef0fda4b4a42c34aabc6d4ae305bd25dd324e955d7d9e8b1ca2946"
     },
     {
       "name": "contrib-case",
@@ -138,8 +138,8 @@
       "command": "os-optics-kit sensitivity",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sensitivity/SKILL.md",
-      "tokens": 788,
-      "sha256": "a22099f51ff5d0aeda2d05de0b164da980c807781a9517b922faf608b48db379"
+      "tokens": 800,
+      "sha256": "bb0edcc7e0346c558e451e07c2c38052c7c34ee0cf93916f1fcf9605a59064f2"
     },
     {
       "name": "study",
@@ -171,8 +171,8 @@
       "command": "os-optics-kit sweep",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sweep/SKILL.md",
-      "tokens": 735,
-      "sha256": "d164e5262fe3bbf8500cfdbf3e3b8b136d99963d36bbbd1db4803f3b3bafbc98"
+      "tokens": 763,
+      "sha256": "5755c9cb1a52cdd2a845befd6354c50b20207827dc1aa79eaa2c78c46eb44791"
     },
     {
       "name": "tolerance",
@@ -182,8 +182,8 @@
       "command": "os-optics-kit tolerance",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/tolerance/SKILL.md",
-      "tokens": 773,
-      "sha256": "2df089f1f95ee0622853ca4da5f309412bc4822c3806dcdd9fa9978682f3f2a9"
+      "tokens": 787,
+      "sha256": "63c552cfd9b16a11633a94ab1b13721d033b4292b8d68fc666aa3e6689dc6f02"
     }
   ]
 }

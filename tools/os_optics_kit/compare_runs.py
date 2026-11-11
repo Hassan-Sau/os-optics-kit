@@ -2,7 +2,7 @@
 
 Usage:
   os-optics-kit compare RUN_DIR RUN_DIR ... [--project CURRENT.json] [--labels a,b,...] [--reference LABEL]
-                        [--targets a,b] [--out DIR]
+                        [--targets a,b] [--value-use exact|reported] [--out DIR]
   os-optics-kit compare STUDY_DIR [--project CURRENT.json] [--out DIR]
 
 Each argument is a run directory (it holds manifest.json) or a study directory written by os-optics-kit sweep (its
@@ -10,8 +10,9 @@ samples become the compared runs, labelled by sample id; a sample that was refus
 comparison as an ERROR entry with missing data). A run directory named "run" is labelled by its parent directory.
 
 What is compared, by ID:
-* targets: value, unit and status per run, the difference to the reference run (first run, or --reference) when
-  both have exact applicable values in the same unit; a target absent from a run is listed with "missing": true;
+* targets: value, unit, status and value_kind per run, the difference to the reference run (first run, or
+  --reference) when both have exact applicable values in the same unit (--value-use reported: any finite values;
+  values_used counts the kinds per target); a target absent from a run is listed with "missing": true;
 * observation planes: received power (W) and number of arriving beams per run, missing planes listed;
 * inputs: every field of each run's project.json, keyed by object ID (pose:<id>.position_mm, source:<id>.<field>,
   binding:<id>.optical_sku / .catalog_version / .optical_model_id, component:<id>.<field>,
@@ -180,11 +181,13 @@ def _ordered_union(lists):
     return out
 
 
-def compare(paths, *, labels=None, reference=None, project=None, targets=None):
+def compare(paths, *, labels=None, reference=None, project=None, targets=None, value_use="exact"):
     """Comparison document (module docstring). ``project``: current Project document or path for freshness.
+    ``value_use``: which target values give a delta (``exact`` or ``reported``; workflow_common.VALUE_USES).
 
     ``targets``: target ids deciding every run's outcome (default: a study sample uses the study's selected targets,
     a run directory all of its targets); an id that no run has is refused (TARGET_UNKNOWN)."""
+    value_use = wc.value_use_setting(value_use)
     entries = []
     for label, run_dir, record in expand_inputs(paths, labels):
         selected = targets if targets is not None else (record or {}).get("selected_targets")
@@ -225,9 +228,12 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None):
             row.setdefault("unit", target["unit"])
             cell = {key: target.get(key) for key in ("value", "unit", "status", "assessment", "quantity_state",
                                                        "applicability_issue_codes", "power_upper_bound_W", "power_complete")}
-            cell["exact"] = wc.target_value_is_exact(target)
-            if ref_target is not None and wc.target_value_is_exact(target) and \
-                    wc.target_value_is_exact(ref_target) and target["unit"] == ref_target["unit"]:
+            kind = wc.target_value_use(target)["kind"]
+            cell["exact"] = kind == "EXACT"
+            cell["value_kind"] = kind
+            if ref_target is not None and wc.value_usable(kind, value_use) and \
+                    wc.value_usable(wc.target_value_use(ref_target)["kind"], value_use) and \
+                    target["unit"] == ref_target["unit"]:
                 cell["delta"] = target["value"] - ref_target["value"]
             row["runs"][entry["label"]] = cell
         target_rows.append(row)
@@ -265,12 +271,21 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None):
             if entry.get(key) is not None:
                 item[key] = entry[key]
         runs.append(item)
-    return {"status": "COMPLETED", "kind": "opensci-example.run-comparison", "reference": ref,
-            "selected_targets": entries[0]["selected_targets"] if len(selected) == 1 else "per run", "runs": runs,
-            "targets": target_rows, "observations": observation_rows, "input_differences": differences,
-            "inputs_compared": {"runs": len(compared), "fields": len(_ordered_union([list(e["inputs"])
-                                                                                       for e in compared])),
-                                "project_hashes": hashes, "project_hashes_equal": equal, "statement": statement}}
+    document = {"status": "COMPLETED", "kind": "opensci-example.run-comparison", "reference": ref,
+                "selected_targets": entries[0]["selected_targets"] if len(selected) == 1 else "per run",
+                "runs": runs, "targets": target_rows, "observations": observation_rows,
+                "input_differences": differences,
+                "inputs_compared": {"runs": len(compared), "fields": len(_ordered_union([list(e["inputs"])
+                                                                                           for e in compared])),
+                                    "project_hashes": hashes, "project_hashes_equal": equal,
+                                    "statement": statement}}
+    if value_use != "exact":
+        document["value_use"] = value_use
+        document["values_used"] = {row["id"]: dict(sorted(
+            {k: sum(1 for c in row["runs"].values() if c.get("value_kind") == k and "delta" in c)
+             for k in {c.get("value_kind") for c in row["runs"].values() if "delta" in c}}.items()))
+            for row in target_rows}
+    return document
 
 
 def csv_rows(document):
@@ -347,10 +362,13 @@ def main(argv=None):
         parser.add_argument("--targets", help="Comma-separated target ids deciding the outcome (default: the study's "
                             "selected targets for study samples, all targets for run directories)")
         parser.add_argument("--out", type=Path, help="Directory for compare.json and compare.csv")
+        parser.add_argument("--value-use", choices=wc.VALUE_USES, default="exact",
+                            help="target values that give a delta: exact (default) or reported (every finite "
+                                 "value; each cell names its value_kind)")
         args = parser.parse_args(argv)
         document = compare(args.paths, labels=args.labels.split(",") if args.labels else None,
                            reference=args.reference, project=args.project,
-                           targets=args.targets.split(",") if args.targets else None)
+                           targets=args.targets.split(",") if args.targets else None, value_use=args.value_use)
         paths = write_outputs(document, args.out) if args.out else None
         return compact(document, paths)
 

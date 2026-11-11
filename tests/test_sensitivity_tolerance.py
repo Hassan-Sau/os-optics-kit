@@ -239,6 +239,8 @@ class SensitivityVisibilityTests(unittest.TestCase):
         wavelength = pair(self.summary, "wavelength", "spot_radius")
         self.assertEqual([e["method"] for e in wavelength["estimates"]], ["central", "backward"])
         self.assertIn("MODEL_WAVELENGTH_OUTSIDE_BAND", wavelength["estimates"][1]["unusable"][0])
+        self.assertTrue(wavelength["estimates"][1]["unusable"][0].startswith("+h: OUTSIDE_MODEL"),
+                        wavelength["estimates"][1]["unusable"])
         self.assertEqual(wavelength["method"], "central")
         self.assertIn("METHOD_DIFFERS", wavelength["flags"])
         shift = pair(self.summary, "L2_axial", "spot_radius")
@@ -385,6 +387,22 @@ class HelpTests(unittest.TestCase):
 
 @requires_numpy
 class ToleranceSamplingTests(unittest.TestCase):
+    def test_distribution_value_use(self):
+        rows = [{"outcome": "PASS", "target:t": 1.0, "target:t:exact": True, "target:t:value_kind": "EXACT",
+                 "target:t:status": "PASS"},
+                {"outcome": "UNKNOWN", "target:t": 3.0, "target:t:exact": False, "target:t:value_kind": "BOUNDED",
+                 "target:t:status": "UNKNOWN"},
+                {"outcome": "ERROR", "target:t": None}]
+        exact = ts.target_distributions(rows, ["t"], {"t": "mm"})["t"]
+        self.assertEqual((exact["count"], exact["max"], exact["denominator"]), (1, 1.0, 3))
+        self.assertNotIn("values_used", exact)
+        reported = ts.target_distributions(rows, ["t"], {"t": "mm"}, "reported")["t"]
+        self.assertEqual((reported["count"], reported["max"]), (2, 3.0))
+        self.assertEqual(reported["values_used"], {"BOUNDED": 1, "EXACT": 1})
+        self.assertIsNone(ts.normalize_spec({"samples": 1, "seed": 0, "value_use": "reported", "parameters": [
+            {"name": "p", "unit": "mm", "ops": translate("L2", [0, 0, "$value"]),
+             "distribution": {"kind": "uniform", "low": -1, "high": 1}}]})["max_evaluations"])
+
     PARAMETERS = [{"name": "a", "unit": "mm", "nominal": 0.0,
                    "distribution": {"kind": "uniform", "low": -2.0, "high": 1.0, "bounds": [-2.0, 1.0]}},
                   {"name": "b", "unit": "deg", "nominal": 22.5,

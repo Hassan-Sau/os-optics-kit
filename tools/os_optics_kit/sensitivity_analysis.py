@@ -23,8 +23,10 @@ SPEC.json (keys; quantities are a bare number in the stated unit or {"value": x,
     ],
     "consistency_threshold": 0.01,               # relative difference of the two step estimates that is flagged
     "resolution": {"spot_radius": {"value": 1e-9, "unit": "mm"}},   # optional: target change treated as none
-    "max_evaluations": 20                        # optional cap (default: none); refused before any run when
+    "max_evaluations": 20,                       # optional cap (default: none); refused before any run when
                                                  # 1 + 2 * steps exceeds it
+    "value_use": "exact"                         # target values used: "exact" (default) or "reported" (every
+                                                 # finite value; each estimate names the kinds it used)
   }
 
 Parameters use the edit vocabulary of os-optics-kit edit and the placeholder syntax of os-optics-kit sweep ("$value"
@@ -386,7 +388,7 @@ def problem_codes(problems):
     return codes
 
 
-def target_value(record, target_id):
+def target_value(record, target_id, value_use="exact", kinds=None):
     """``(value, None)`` when ``record`` gives a usable value of ``target_id``, else ``(None, reason)``."""
     outcome = record["outcome"]
     if outcome == "ERROR":
@@ -396,9 +398,12 @@ def target_value(record, target_id):
     row = next((t for t in record.get("targets") or [] if t["id"] == target_id), None)
     if row is None:
         return None, "NO_VALUE (target not in the run)"
-    if not wc.target_value_is_exact(row):
-        codes = ", ".join(row.get("issue_codes") or []) or "no issue code"
-        return None, f"NO_VALUE (status {row.get('status')}, {codes})"
+    use = wc.target_value_use(row)
+    if kinds is not None:
+        kinds.append(use["kind"])
+    if not wc.value_usable(use["kind"], value_use):
+        codes = ", ".join(use["codes"]) or "no issue code"
+        return None, f"{use['kind']} (status {row.get('status')}, {codes})"
     return row["value"], None
 
 
@@ -505,7 +510,7 @@ def normalize_spec(spec, *, build=None, base=None):
     samples = 1 + 2 * sum(len(p["steps"]) for p in out)
     budget = wc.evaluation_cap(spec, samples, f"the study needs {samples} runs (1 nominal + 2 per step)")
     return {"parameters": out, "samples": samples, "max_evaluations": budget, "targets": spec.get("targets"),
-            "consistency_threshold": float(threshold)}
+            "consistency_threshold": float(threshold), "value_use": wc.value_use_setting(spec.get("value_use"))}
 
 
 def target_resolution(raw, targets, units):
@@ -726,6 +731,7 @@ def aggregate_sensitivity(study_dir, *, plots=None, report=None):
         row.update({"role": record.get("role"), "perturbed_parameter": name, "step": record.get("step"),
                     "step_unit": None if name is None else by_name[name]["unit"]})
         rows.append(row)
+    value_use = normalized.get("value_use", "exact")
     sweep.select_best(rows, [], None)  # no requirement constraints; per-target validity is assessed separately
     nominal = records["s0000"]
     pairs, estimate_rows = [], []
@@ -733,12 +739,14 @@ def aggregate_sensitivity(study_dir, *, plots=None, report=None):
         ids = {(r.get("step"), r.get("role")): sid for sid, r in records.items()
                if r.get("perturbed_parameter") == parameter["name"]}
         for target_id in targets:
-            f0, nominal_reason = target_value(nominal, target_id)
+            nominal_kind = []
+            f0, nominal_reason = target_value(nominal, target_id, value_use, nominal_kind)
             estimates = []
             for step in parameter["steps"]:
                 plus, minus = records[ids[(step, "plus")]], records[ids[(step, "minus")]]
-                f_plus, reason_plus = target_value(plus, target_id)
-                f_minus, reason_minus = target_value(minus, target_id)
+                plus_kind, minus_kind = [], []
+                f_plus, reason_plus = target_value(plus, target_id, value_use, plus_kind)
+                f_minus, reason_minus = target_value(minus, target_id, value_use, minus_kind)
                 applied_plus = plus["parameters"][parameter["name"]]["value"]
                 applied_minus = minus["parameters"][parameter["name"]]["value"]
                 if nominal_reason is not None:
@@ -753,6 +761,10 @@ def aggregate_sensitivity(study_dir, *, plots=None, report=None):
                             "plus_sample": plus["sample_id"], "minus_sample": minus["sample_id"],
                             "plus_outcome": plus["outcome"], "minus_outcome": minus["outcome"],
                             "unusable": reasons}
+                if value_use != "exact":  # the kind of each value the estimate used
+                    estimate["value_kinds"] = {"nominal": next(iter(nominal_kind), None),
+                                               "minus": next(iter(minus_kind), None),
+                                               "plus": next(iter(plus_kind), None)}
                 estimates.append(estimate)
             assessed = assess(estimates, normalized["consistency_threshold"], parameter["scale"],
                               resolution.get(target_id))
@@ -806,6 +818,7 @@ def aggregate_sensitivity(study_dir, *, plots=None, report=None):
                         "nominal_source": p.get("nominal_source"), "steps": p["steps"],
                         "steps_source": p["steps_source"], "scale": p["scale"]} for p in parameters],
         "consistency_threshold": normalized["consistency_threshold"],
+        **({"value_use": value_use} if value_use != "exact" else {}),
         "selected_targets": targets, "sensitivities": pairs, "ranking": ranking, "unavailable": unavailable,
         "counts": agg.counts(rows), "feasible": sum(1 for r in rows if r["feasible"]),
         "constraints": [], "objective": None, "best": None, "no_feasible": None, "stopped_by": None,

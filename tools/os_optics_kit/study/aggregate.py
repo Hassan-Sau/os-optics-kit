@@ -10,7 +10,8 @@ Row columns (``row_from_record``): ``sample_id, outcome, status, in_model_scope,
 reached), ``requirements, model_scope_issues, out_of_model_issues, warnings, error_stage, error_code,
 error_problems``, ``param:<name>`` and
 ``param:<name>:unit`` per parameter, per target ``target:<id>`` (value in the target unit) with ``:status``, ``:unit``,
-``:assessment``, ``:quantity_state``, ``:exact``, ``:applicability_issue_codes``, then ``project_hash, input_hash,
+``:assessment``, ``:quantity_state``, ``:exact``, ``:value_kind`` (``workflow_common.target_value_use``),
+``:applicability_issue_codes``, then ``project_hash, input_hash,
 result_hash, engine_build_id, catalog_version, run_dir`` (study-relative) and ``seconds``.
 """
 
@@ -70,7 +71,9 @@ def row_from_record(sample_id, values, parameters, record, study_dir):
         row[f"target:{target['id']}:unit"] = target["unit"]
         row[f"target:{target['id']}:assessment"] = target.get("assessment")
         row[f"target:{target['id']}:quantity_state"] = target.get("quantity_state")
-        row[f"target:{target['id']}:exact"] = wc.target_value_is_exact(target)
+        use = wc.target_value_use(target)
+        row[f"target:{target['id']}:exact"] = use["kind"] == "EXACT"
+        row[f"target:{target['id']}:value_kind"] = use["kind"]
         row[f"target:{target['id']}:applicability_issue_codes"] = target.get("applicability_issue_codes")
     identity = record.get("identity") or {}
     row.update({key: identity.get(key) for key in (

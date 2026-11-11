@@ -28,7 +28,7 @@ kind: tool
 - `parameters`: `{name, unit, ops, nominal?, steps? (>= 1 size; two enable the step check), scale?}`; `ops` use the `edit`
   vocabulary with `"$value"` = nominal + perturbation. An omitted nominal is the base value of the
   field a `set_*` op writes (0 for `transform`); a stated one must reproduce the base (`NOMINAL_MISMATCH`).
-- Optional `consistency_threshold`, `resolution` per target.
+- Optional `consistency_threshold`, `resolution` per target, `value_use` (`exact` default, or `reported`).
 
 Options: `--out STUDY_DIR`, `--overwrite`, `--no-plots`, `--no-report`.
 Execution (`study` skill): `--workers N|auto` (worker processes, same results as one), `--resume`

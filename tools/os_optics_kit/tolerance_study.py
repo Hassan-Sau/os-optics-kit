@@ -187,7 +187,8 @@ def normalize_spec(spec, *, build=None, base=None, seed=None, samples=None, zero
         raise wc.WorkflowError("SPEC_INVALID", "seed must be an integer >= 0 (spec seed or --seed)")
     budget = wc.evaluation_cap(spec, count + 1, f"the study needs {count + 1} runs ({count} samples + nominal)")
     return {"parameters": out, "samples": count, "seed": seed, "max_evaluations": budget,
-            "targets": spec.get("targets"), "zero_tolerance": bool(zero_tolerance)}
+            "targets": spec.get("targets"), "zero_tolerance": bool(zero_tolerance),
+            "value_use": wc.value_use_setting(spec.get("value_use"))}
 
 
 # --------------------------------------------------------------------------------------------- sampling
@@ -297,22 +298,32 @@ def verify_samples(study_dir):
 
 # --------------------------------------------------------------------------------------------- statistics
 
-def target_distributions(rows, targets, units):
-    """Statistics over each target's exact applicable values, with count and requested denominator."""
+def _used(row, target_id, value_use):
+    kind = row.get(f"target:{target_id}:value_kind")
+    return bool(row.get(f"target:{target_id}:exact")) if kind is None else wc.value_usable(kind, value_use)
+
+
+def target_distributions(rows, targets, units, value_use="exact"):
+    """Statistics over each target's used values (``value_use``: exact applicable values by default, every finite
+    reported value with ``reported``), with count and requested denominator."""
     import numpy as np
 
     out = {}
     total = len(rows)
     for target_id in targets:
-        values = [r.get(f"target:{target_id}") for r in rows if r.get(f"target:{target_id}:exact")]
+        values = [r.get(f"target:{target_id}") for r in rows if _used(r, target_id, value_use)]
         values = [v for v in values if isinstance(v, (int, float))]
         statuses = {}
         for r in rows:
-            key = r.get(f"target:{target_id}:status") if r.get(f"target:{target_id}:exact") else \
+            key = r.get(f"target:{target_id}:status") if _used(r, target_id, value_use) else \
                 r["outcome"]
             statuses[key or "NO_VALUE"] = statuses.get(key or "NO_VALUE", 0) + 1
+        population = ("samples with a finite exact target value and applicable dependencies" if value_use == "exact"
+                      else "samples with a finite reported target value (values_used counts their kinds)")
         entry = {"unit": units.get(target_id), "count": len(values), "denominator": total,
-                 "population": "samples with a finite exact target value and applicable dependencies", "status_counts": statuses}
+                 "population": population, "status_counts": statuses}
+        if value_use != "exact":
+            entry["values_used"] = wc.values_used(rows, [f"target:{target_id}"], value_use)[f"target:{target_id}"]
         if values:
             array = np.asarray(values, dtype=float)
             entry.update({"min": float(array.min()), "max": float(array.max()), "mean": float(array.mean()),
@@ -487,7 +498,8 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
                     "targets": [{k: t.get(k) for k in ("id", "value", "unit", "status", "assessment", "quantity_state", "power_upper_bound_W")} for t in nominal["targets"]
                                 if t["id"] in targets], "run_dir": nominal_row["run_dir"]},
         "counts": counts,
-        "target_distributions": target_distributions(rows, targets, units),
+        "target_distributions": target_distributions(rows, targets, units, normalized.get("value_use", "exact")),
+        **({"value_use": normalized["value_use"]} if normalized.get("value_use", "exact") != "exact" else {}),
         "zero_offset_check": zero_offset_check(rows, nominal_row, targets),
         "feasible": counts["by_outcome"]["PASS"], "constraints": [{"outcome": ["PASS"]}], "objective": None,
         "best": None, "no_feasible": None if status == "COMPLETED" else {
@@ -539,7 +551,8 @@ def plot_tolerance(study_dir, summary):
     total = len(summary["rows"])
     for target_id in summary["selected_targets"]:
         unit = summary["target_distributions"][target_id]["unit"]
-        values = [r.get(f"target:{target_id}") if r.get(f"target:{target_id}:exact") else None
+        value_use = summary.get("value_use", "exact")
+        values = [r.get(f"target:{target_id}") if _used(r, target_id, value_use) else None
                   for r in summary["rows"]]
         bounds = None
         for _entry, record in agg.collect_records(study_dir):

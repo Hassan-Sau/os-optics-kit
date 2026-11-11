@@ -21,7 +21,8 @@ kind: tool
 ## Inputs
 
 - `PATH ...`: run directories (each holds `manifest.json`) or study directories written by `sweep`.
-- `--labels a,b`, `--reference LABEL` (default: first run), `--targets a,b` (ids deciding outcomes).
+- `--labels a,b`, `--reference LABEL` (default: first run), `--targets a,b` (ids deciding outcomes),
+  `--value-use reported` (deltas of every finite value; each cell names its `value_kind`).
 - `--project CURRENT.json`: report freshness CURRENT / HISTORICAL / UNDETERMINED with engine reasons.
 - `--out DIR`: also write `compare.json` and `compare.csv`.
 

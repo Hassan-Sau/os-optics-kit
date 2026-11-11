@@ -34,6 +34,34 @@ class EngineControlsTests(unittest.TestCase):
             self.assertEqual((best, count), (None, 0))
             self.assertFalse(row["objective_valid"])
         self.assertEqual(row["target:power"], 1.0)
+        # value_use "reported" ranks the bounded value, and the failure text of the default names the kind.
+        bounded = {"sample_id": "s1", "outcome": "PASS", "target:power": 1.0, "target:power:exact": False,
+                   "target:power:value_kind": "BOUNDED"}
+        best, count = sweep.select_best([bounded], [], {"column": "target:power", "sense": "maximize"})
+        self.assertEqual((best, count, bounded["constraint_failures"]),
+                         (None, 0, ["target:power has no usable value (BOUNDED)"]))
+        best, count = sweep.select_best([bounded], [], {"column": "target:power", "sense": "maximize"}, "reported")
+        self.assertEqual((best["sample_id"], count), ("s1", 1))
+        self.assertEqual(wc.values_used([bounded], ["target:power"], "reported"), {"target:power": {"BOUNDED": 1}})
+
+    def test_value_kinds(self):
+        def use(**fields):
+            return wc.target_value_use({"value": 1.0, "status": "PASS", "assessment": "MET", **fields})["kind"]
+
+        self.assertEqual(use(), "EXACT")
+        self.assertEqual(use(status="FAIL", assessment="UNMET"), "EXACT")
+        self.assertEqual(use(value=None), "NO_VALUE")
+        self.assertEqual(use(value=float("inf")), "NO_VALUE")
+        self.assertEqual(use(applicability_issue_codes=["MODEL_WAVELENGTH_OUTSIDE_BAND"]), "OUTSIDE_MODEL")
+        self.assertEqual(use(status="OUT_OF_MODEL_SCOPE", assessment="INDETERMINATE"), "OUTSIDE_MODEL")
+        self.assertEqual(use(quantity_state="BOUNDED"), "BOUNDED")
+        self.assertEqual(use(quantity_state="UNKNOWN"), "QUANTITY_UNKNOWN")
+        self.assertEqual(use(status="UNKNOWN", assessment="INDETERMINATE"), "UNDECIDED")
+        for kind in wc.VALUE_KINDS:
+            self.assertEqual(wc.value_usable(kind), kind == "EXACT")
+            self.assertEqual(wc.value_usable(kind, "reported"), kind != "NO_VALUE")
+        with self.assertRaises(wc.WorkflowError):
+            wc.value_use_setting("all")
 
     def test_effective_assessment_controls_constraints(self):
         row = {"outcome": "UNKNOWN", "target:p:status": "PASS",

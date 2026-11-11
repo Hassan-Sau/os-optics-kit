@@ -27,7 +27,7 @@ kind: tool
   `max_evaluations` (optional cap; the study needs samples + 1).
 - `parameters`: `{name, unit, ops, nominal? (omitted: the base value, as in sensitivity), distribution}` with distribution
   `{"kind": "uniform", "low", "high"}` or `{"kind": "normal", "sigma", "mean_offset"?, "truncate_sigma" | "bounds"}`
-  (offsets from nominal, parameter unit).
+  (offsets from nominal, parameter unit). Optional `value_use` (`exact` default, or `reported`).
 
 Options: `--out STUDY_DIR`, `--seed N`, `--samples N`, `--zero-tolerance` (all offsets 0),
 `--draw-only` (write the sample set and stop; not with `--plan-only`), `--verify-seed STUDY_DIR`,
