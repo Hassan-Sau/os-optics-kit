@@ -563,7 +563,7 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `RUN_REFUSED` (`run.status`) | the edit was written but the Engine refused the run | read `run.problems`; adjust geometry or models |
 | `BUDGET_EXCEEDED` | more evaluations than a stated `max_evaluations` | fewer values, a larger cap, or no cap |
 | `SPEC_INVALID`, `TARGET_UNKNOWN`, `COLUMN_UNKNOWN`, `NOMINAL_MISMATCH`, `NOMINAL_AMBIGUOUS`, `STEP_REQUIRED` | spec structure, unknown target, objective / constraint / derived column the spec cannot produce, a stated `nominal` that is not the base value, `set_*` fields with different base values, relative step at nominal 0 | fix the spec as the message states; `known` lists the valid ids or columns |
-| `INPUT_INVALID` | a workflow input cannot build a design | change the named input |
+| `INPUT_INVALID` | a workflow input cannot build the nominal design (a study value that cannot be built is one `ERROR` sample with `error_stage` `build`; the other values run) | change the named input |
 | `CATALOG_NOT_AVAILABLE` | no catalog release installed | `os-optics catalog sync` (or `catalog import FILE`) |
 | `STUDY_STARTED` | `study run` on a study that already has sample results | `--resume`, or plan it again with its planning command and `--overwrite` |
 | `STUDY_IDENTITY_CHANGED` | Engine build, catalog release or plan differ from the planned study (`changed` names them); `study run` refuses it with or without `--resume` | plan it again with its planning command (`sweep`, `sensitivity`, `tolerance`, `study candidates`) and `--overwrite` |

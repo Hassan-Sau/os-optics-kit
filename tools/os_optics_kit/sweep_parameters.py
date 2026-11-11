@@ -355,7 +355,10 @@ def plan_sweep(spec, study_dir, *, base=None, build=None, documents=None, base_p
     """Validate ``spec`` and write the planned study (``study.json``, ``plan.jsonl``, ``requests/``); nothing runs.
 
     ``documents``: the Project of every grid point in sample order, built by the caller (an alternative to ops and
-    ``build``). A sample whose ops the Engine refuses becomes a refused request (recorded ERROR, never run).
+    ``build``); an entry ``{"refusal": {stage, code, problems}}`` stands for a grid point the caller could not
+    build. A sample whose ops the Engine refuses, or whose ``build`` raises a WorkflowError, becomes a refused
+    request (recorded ERROR, never run). The ops are normalized once, at the first grid point: unit and op-shape
+    errors do not depend on the value and refuse the spec before anything runs.
     Returns ``(study_dir, normalized spec)``."""
     normalized = normalize_spec(spec, build=build if build is not None else documents)
     if build is None and documents is None and base is None:
@@ -365,27 +368,32 @@ def plan_sweep(spec, study_dir, *, base=None, build=None, documents=None, base_p
     if documents is not None and len(documents) != len(points):
         raise wc.WorkflowError("SPEC_INVALID", f"{len(documents)} documents for {len(points)} grid points")
     if build is None and documents is None:  # unit and op errors are spec errors: refuse before running anything
-        for _sample_id, values in points:
-            normalize_ops(base, sample_ops(parameters, values))
+        normalize_ops(base, sample_ops(parameters, points[0][1]))
     requests = []
     for index, (sample_id, values) in enumerate(points):
         labels = {"parameters": {p["name"]: {"value": values[p["name"]], "unit": p["unit"]} for p in parameters}}
         try:
             if documents is not None:
                 document = documents[index]
+                if isinstance(document, dict) and set(document) == {"refusal"}:
+                    requests.append(rq.make_request(sample_id, None, labels=labels,
+                                                    selected_targets=normalized["targets"], outputs=outputs,
+                                                    refusal=document["refusal"]))
+                    continue
             elif build is not None:
                 document = build(dict(values))
             else:
                 document = apply_edits(base, sample_ops(parameters, values), validate=False)["project"]
-        except EditError as exc:
+        except wc.WorkflowError as exc:
+            stage = "edit" if isinstance(exc, EditError) else "build"
             requests.append(rq.make_request(sample_id, None, labels=labels, selected_targets=normalized["targets"],
-                                            outputs=outputs, refusal={"stage": "edit", "code": exc.code,
+                                            outputs=outputs, refusal={"stage": stage, "code": exc.code,
                                                                       "problems": [exc.as_dict()]}))
             continue
         requests.append(rq.make_request(sample_id, document, labels=labels, selected_targets=normalized["targets"],
                                         outputs=outputs))
     # target ids and columns must exist: a misspelt id would make every sample UNKNOWN or infeasible
-    reference = requests[0]["project"] or base
+    reference = next((r["project"] for r in requests if r["project"] is not None), None) or base
     validate_columns(normalized, {t["target_id"] for doc in (base, reference) if doc for t in doc.get("targets", [])})
     study_dir, resuming = store.prepare_study_dir(study_dir, overwrite=overwrite, resume=resume, files=STUDY_FILES,
                                                   dirs=STUDY_DIRS)

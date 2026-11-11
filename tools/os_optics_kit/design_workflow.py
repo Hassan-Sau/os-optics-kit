@@ -369,13 +369,17 @@ def run_workflow(config, inputs, studies, out_dir, *, max_evaluations=None, max_
         raise wc.WorkflowError("BUDGET_EXCEEDED", f"the request needs {total} Engine runs (nominal + samples), more "
                                f"than --max-evaluations {max_evaluations}; nothing was run", evaluations=total,
                                max_evaluations=max_evaluations)
-    nominal_doc = _build(config["builder"], inputs, "nominal design")
+    nominal_doc = _build(config["builder"], inputs, "nominal design")  # a refusal here refuses the request
     planned = []
     for study in studies:
         docs = {}
         for value in study["values"]:
             params = {**inputs, study["name"]: value}
-            docs[value] = (_build(config["builder"], params, f"{study['name']}={value!r}"), params)
+            try:
+                docs[value] = (_build(config["builder"], params, f"{study['name']}={value!r}"), params)
+            except wc.WorkflowError as exc:  # one study value the builder refuses is one ERROR sample
+                docs[value] = ({"refusal": {"stage": "build", "code": exc.code, "problems": [exc.as_dict()]}},
+                               params)
         planned.append((study, docs))
     out_dir = _prepare(out_dir, overwrite)
     samples = sum(len(s["values"]) for s in studies)
@@ -425,6 +429,9 @@ def _run(config, inputs, planned, out_dir, *, record_inputs, max_plots, schedule
             sample = agg.resolve_paths(wc.read_json(study_dir / "samples" / row["sample_id"] / "sample.json"),
                                        study_dir)
             value = row[f"param:{study['name']}"]
+            if "refusal" in docs[value][0]:  # no Project was built: no closed-form check
+                notable.append(_notable({"value": value}, sample, config.get("analysis_keys"), None))
+                continue
             result = config["checks"](docs[value][1], sample)
             analyses[row["sample_id"]] = result.get("analysis")
             for item in result["rows"]:

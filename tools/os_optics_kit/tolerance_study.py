@@ -74,7 +74,6 @@ import time
 from . import workflow_common as wc
 from . import sweep_parameters as sweep
 from . import sensitivity_analysis as sa
-from .edit_project import normalize_ops
 from .study import aggregate as agg, options as opts, store
 
 PROG = "os-optics-kit tolerance"
@@ -354,10 +353,7 @@ def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_toleran
     checked = sa.check_base(document, parameters, build=build)
     targets = sa.selected_targets(document, normalized["targets"])
     units = sa.target_units(document)
-    drawn = draw_samples(parameters, normalized["samples"], normalized["seed"])
-    if build is None:  # unit and op errors in any sample are spec errors: refuse before running anything
-        for _sid, offsets in drawn:
-            normalize_ops(document, [op for p in parameters for op in sa.parameter_ops(p, offsets[p["name"]])])
+    drawn = draw_samples(parameters, normalized["samples"], normalized["seed"])  # ops validated by check_base
     header = store.study_header(
         KIND, spec=spec,
         options={"seed": normalized["seed"], "samples": normalized["samples"],

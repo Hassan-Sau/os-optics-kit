@@ -210,9 +210,18 @@ class BeamExpansionFocusTests(unittest.TestCase):
         self.assertEqual((code, out), (4, None))
         self.assertEqual(json.loads(err.strip().splitlines()[-1])["error"]["code"], "BUDGET_EXCEEDED")
         self.assertFalse((self.dir / "budget").exists())
-        code, out, err = invoke(bef.main, ["--out", str(self.dir / "bad"), "--study", "f3_mm=0"])
+        # A study value the builder refuses is one ERROR sample; the other values run and the exit follows the
+        # nominal design.
+        code, out, err = invoke(bef.main, ["--out", str(self.dir / "bad"), "--study", "f3_mm=0,100"])
+        self.assertEqual((code, out["status"]), (0, "PASS"), err)
+        study = wc.read_json(self.dir / "bad" / "studies" / "f3_mm" / "summary.json")
+        self.assertEqual((study["counts"]["by_outcome"]["ERROR"], study["counts"]["by_outcome"]["PASS"]), (1, 1))
+        refused = next(r for r in study["rows"] if r["outcome"] == "ERROR")
+        self.assertEqual((refused["param:f3_mm"], refused["error_stage"], refused["error_code"]),
+                         (0.0, "build", "INPUT_INVALID"))
+        code, out, err = invoke(bef.main, ["--out", str(self.dir / "bad-nominal"), "--f3-mm", "0", "--no-studies"])
         self.assertEqual((code, json.loads(err.strip().splitlines()[-1])["error"]["code"]), (4, "INPUT_INVALID"))
-        self.assertFalse((self.dir / "bad").exists())
+        self.assertFalse((self.dir / "bad-nominal").exists())
         code, _out, err = invoke(bef.main, ["--out", str(self.dir / "wf"), "--no-studies"])
         self.assertEqual((code, json.loads(err.strip().splitlines()[-1])["error"]["code"]), (4, "OUTPUT_EXISTS"))
         code, out, _err = invoke(bef.main, ["--list-parameters"])

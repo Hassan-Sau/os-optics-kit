@@ -86,7 +86,7 @@ import time
 from . import workflow_common as wc
 from . import sweep_parameters as sweep
 from ._engine import matplotlib_missing_message
-from .edit_project import EditError, apply_edits, normalize_ops
+from .edit_project import EditError, apply_edits
 from .study import aggregate as agg, execute as ex, options as opts, requests as rq, store
 
 PROG = "os-optics-kit sensitivity"
@@ -339,15 +339,17 @@ def prepare_dir(study_dir, overwrite, resume=False):
 
 def offset_request(sample_id, base, parameters, offsets, *, build, targets, labels, outputs=None):
     """The request of one sample (parameters missing from ``offsets`` stay at nominal); a refused edit gives a
-    refused request. ``labels`` gain ``parameters``: value, offset and unit of every parameter."""
+    refused request (stage ``edit``), as does a build function's refusal (stage ``build``). ``labels`` gain
+    ``parameters``: value, offset and unit of every parameter."""
     labels = {**labels, "parameters": {p["name"]: {"value": p["nominal"] + offsets.get(p["name"], 0.0),
                                                    "offset": offsets.get(p["name"], 0.0), "unit": p["unit"]}
                                        for p in parameters}}
     try:
         document = offset_document(base, parameters, offsets, build=build)
-    except EditError as exc:
+    except wc.WorkflowError as exc:
+        stage = "edit" if isinstance(exc, EditError) else "build"
         return rq.make_request(sample_id, None, labels=labels, selected_targets=targets, outputs=outputs,
-                               refusal={"stage": "edit", "code": exc.code, "problems": [exc.as_dict()]})
+                               refusal={"stage": stage, "code": exc.code, "problems": [exc.as_dict()]})
     return rq.make_request(sample_id, document, labels=labels, selected_targets=targets, outputs=outputs)
 
 
@@ -402,21 +404,11 @@ def target_value(record, target_id):
 
 def append_report(study_dir, *, plots, title, lines, extra, artifacts=()):
     """build_report report of the study with a study-specific section, extra artifacts and a JSON key."""
-    import inspect
-
     from .build_report import build_report
 
     out_dir = Path(study_dir) / "report"
-    if "sections" in inspect.signature(build_report).parameters:
-        report = build_report([study_dir], out_dir=out_dir, plots=plots or None,
-                              sections=[{"title": title, "lines": lines}], artifacts=list(artifacts))
-    else:  # build_report without caller sections: insert the section before Diagnostics
-        report = build_report([study_dir], out_dir=out_dir, plots=plots or None)
-        text = (out_dir / "report.md").read_text(encoding="utf-8")
-        section = "\n".join([f"## {title}", ""] + lines + [""]) + "\n"
-        marker = "## Diagnostics"
-        text = text.replace(marker, section + marker, 1) if marker in text else text + "\n" + section
-        wc.write_text_atomic(out_dir / "report.md", text)
+    report = build_report([study_dir], out_dir=out_dir, plots=plots or None,
+                          sections=[{"title": title, "lines": lines}], artifacts=list(artifacts))
     document = wc.read_json(out_dir / "report.json")
     document.update(extra)
     wc.write_json(out_dir / "report.json", document)
@@ -667,11 +659,7 @@ def plan_sensitivity(spec, study_dir, *, base=None, build=None, base_path=None, 
     targets = selected_targets(document, normalized["targets"])
     units = target_units(document)
     resolution = target_resolution(spec.get("resolution"), targets, units)
-    samples = plan(parameters)
-    if build is None:  # unit and op errors in any sample are spec errors: refuse before running anything
-        by_name = {p["name"]: p for p in parameters}
-        for _sid, name, _step, _side, offset in samples[1:]:
-            normalize_ops(document, parameter_ops(by_name[name], offset))
+    samples = plan(parameters)  # check_base validated every parameter's ops: the units do not depend on the value
     requests = []
     for sample_id, name, step, side, offset in samples:
         labels = {"role": side, "perturbed_parameter": name, "step": step}

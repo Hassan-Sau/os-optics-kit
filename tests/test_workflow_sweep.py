@@ -132,6 +132,19 @@ class SweepSpecTests(unittest.TestCase):
                 sp.normalize_spec({**spec, "max_evaluations": bad})
             self.assertEqual(caught.exception.code, "SPEC_INVALID", bad)
 
+    def test_build_refusal_is_one_error_sample(self):
+        def build(values):
+            if values["f3"] < 0:
+                raise wc.WorkflowError("INPUT_INVALID", "f3 must be positive")
+            return expander(f3=values["f3"])
+
+        summary = sp.run_sweep({"parameters": [{"name": "f3", "unit": "mm", "values": [-1.0, 100.0]}]},
+                               self.dir / "study", build=build)
+        rows = {r["param:f3"]: r for r in summary["rows"]}
+        self.assertEqual((rows[-1.0]["outcome"], rows[-1.0]["error_stage"], rows[-1.0]["error_code"]),
+                         ("ERROR", "build", "INPUT_INVALID"))
+        self.assertNotEqual(rows[100.0]["outcome"], "ERROR")
+
     def test_unit_error_is_refused_before_running(self):
         spec = {"parameters": [{"name": "w", "unit": "deg", "values": [1.0],
                                 "ops": [{"op": "set_source_model", "instance_id": "SRC",
