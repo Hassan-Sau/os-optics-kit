@@ -21,7 +21,7 @@ if HAS_ENGINE:
     from os_optics.contracts import (
         PowerBudget, TargetResult, ValidationIssue, ValidationResult, ValidationSummary,
     )
-    from os_optics.results import ResultsError, RunResults, results_from_engine
+    from os_optics.results import RunResults, results_from_engine
 
 
 ROOT = Path(__file__).resolve().parents[1]
