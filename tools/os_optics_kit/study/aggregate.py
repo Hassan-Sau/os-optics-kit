@@ -5,8 +5,10 @@ Engine, so it is the same whether the samples ran serially, in parallel, in seve
 written by another evaluator. The sweep, sensitivity, tolerance and candidate studies build their summaries from
 these helpers and add their own analysis (best sample, finite differences, distributions).
 
-Row columns (``row_from_record``): ``sample_id, outcome, status, in_model_scope, execution, requirements,
-model_scope_issues, out_of_model_issues, warnings, error_stage, error_code, error_problems``, ``param:<name>`` and
+Row columns (``row_from_record``): ``sample_id, outcome, status, in_model_scope, execution, execution_outcome``
+(``COMPLETED`` or ``PARTIAL``; empty for a sample without a run), ``budgets_exhausted`` (the budgets a ``PARTIAL`` run
+reached), ``requirements, model_scope_issues, out_of_model_issues, warnings, error_stage, error_code,
+error_problems``, ``param:<name>`` and
 ``param:<name>:unit`` per parameter, per target ``target:<id>`` (value in the target unit) with ``:status``, ``:unit``,
 ``:assessment``, ``:quantity_state``, ``:exact``, ``:applicability_issue_codes``, then ``project_hash, input_hash,
 result_hash, engine_build_id, catalog_version, run_dir`` (study-relative) and ``seconds``.
@@ -48,9 +50,12 @@ def parameter_values(record, parameters, field="value"):
 def row_from_record(sample_id, values, parameters, record, study_dir):
     """One table row of a sample record (module docstring); ``values``: ``param:`` column values by name."""
     error = record.get("error") or {}
-    row = {"sample_id": sample_id, "outcome": record["outcome"], "status": record.get("status"),
+    execution = record.get("execution") or {}
+    row = {"sample_id": sample_id, "outcome": wc.record_outcome(record), "status": record.get("status"),
            "in_model_scope": record.get("in_model_scope"),
-           "execution": record.get("execution"), "requirements": record.get("requirements"),
+           "execution": record.get("execution"), "execution_outcome": execution.get("outcome"),
+           "budgets_exhausted": list((execution.get("budgets") or {}).get("exhausted") or []),
+           "requirements": record.get("requirements"),
            "model_scope_issues": sorted({i.get("code") for i in record.get("model_scope_issues") or []}),
            "out_of_model_issues": sorted({i.get("code") for i in record.get("out_of_model_issues") or []}),
            "warnings": record.get("warnings") or [],
@@ -125,13 +130,17 @@ def target_units(rows):
 
 
 def counts(rows):
-    """Outcome counts with explicit denominators."""
+    """Outcome counts with explicit denominators, and ``by_execution``: the samples that have a run, by the Engine's
+    execution outcome (``COMPLETED``, ``PARTIAL``)."""
     by = {outcome: 0 for outcome in wc.OUTCOMES}
+    by_execution = {}
     for row in rows:
         by[row["outcome"]] += 1
+        if row.get("execution_outcome") is not None:
+            by_execution[row["execution_outcome"]] = by_execution.get(row["execution_outcome"], 0) + 1
     total = len(rows)
     evaluable = by["PASS"] + by["FAIL"]
-    return {"requested": total, "by_outcome": by,
+    return {"requested": total, "by_outcome": by, "by_execution": dict(sorted(by_execution.items())),
             "pass_fraction": {"numerator": by["PASS"], "denominator": total,
                               "value": by["PASS"] / total if total else None,
                               "definition": "PASS samples / all requested samples"},

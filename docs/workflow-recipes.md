@@ -31,7 +31,7 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 
 | Command | Exit 0 | 1 | 2 | 3 | 4 |
 | --- | --- | --- | --- | --- | --- |
-| `summary` | `PASS`, `WARNING`, `NOT_APPLICABLE` | `FAIL` | `UNKNOWN`, including a partial run (`PARTIAL`) | `OUT_OF_MODEL`, `OUT_OF_MODEL_SCOPE` | error, including a `FAILED` or `CANCELLED` run |
+| `summary` | `PASS`, `NOT_APPLICABLE` | `FAIL` | `UNKNOWN` | `OUT_OF_MODEL` | error, including a `FAILED` or `CANCELLED` run |
 | `edit` | `EDITED`, `ALREADY_APPLIED`, `DESCRIBED`; with `--run` outcome `PASS` or `NOT_APPLICABLE` | outcome `FAIL` | outcome `UNKNOWN` | outcome `OUT_OF_MODEL` | refused, `RUN_REFUSED` |
 | `sweep` | `COMPLETED`, `PLANNED` | `NO_FEASIBLE` (constraints given, none met) | | | refused |
 | `sensitivity` | `COMPLETED`, `PLANNED` | | `INCOMPLETE` (a derivative unavailable) | | refused |
@@ -50,12 +50,14 @@ prints status `CANCELLED` and exits 130, with any number of workers; its `next` 
 (`study run DIR --resume`) continues it. Ctrl-C outside an execution (planning,
 aggregation) prints the error `INTERRUPTED` and exits 130.
 
-A partial run (execution `PARTIAL`, for example a reached `max_return_analysis_work`
-reported as `RETURN_ANALYSIS_BUDGET`) is `UNKNOWN`, exit 2, even when its targets are met;
-an unmet selected target keeps `FAIL`, exit 1. A `FAILED` or `CANCELLED` run is `ERROR`,
-exit 4. For a `RETURN_ANALYSIS_BUDGET` run these are the codes of
-`os-optics project run --status-contract aggregate`; under its default `requirements`
-contract the engine exits 3 for it.
+A partial run (execution `PARTIAL`: a compute budget was reached) takes the class of
+its selected targets. A target the budget left undecided is `INDETERMINATE` and makes the
+run `UNKNOWN`; a run whose selected targets are all met is `PASS`, for example a reached
+`max_return_analysis_work` (`RETURN_ANALYSIS_BUDGET`) with every target `MET`. The
+execution outcome and the exhausted budgets stay in the record (`outcome.execution`; in a
+study the columns `execution_outcome` and `budgets_exhausted` and the count
+`by_execution`); the sweep constraint `{"execution": ["COMPLETED"]}` makes only complete
+runs feasible. A `FAILED` or `CANCELLED` run is `ERROR`, exit 4.
 
 `edit --run` uses the outcome of its selected targets. It retains the
 engine's execution, requirements, quantity validity and issue fields. Outcome classes
@@ -66,11 +68,11 @@ are workflow routing summaries; inspect those fields for the scientific meaning.
 Selected requirements determine a sample's class:
 
 1. `ERROR`: an edit, load or run was refused, or the sample was not run.
-2. `OUT_OF_MODEL`: a selected target depends on a quantity outside its model. A missing selected target ID is `UNKNOWN`.
-3. `FAIL`: at least one selected requirement is unmet; other indeterminate requirements remain listed.
-4. `UNKNOWN`: no selected requirement is unmet, but one is indeterminate or its quantity is unavailable.
-5. `PASS`: all selected requirements are met.
-6. `NOT_APPLICABLE`: no selected requirement applies, including a target-free run. A mixture of applicable and not-applicable targets stays explicit as `UNKNOWN`.
+2. `FAIL`: at least one selected requirement is unmet; out-of-model and indeterminate requirements remain listed per target.
+3. `OUT_OF_MODEL`: no selected requirement is unmet, and a selected target depends on a quantity outside its model. A missing selected target ID is `UNKNOWN`.
+4. `UNKNOWN`: no selected requirement is unmet or out of its model, but one is indeterminate or its quantity is unavailable.
+5. `PASS`: every selected requirement that applies is met; targets assessed `NOT_APPLICABLE` are left out and stay listed in `requirements.not_applicable`.
+6. `NOT_APPLICABLE`: no selected requirement applies, including a target-free run.
 
 Unrelated scope findings remain in the record without invalidating an otherwise
 usable selected quantity. A bounded quantity retains its interval and is not an exact

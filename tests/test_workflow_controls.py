@@ -113,24 +113,25 @@ class EngineControlsTests(unittest.TestCase):
             record = wc.run_sample(limited, directory / "limited_free")
             self.assertEqual(record["execution"]["outcome"], "PARTIAL")
             self.assertFalse(record["requirements"]["declared"])
-            # A calculation that did not complete is never NOT_APPLICABLE (exit 0), even without targets.
-            self.assertEqual((record["status"], record["outcome"]), ("UNKNOWN", "UNKNOWN"))
+            # Without targets the class is NOT_APPLICABLE (exit 0); the execution stays PARTIAL beside it.
+            self.assertEqual((record["status"], record["outcome"]), ("UNKNOWN", "NOT_APPLICABLE"))
             from os_optics_kit import result_summary
             from tests.workflow_fixtures import invoke
             code, summary, error = invoke(result_summary.main, [record["run_dir"]])
-            self.assertEqual((code, error), (2, ""))
+            self.assertEqual((code, error), (0, ""))
             self.assertEqual(summary["outcome"]["execution"]["outcome"], "PARTIAL")
-            self.assertEqual(summary["requirement_outcome"], "UNKNOWN")
+            self.assertEqual(summary["requirement_outcome"], "NOT_APPLICABLE")
 
-    def test_partial_execution_is_never_pass(self):
+    def test_partial_execution_takes_the_class_of_its_targets(self):
         met = [{"id": "t", "assessment": "MET", "status": "PASS"}]
         unmet = [{"id": "t", "assessment": "UNMET", "status": "FAIL"}]
         out = [{"id": "t", "assessment": "INDETERMINATE", "status": "OUT_OF_MODEL_SCOPE"}]
         for execution, targets, expected in (
             ({"outcome": "COMPLETED"}, met, "PASS"),
             ({"outcome": "COMPLETED"}, [], "NOT_APPLICABLE"),
-            ({"outcome": "PARTIAL"}, met, "UNKNOWN"),
-            ({"outcome": "PARTIAL"}, [], "UNKNOWN"),
+            ({"outcome": "PARTIAL"}, met, "PASS"),
+            ({"outcome": "PARTIAL"}, [], "NOT_APPLICABLE"),
+            ({"outcome": "PARTIAL"}, [{"id": "t", "assessment": "INDETERMINATE", "status": "UNKNOWN"}], "UNKNOWN"),
             ({"outcome": "PARTIAL"}, unmet, "FAIL"),
             ({"outcome": "PARTIAL"}, out, "OUT_OF_MODEL"),
             ({"outcome": "FAILED"}, met, "ERROR"),

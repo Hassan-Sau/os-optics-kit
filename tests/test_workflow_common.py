@@ -36,6 +36,27 @@ class ClassifyTests(unittest.TestCase):
             self.assertEqual(wc.classify(status, [], []), "NOT_APPLICABLE", status)
         self.assertEqual(wc.classify("PASS", [], [row("a", "PASS")], selected=[]), "NOT_APPLICABLE")
 
+    def test_not_applicable_targets_are_left_out(self):
+        na = {"id": "n", "status": "NOT_APPLICABLE", "value": None, "assessment": "NOT_APPLICABLE"}
+        self.assertEqual(wc.classify("PASS", [], [row("a", "PASS"), na]), "PASS")
+        self.assertEqual(wc.classify("FAIL", [], [row("a", "FAIL"), na]), "FAIL")
+        self.assertEqual(wc.classify("UNKNOWN", [], [row("a", "UNKNOWN"), na]), "UNKNOWN")
+        self.assertEqual(wc.classify("NOT_APPLICABLE", [], [na, {**na, "id": "m"}]), "NOT_APPLICABLE")
+
+    def test_unmet_outranks_out_of_model(self):
+        scoped = {"id": "s", "status": "OUT_OF_MODEL_SCOPE", "value": None, "assessment": "INDETERMINATE",
+                  "applicability_issue_codes": ["MODEL_WAVELENGTH_OUTSIDE_BAND"]}
+        self.assertEqual(wc.classify("FAIL", [], [row("a", "FAIL"), scoped]), "FAIL")
+        self.assertEqual(wc.classify("OUT_OF_MODEL_SCOPE", [], [row("a", "PASS"), scoped]), "OUT_OF_MODEL")
+
+    def test_saved_record_is_classed_again(self):
+        record = {"outcome": "UNKNOWN", "status": "WARNING", "error": None,
+                  "execution": {"outcome": "PARTIAL", "budgets": {"exhausted": ["max_return_analysis_work"]}},
+                  "targets": [row("a", "PASS"), row("b", "FAIL")], "selected_targets": ["a"]}
+        self.assertEqual(wc.record_outcome(record), "PASS")
+        self.assertEqual(wc.record_outcome({**record, "selected_targets": None}), "FAIL")
+        self.assertEqual(wc.record_outcome({**record, "error": {"code": "NOT_RUN"}}), "ERROR")
+
 
 if __name__ == "__main__":
     unittest.main()

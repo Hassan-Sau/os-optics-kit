@@ -15,10 +15,12 @@ What it provides:
   W/mW/uW; anything else raises ``WorkflowError`` (``UNIT_UNKNOWN`` / ``UNIT_INCOMPATIBLE``) before any run;
 * ``check`` (``json_api.check_project``) and ``run_sample``: one in-process run into a sample directory, returned as
   a sample record whatever happens (an Engine refusal at load or at run is recorded, never raised);
-* selected-requirement shorthand: ERROR (no result), OUT_OF_MODEL (selected target applicability),
-  UNKNOWN (indeterminate, or a partial run), FAIL (unmet), PASS (all selected targets met),
-  NOT_APPLICABLE (no selected requirements); full execution, quantity states and target assessments are retained
-  independently;
+* the requirement class of a sample, from the Engine's assessments of the selected targets: ERROR (no result),
+  FAIL (a selected requirement is unmet), OUT_OF_MODEL (a selected target reads a quantity outside its model),
+  UNKNOWN (a selected requirement is indeterminate), PASS (every selected requirement that applies is met),
+  NOT_APPLICABLE (no selected requirement applies). The execution outcome (COMPLETED or PARTIAL, with the exhausted
+  budgets) is a separate fact of the record and does not change the class: a budget that leaves a target undecided
+  shows in that target's assessment;
 * ``freshness`` delegates to the Engine's CURRENT / HISTORICAL / UNDETERMINED decision with its reasons;
 * sha256 / JSON / CSV writers (LF line endings) and bounded-output helpers.
 
@@ -361,10 +363,14 @@ def target_bounds(target):
 
 
 def classify(status, model_scope_issues, targets, selected=None, out_of_model_issues=()):
-    """Selected requirement shorthand; execution and individual quantity evidence remain separate.
+    """Requirement class of a run from the Engine's assessments of the selected targets.
 
-    Unrelated scope findings never invalidate a selected target. Assessments are
-    supplied by the Engine after resolving each target's actual dependencies.
+    In this order: ``ERROR`` without a result; ``NOT_APPLICABLE`` when no target is selected; ``UNKNOWN`` when a
+    selected id is not in the run; ``FAIL`` when a selected target is ``UNMET``; ``OUT_OF_MODEL`` when a selected
+    target carries model-applicability codes or the status ``OUT_OF_MODEL_SCOPE``; ``UNKNOWN`` when one is
+    ``INDETERMINATE`` or has no assessment; then the targets assessed ``NOT_APPLICABLE`` are left out:
+    ``NOT_APPLICABLE`` when none remains, ``PASS`` when every remaining one is ``MET``. Scope findings on quantities
+    no selected target reads do not change the class; the per-target rows keep every assessment and code.
     """
     if status is None:
         return "ERROR"
@@ -375,31 +381,38 @@ def classify(status, model_scope_issues, targets, selected=None, out_of_model_is
     selected_rows = [rows.get(target_id) for target_id in chosen]
     if any(row is None for row in selected_rows):
         return "UNKNOWN"
-    if any(row.get("applicability_issue_codes") or row.get("status") == "OUT_OF_MODEL_SCOPE"
-           for row in selected_rows):
-        return "OUT_OF_MODEL"
     assessments = [row.get("assessment") for row in selected_rows]
     if "UNMET" in assessments:
         return "FAIL"
+    if any(row.get("applicability_issue_codes") or row.get("status") == "OUT_OF_MODEL_SCOPE"
+           for row in selected_rows):
+        return "OUT_OF_MODEL"
     if "INDETERMINATE" in assessments or any(value is None for value in assessments):
         return "UNKNOWN"
-    if all(value == "NOT_APPLICABLE" for value in assessments):
+    applicable = [value for value in assessments if value != "NOT_APPLICABLE"]
+    if not applicable:
         return "NOT_APPLICABLE"
-    return "PASS" if all(value == "MET" for value in assessments) else "UNKNOWN"
+    return "PASS" if all(value == "MET" for value in applicable) else "UNKNOWN"
 
 
 def requirement_outcome(status, execution, model_scope_issues, targets, selected=None, out_of_model_issues=()):
-    """``classify`` with the execution applied: a FAILED or CANCELLED calculation is ERROR, and a PARTIAL one (a
-    budget reached, e.g. RETURN_ANALYSIS_BUDGET) is never PASS or NOT_APPLICABLE but UNKNOWN (for
-    RETURN_ANALYSIS_BUDGET the code of the Engine's aggregate status contract); an unmet or out-of-model selected
-    target keeps FAIL / OUT_OF_MODEL."""
-    state = (execution or {}).get("outcome")
-    if state in ("FAILED", "CANCELLED"):
+    """``classify`` for a run record: a ``FAILED`` or ``CANCELLED`` calculation has no result and is ``ERROR``;
+    every other run, ``PARTIAL`` included, takes the class of its selected targets' assessments. What a reached
+    budget left undecided is ``INDETERMINATE`` on the targets it affects; ``execution`` stays beside the class."""
+    if (execution or {}).get("outcome") in ("FAILED", "CANCELLED"):
         return "ERROR"
-    outcome = classify(status, model_scope_issues, targets, selected, out_of_model_issues)
-    if state == "PARTIAL" and outcome in ("PASS", "NOT_APPLICABLE"):
-        return "UNKNOWN"
-    return outcome
+    return classify(status, model_scope_issues, targets, selected, out_of_model_issues)
+
+
+def record_outcome(record):
+    """The requirement class of a saved sample record, derived again from its targets, execution and selected
+    targets (``requirement_outcome``), so a record written by an earlier kit release is classed by the same rule; a
+    record with an error stays ``ERROR``."""
+    if record.get("error") or record.get("status") is None:
+        return "ERROR"
+    return requirement_outcome(record.get("status"), record.get("execution"), record.get("model_scope_issues") or [],
+                               record.get("targets") or [], record.get("selected_targets"),
+                               record.get("out_of_model_issues") or [])
 
 
 def target_value_is_exact(target):

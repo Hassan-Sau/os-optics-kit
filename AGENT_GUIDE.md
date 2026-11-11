@@ -62,8 +62,8 @@ Saved results keep their identities after edits. `compare` and `os-optics result
 `TARGETS_CHANGED`, ...). A historical result describes the earlier design; rerun when the task needs
 the edited one.
 
-Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN (also
-a partial run, `PARTIAL`) or `INCOMPLETE`; 3 OUT_OF_MODEL; 4 refused input, with a JSON
+Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN or
+`INCOMPLETE`; 3 OUT_OF_MODEL (a `PARTIAL` run exits by its targets); 4 refused input, with a JSON
 error on stderr; 130 a cancelled study or Ctrl-C (`study run DIR --resume` continues a study). Stdout is compact JSON;
 details stay in files.
 

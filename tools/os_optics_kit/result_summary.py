@@ -2,10 +2,10 @@
 
 Usage: os-optics-kit summary RUN_DIR [--details]   (or: python -m os_optics_kit summary RUN_DIR)
 
-Exit codes follow requirement_outcome: 0 all selected targets met or none declared,
-1 an unmet target, 2 indeterminate or a partial run (PARTIAL),
-3 selected target outside its model, 4 invalid input/artifact or failed computation.
-Raw aggregate status is preserved separately.
+Exit codes follow requirement_outcome, the class of the declared targets' assessments: 0 every target that applies
+is met, or none applies or is declared; 1 an unmet target; 2 an indeterminate target; 3 a target reads a quantity
+outside its model; 4 invalid input or artifact, or a FAILED or CANCELLED run. A PARTIAL run (a budget was reached)
+exits by its targets; outcome.execution states the execution and the budgets. The aggregate status is in "status".
 """
 
 from __future__ import annotations

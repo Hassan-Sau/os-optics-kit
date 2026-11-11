@@ -20,6 +20,7 @@ SPEC.json (keys; units as in os-optics-kit edit):
                                                   # all); an id not in the Project is refused (TARGET_UNKNOWN)
     "constraints": [                              # optional, all must hold for a sample to be feasible
       {"outcome": ["PASS"]},
+      {"execution": ["COMPLETED"]},               # only runs that reached no budget (default: execution not tested)
       {"target": "spot_radius", "assessment": ["MET"]},
       {"column": "target:spot_radius", "max": {"value": 18, "unit": "um"}}   # min / max, in the column's unit
     ],
@@ -38,9 +39,11 @@ may use the derived columns listed before it. A target id or column that the spe
 objective, constraint or derived operand) refuses the spec before any run (TARGET_UNKNOWN / COLUMN_UNKNOWN, with the
 known ids and columns).
 
-Each sample retains execution (including PARTIAL), quantity evidence, and target assessments separately.
-The outcome shorthand describes selected requirements: ERROR, OUT_OF_MODEL (a selected target's applicability),
-UNKNOWN (indeterminate), FAIL (unmet), PASS (all met), or NOT_APPLICABLE (no selected requirements).
+Each sample keeps its execution outcome (COMPLETED or PARTIAL, columns execution_outcome and budgets_exhausted),
+quantity states and target assessments. The outcome class comes from the selected targets' assessments: ERROR, FAIL
+(unmet), OUT_OF_MODEL (a selected target reads a quantity outside its model), UNKNOWN (indeterminate), PASS (every
+selected requirement that applies is met) or NOT_APPLICABLE (none applies). A PARTIAL run has the class of its
+targets; the constraint {"execution": ["COMPLETED"]} makes only complete runs feasible.
 No sample is dropped. Feasibility follows the explicit constraints and objective validity. An exact scalar
 objective must have a finite value with applicable dependencies; bounded values remain recorded but are not
 ranked as exact. Unrelated diagnostics do not invalidate an otherwise usable objective. The best feasible
@@ -83,6 +86,8 @@ TOP_ROWS = 5
 STUDY_FILES = ("study.json", "table.csv", "summary.json")
 STUDY_DIRS = ("samples", "plots", "report")
 EXIT_CODES = {**wc.WORKFLOW_EXIT_CODES, **opts.EXIT_CODES}
+#: Execution outcomes of a sample that has a run (the values of an ``{"execution": [...]}`` constraint).
+EXECUTION_OUTCOMES = ("COMPLETED", "PARTIAL")
 
 
 # --------------------------------------------------------------------------------------------- spec
@@ -167,8 +172,14 @@ def normalize_spec(spec, *, build=None):
                                   not isinstance(objective.get("column"), str)):
         raise wc.WorkflowError("SPEC_INVALID", "objective is {column, sense: minimize|maximize}")
     for rule in spec.get("constraints") or []:
-        if not ({"outcome"} <= set(rule) or {"target", "assessment"} <= set(rule) or "column" in rule):
+        if not ({"outcome"} <= set(rule) or {"execution"} <= set(rule) or {"target", "assessment"} <= set(rule)
+                or "column" in rule):
             raise wc.WorkflowError("SPEC_INVALID", f"unsupported constraint {rule!r}")
+        if "execution" in rule and (
+                not isinstance(rule["execution"], list) or not rule["execution"]
+                or any(item not in EXECUTION_OUTCOMES for item in rule["execution"])):
+            raise wc.WorkflowError("SPEC_INVALID", f"constraint {rule!r}: execution lists outcomes of "
+                                   f"{EXECUTION_OUTCOMES}")
     stop_on = list(spec.get("stop_on") or [])
     if any(item not in wc.OUTCOMES for item in stop_on):
         raise wc.WorkflowError("SPEC_INVALID", f"stop_on lists outcome classes {wc.OUTCOMES}")
@@ -212,7 +223,7 @@ def validate_columns(normalized, target_ids):
                 column(operand, f"derived {item['name']}.{key}", available)
         available = [*available, f"derived:{item['name']}"]
     for index, rule in enumerate(normalized["constraints"]):
-        if "outcome" in rule:
+        if "outcome" in rule or "execution" in rule:
             continue
         if "target" in rule:
             target(rule["target"], f"constraint {index}")
@@ -300,9 +311,13 @@ def constraint_failures(row, constraints):
     if row["outcome"] == "ERROR":
         failed.append(f"outcome {row['outcome']}")
     for rule in constraints:
+        if "execution" in rule and row.get("execution_outcome") not in rule["execution"]:
+            failed.append(f"execution in {rule['execution']}")
         if "outcome" in rule:
             if row["outcome"] not in rule["outcome"]:
                 failed.append(f"outcome in {rule['outcome']}")
+        elif "execution" in rule:
+            continue
         elif "target" in rule:
             if row.get(f"target:{rule['target']}:assessment") not in rule["assessment"] or \
                     row.get(f"target:{rule['target']}:applicability_issue_codes"):

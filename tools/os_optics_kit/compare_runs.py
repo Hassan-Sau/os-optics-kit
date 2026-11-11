@@ -19,7 +19,7 @@ What is compared, by ID:
   project.<field>), plus each run's catalog release and Engine build. Only inputs that differ are listed, with the
   unit of the field name. inputs_compared states the result: the number of differing inputs, or that the Projects
   are identical (equal project hashes), or that the project hashes differ although no field does;
-* outcome class per run (ERROR, OUT_OF_MODEL, UNKNOWN, FAIL, PASS, NOT_APPLICABLE), decided by the study's selected targets for
+* outcome class per run (ERROR, FAIL, OUT_OF_MODEL, UNKNOWN, PASS, NOT_APPLICABLE), decided by the study's selected targets for
   study samples and by all targets for run directories (--targets overrides both; an id in no run is refused),
   with model-scope findings, warnings, and target issue codes retained independently; only selected-target
   applicability determines the OUT_OF_MODEL shorthand;
