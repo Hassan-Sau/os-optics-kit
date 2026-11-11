@@ -9,7 +9,9 @@ Contents: Engine and catalog identity; inputs (base project file and hash, sweep
 constraints and objective, or the compared runs' input differences); the edit's change record (every operation with
 before / after values) when --changes is given; target outcomes with units and statuses; outcome counts with their
 denominators; best sample or the no-feasible outcome; diagnostics (issue codes, model-scope issues, warnings,
-refusal codes); freshness of every run against --project (a historical PASS is labelled HISTORICAL PASS); plots as
+refusal codes); freshness against --project: of every run (a historical PASS is labelled HISTORICAL PASS), or for a
+study one record (compare_runs.study_freshness: CURRENT when its base Project or a sample is the current Project, the
+Engine's run freshness for such a sample; the best sample is labelled HISTORICAL when the study is); plots as
 relative links; and the artifact list with relative paths and sha256. Numbers are copied from the saved files;
 nothing is interpreted beyond the computed comparisons. From Python, ``build_report(..., sections=[{"title",
 "lines"}], artifacts=[(path, role)])`` adds the caller's own sections (Markdown lines, e.g. an independent reference
@@ -25,7 +27,7 @@ import argparse
 from pathlib import Path
 
 from . import workflow_common as wc
-from .compare_runs import compare
+from .compare_runs import compare, study_freshness
 
 PROG = "os-optics-kit report"
 MAX_SAMPLE_ROWS = 40
@@ -94,16 +96,17 @@ def study_section(study_dir, out_dir, project=None):
                            ("run/manifest.json", "run manifest")):
             if (sample_dir / name).is_file():
                 artifacts.append(_artifact(sample_dir / name, out_dir, f"{role} {row['sample_id']}"))
-        if project is not None:
-            entry["freshness"] = wc.freshness(project, sample_dir / "run") if entry["run_dir"] else \
-                {"freshness": "HISTORICAL", "reasons": ["RUN_UNVERIFIED"]}
-            if entry["freshness"]["freshness"] != "CURRENT":
-                entry["outcome_label"] = f"{entry['freshness']['freshness']} {entry['outcome']}"
         samples.append(entry)
+    freshness = None
+    if project is not None:  # one Project check for the study; the Engine's run freshness for a current sample
+        freshness = study_freshness(study, [(s["sample_id"], s["identity"]) for s in samples], project)
+        for entry in samples:
+            if entry["sample_id"] in freshness["current_samples"]:
+                entry["freshness"] = wc.freshness(project, study_dir / "samples" / entry["sample_id"] / "run") \
+                    if entry["run_dir"] else {"freshness": "HISTORICAL", "reasons": ["RUN_UNVERIFIED"]}
     best = summary["best"]
-    if best is not None:
-        chosen = next((s for s in samples if s["sample_id"] == best["sample_id"]), {})
-        best = {**best, **({"outcome_label": chosen["outcome_label"]} if "outcome_label" in chosen else {})}
+    if best is not None and freshness is not None and freshness["freshness"] == "HISTORICAL":
+        best = {**best, "outcome_label": f"HISTORICAL {best['outcome']}"}
     return {"kind": "study", "study_dir": wc.relative(study_dir, out_dir),
             "base_project": study.get("base_project"), "parameters": study["normalized"]["parameters"],
             "selected_targets": study["normalized"].get("targets"), "constraints": summary["constraints"],
@@ -111,7 +114,7 @@ def study_section(study_dir, out_dir, project=None):
             "counts": summary["counts"], "feasible": summary["feasible"], "best": best,
             "no_feasible": summary["no_feasible"], "stopped_by": summary.get("stopped_by"),
             "target_units": summary["targets"], "engine": study["engine"], "catalog": study["catalog"],
-            "environment": study.get("environment"), "samples": samples}, artifacts
+            "environment": study.get("environment"), "freshness": freshness, "samples": samples}, artifacts
 
 
 def runs_section(paths, out_dir, project=None):
@@ -314,9 +317,25 @@ def render_markdown(report):
     lines.append("")
     for extra in report.get("sections") or []:
         lines += [f"## {extra['title']}", "", *extra["lines"], ""]
-    if report.get("current_project"):
+    if report.get("current_project") and section["kind"] == "study":
+        record = section["freshness"]
+        if record["base_is_current"]:
+            basis = "the study's base Project is the current Project"
+        elif record["current_samples"]:
+            basis = "samples that are the current Project: " + ", ".join(record["current_samples"])
+        else:
+            basis = "neither the study's base Project nor a sample is the current Project"
+        lines += ["## Freshness", "", f"Against [{report['current_project']}]({report['current_project']}): "
+                  f"{record['freshness']} ({basis}).", ""]
+        checked = [s for s in section["samples"] if s.get("freshness")]
+        if checked:
+            lines += _table(["sample", "freshness", "reasons", "outcome"], [
+                [s["sample_id"], s["freshness"]["freshness"], ", ".join(s["freshness"]["reasons"]) or "-",
+                 s["outcome"]] for s in checked])
+            lines.append("")
+    elif report.get("current_project"):
         lines += ["## Freshness", "", f"Against [{report['current_project']}]({report['current_project']}):", ""]
-        entries = section["samples"] if section["kind"] == "study" else section["runs"]
+        entries = section["runs"]
         lines += _table(["run", "freshness", "reasons", "outcome"], [
             [e.get("sample_id") or e.get("label"), e["freshness"]["freshness"],
              ", ".join(e["freshness"]["reasons"]) or "-", e.get("outcome_label", e["outcome"])] for e in entries])

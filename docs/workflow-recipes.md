@@ -351,6 +351,13 @@ The command uses engine freshness: `CURRENT`, `HISTORICAL` or `UNDETERMINED`, pr
 reasons such as `PHYSICS_CHANGED`, `TARGETS_CHANGED`, `OTHER_PROJECT_CHANGED`,
 `CATALOG_CHANGED` and `RUN_UNVERIFIED`. A budget change is `PHYSICS_CHANGED`.
 
+A study against `--project` has one freshness record (`section.freshness` in a report,
+`study_freshness` in a comparison): `CURRENT` when its base Project or one of its samples
+is the current Project (`current_samples` get the engine's run freshness), `HISTORICAL`
+when neither is (the best sample and, in a comparison, every sample outcome are then
+labelled `HISTORICAL`), `UNDETERMINED` for a study planned without a base Project. Each
+sample is a perturbed design, so samples carry no label of their own.
+
 An unchanged Project and lowered input can remain current across engine builds;
 `engine_build_matches` reports that distinction. A historical result keeps its
 original assessment, displayed as e.g. `HISTORICAL PASS`, and is not an assessment of

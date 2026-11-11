@@ -25,7 +25,10 @@ What is compared, by ID:
   with model-scope findings, warnings, and target issue codes retained independently; only selected-target
   applicability determines the OUT_OF_MODEL shorthand;
 * freshness, when --project is given: CURRENT, HISTORICAL or UNDETERMINED (Engine reasons, including PHYSICS_CHANGED,
-  TARGETS_CHANGED and RUN_UNVERIFIED) for every run; the outcome of a historical run is labelled e.g. "HISTORICAL PASS".
+  TARGETS_CHANGED and RUN_UNVERIFIED) for every run directory; the outcome of a historical run is labelled e.g.
+  "HISTORICAL PASS". The samples of a study directory share one record (study_freshness, one Project check):
+  samples that are the current Project get the Engine's run freshness, the others are labelled HISTORICAL only
+  when the study is;
 
 Writes DIR/compare.json (everything) and DIR/compare.csv (long format: section, id, field, unit, run, value,
 status, assessment, quantity_state, exact, power_complete, power_upper_bound_W, delta, reference) when --out is given. Stdout: one compact JSON document (at most eight runs and ten input
@@ -44,18 +47,51 @@ MAX_RUNS_SHOWN = 8
 MAX_DIFFERENCES_SHOWN = 10
 
 
-def expand_inputs(paths, labels=None):
-    """``[(label, run_dir or None, sample record or None)]`` for run directories and study directories."""
+def study_freshness(study, samples, project):
+    """One freshness record of a study against the current Project (``project``: document or path).
+
+    One Project check, no run read: ``CURRENT`` when the study's base Project (``study.json``
+    ``base_project.project_hash``) or a sample (``samples``: ``[(sample_id, identity)]``) has the current Project
+    hash, ``HISTORICAL`` when neither has, ``UNDETERMINED`` without a base Project and a matching sample, or when the
+    current Project is refused. ``current_samples`` lists the samples that are the current Project; a reader gives
+    those the Engine's own run freshness."""
+    document = project if isinstance(project, dict) else wc.read_json(project)
+    checked = wc.check(document)
+    current = checked.get("project_hash")
+    base = (study or {}).get("base_project") or {}
+    base_is_current = current is not None and base.get("project_hash") == current
+    current_samples = [sample_id for sample_id, identity in samples
+                       if current is not None and (identity or {}).get("project_hash") == current]
+    if base_is_current or current_samples:
+        state = "CURRENT"
+    elif current is None or base.get("project_hash") is None:
+        state = "UNDETERMINED"
+    else:
+        state = "HISTORICAL"
+    engine_inputs = (base.get("engine_input_hash"), checked.get("engine_input_hash"))
+    return {"freshness": state, "current_project_hash": current, "base_is_current": base_is_current,
+            "current_samples": current_samples,
+            "base_engine_input_equal": None if None in engine_inputs else engine_inputs[0] == engine_inputs[1]}
+
+
+def expand_inputs(paths, labels=None, origins=None):
+    """``[(label, run_dir or None, sample record or None)]`` for run directories and study directories.
+    ``origins``: a list that receives, per entry, the study directory it was expanded from (None for a run
+    directory)."""
     entries = []
     for path in [Path(p) for p in paths]:
         if (path / "manifest.json").is_file() or (path / "local_validation.json").is_file():
             name = path.resolve().parent.name if path.name == "run" else path.name  # samples/<id>/run -> <id>
             entries.append((name, path, None))
+            if origins is not None:
+                origins.append(None)
         elif (path / "summary.json").is_file() and (path / "samples").is_dir():
             for sample_dir in sorted(p for p in (path / "samples").iterdir() if p.is_dir()):
                 record = wc.read_json(sample_dir / "sample.json") if (sample_dir / "sample.json").is_file() else None
                 run_dir = sample_dir / "run"
                 entries.append((sample_dir.name, run_dir if (run_dir / "manifest.json").is_file() else None, record))
+                if origins is not None:
+                    origins.append(path)
         else:
             raise wc.WorkflowError("RUN_NOT_READABLE", f"{path} is neither a run directory nor a study directory",
                                    path=path.as_posix())
@@ -199,8 +235,8 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None, v
     ``targets``: target ids deciding every run's outcome (default: a study sample uses the study's selected targets,
     a run directory all of its targets); an id that no run has is refused (TARGET_UNKNOWN)."""
     value_use = wc.value_use_setting(value_use)
-    entries = []
-    for label, run_dir, record in expand_inputs(paths, labels):
+    entries, origins = [], []
+    for label, run_dir, record in expand_inputs(paths, labels, origins):
         selected = targets if targets is not None else (record or {}).get("selected_targets")
         entry = load_entry(label, run_dir, record, selected)
         entry["selected_targets"] = selected
@@ -218,8 +254,17 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None, v
     if ref not in names:
         raise wc.WorkflowError("BAD_ARGUMENT", f"reference {ref!r} is not one of the runs {names}")
     ref_entry = entries[names.index(ref)]
+    studies = {}
     if project is not None:
-        for entry in entries:
+        for origin in dict.fromkeys(o for o in origins if o is not None):
+            members = [(e["label"], e["identity"]) for e, o in zip(entries, origins) if o == origin]
+            studies[origin] = study_freshness(wc.read_json(origin / "study.json"), members, project)
+        for entry, origin in zip(entries, origins):
+            if origin is not None and entry["label"] not in studies[origin]["current_samples"]:
+                # a study sample is a perturbed design: the study has one freshness, its samples no label of their own
+                if studies[origin]["freshness"] == "HISTORICAL":
+                    entry["outcome_label"] = f"HISTORICAL {entry['outcome']}"
+                continue
             if entry["run_dir"] is None:
                 entry["freshness"] = {"freshness": "HISTORICAL", "reasons": ["RUN_UNVERIFIED"]}
             else:
@@ -290,6 +335,8 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None, v
                                                                                            for e in compared])),
                                     "project_hashes": hashes, "project_hashes_equal": equal,
                                     "statement": statement}}
+    if studies:
+        document["study_freshness"] = {path.as_posix(): record for path, record in studies.items()}
     if value_use != "exact":
         document["value_use"] = value_use
         document["values_used"] = {row["id"]: dict(sorted(

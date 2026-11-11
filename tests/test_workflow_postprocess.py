@@ -221,8 +221,17 @@ class PlotAndReportTests(unittest.TestCase):
             self.assertTrue((out_dir / link).exists(), link)
         for artifact in report["artifacts"]:
             self.assertEqual(wc.sha256_file(out_dir / artifact["path"]), artifact["sha256"])
-        self.assertIn("HISTORICAL PASS", text)  # s0001 passes but is not the current Project
+        # The current Project is sample s0002: the study is CURRENT, and no sample is labelled HISTORICAL.
+        self.assertNotIn("HISTORICAL", text)
+        self.assertIn("| s0001 | PASS |", text)
         self.assertIn("| s0002 | PASS |", text)
+        record = report["section"]["freshness"]
+        self.assertEqual((record["freshness"], record["current_samples"], record["base_is_current"]),
+                         ("CURRENT", ["s0002"], False))
+        samples = {s["sample_id"]: s for s in report["section"]["samples"]}
+        self.assertEqual(samples["s0002"]["freshness"]["freshness"], "CURRENT")
+        self.assertNotIn("freshness", samples["s0001"])
+        self.assertIn("samples that are the current Project: s0002", text)
         self.assertIn("PASS fraction: 2/3 of all requested samples", text)
         self.assertEqual(wc.read_json(out_dir / "report.json")["section"]["counts"]["requested"], 3)
 
