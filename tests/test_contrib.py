@@ -155,7 +155,7 @@ SKILL_VALUES = {"name": "hello", "description": "Print a greeting.", "kind": "to
 
 
 def case_values(case_dir: Path) -> dict:
-    verified = {"engine": "0.12.0", "catalog": None, "status": "PASS",
+    verified = {"engine": "0.12.0", "catalog": None, "status": "PASS", "execution": "COMPLETED",
                 "targets": {"targets": [{"target_id": "w", "metric": "beam_radius_mm", "observation_id": "out",
                                          "unit": "mm", "bounds": {"maximum": 2.0}, "value": 1.5,
                                          "assessment": "MET"}]}}

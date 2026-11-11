@@ -124,7 +124,8 @@ class CaseFlowTests(unittest.TestCase):
             self.assertLessEqual(image.stat().st_size, case_mod.IMAGE_LIMIT_BYTES)
         expected = json.loads((case_dir / "expected.json").read_text(encoding="utf-8"))
         self.assertEqual(expected["schema"], "os-optics-kit.case-expected")
-        self.assertEqual((expected["catalog"], expected["status"]), (None, "PASS"))
+        self.assertEqual((expected["catalog"], expected["execution"], expected["schema_version"]),
+                         (None, "COMPLETED", 2))
         front, _ = fm.split((case_dir / "CASE.md").read_text(encoding="utf-8"))
         self.assertEqual((front["catalog"], front["tools"], front["license"]), ("none", "summary", "MIT"))
         self.assertLessEqual(fm.token_estimate((case_dir / "CASE.md").read_text(encoding="utf-8")), 700)
@@ -160,6 +161,24 @@ class CaseFlowTests(unittest.TestCase):
         code, doc = call(["case", "--refresh", str(out), "--repo", str(self.repo), "--dry-run"])
         self.assertEqual((code, doc["error"]["code"]), (4, "CASE_FILES_INVALID"))
         self.assertIn("CASE.md: missing section '## Targets'", doc["error"]["problems"])
+
+    def test_partial_run_is_verified_with_its_budgets(self):
+        case_dir = self.tmp / "partial-case"
+        case_dir.mkdir()
+        limited = copy.deepcopy(PROJECT)
+        limited["compute_budget"] = {"max_trace_steps": 1}
+        (case_dir / "project.json").write_text(json.dumps(limited), encoding="utf-8")
+        verified = case_mod.verify_project(case_dir, self.tmp / "partial-run", dict(os.environ))
+        self.assertEqual(verified["execution"], "PARTIAL")
+        self.assertIn("max_trace_steps", verified["budgets_exhausted"])
+        self.assertEqual(verified["check"]["status"], "ACCEPTED")
+        self.assertEqual(case_mod.expected_document(verified)["execution"], "PARTIAL")
+        refused = copy.deepcopy(PROJECT)
+        refused["components"][0]["unknown_field"] = 1
+        (case_dir / "project.json").write_text(json.dumps(refused), encoding="utf-8")
+        with self.assertRaises(C.ContribError) as caught:
+            case_mod.verify_project(case_dir, self.tmp / "refused-run", dict(os.environ))
+        self.assertEqual(caught.exception.code, "PROJECT_REFUSED")
 
     def test_bundle_without_checkout_and_catalog_file_refusal(self):
         outside = self.tmp / "elsewhere"

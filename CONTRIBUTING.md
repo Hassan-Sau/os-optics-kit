@@ -28,8 +28,8 @@ os-optics-kit contrib case my_design.json --name my-case --open-pr  # fork, push
 os-optics-kit contrib tool my_helper.py --name my-tool --dry-run
 ```
 
-`contrib case` normalizes the Project, pins the engine and catalog versions, runs `project check`, `project run`
-and `results targets`, renders the images, writes `CASE.md`, `README.md` and `expected.json`, and produces a
+`contrib case` normalizes the Project, pins the engine and catalog versions, runs it once with `project run`
+(which validates it), renders the images, writes `CASE.md`, `README.md` and `expected.json`, and produces a
 patch with a pull-request description. `--open-pr` uses your own `gh` login; without it you get a bundle directory
 with the patch, which you can apply and push yourself. Step-by-step instructions, including what to tell your
 agent, are in [Contributing with an agent](docs/contributing-with-an-agent.md).

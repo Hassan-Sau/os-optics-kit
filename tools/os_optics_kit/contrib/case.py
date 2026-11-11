@@ -154,35 +154,38 @@ def engine_env(args, workdir: Path, pins: list[str]) -> dict:
 
 
 def verify_project(case_dir: Path, run_dir: Path, env: dict) -> dict:
-    """``project check`` -> ``project run`` -> ``results targets`` on ``case_dir/project.json``."""
-    check_result = C.run(_engine_cmd("project", "check", "project.json"), cwd=case_dir, env=env)
-    check = _json_out(check_result, "os-optics project check")
-    if check_result.returncode != 0 or check.get("status") != "ACCEPTED":
-        raise C.ContribError("PROJECT_REFUSED", "os-optics project check did not accept the Project",
-                             problems=check.get("problems") or [check.get("status")])
-    run_result = C.run(_engine_cmd("project", "run", "project.json", "--out-dir", str(run_dir)), cwd=case_dir, env=env)
-    if run_result.returncode not in (0, 1, 2, 3):
-        raise C.ContribError("RUN_FAILED", f"os-optics project run exited with {run_result.returncode}",
-                             problems=[C._tail(run_result.stdout or run_result.stderr)], exit_code=C.EXIT_VERIFICATION)
-    targets_result = C.run(_engine_cmd("results", "targets", str(run_dir)), env=env)
-    targets = _json_out(targets_result, "os-optics results targets")
-    if targets_result.returncode != 0:
-        raise C.ContribError("RESULTS_UNREADABLE", "os-optics results targets could not read the run",
-                             problems=[targets.get("error") or targets], exit_code=C.EXIT_VERIFICATION)
+    """One ``project run`` of ``case_dir/project.json`` (the Engine validates the Project in that run; exit 65 is
+    its refusal), then the run's target rows read in-process with ``os_optics.results``."""
+    from os_optics.results import ResultsError, load_run
+
+    code, summary, stderr = kit_cases.run_project("project.json", run_dir, env, cwd=case_dir)
+    if code == kit_cases.PROJECT_REFUSED_EXIT:
+        raise C.ContribError("PROJECT_REFUSED", "os-optics project run refused the Project",
+                             problems=(summary or {}).get("problems") or [stderr])
+    if code not in (0, 1, 2, 3):
+        raise C.ContribError("RUN_FAILED", f"os-optics project run exited with {code}",
+                             problems=[stderr], exit_code=C.EXIT_VERIFICATION)
+    try:
+        targets = load_run(run_dir).targets()
+    except ResultsError as exc:
+        raise C.ContribError("RESULTS_UNREADABLE", "the run could not be read", problems=[exc.as_dict()],
+                             exit_code=C.EXIT_VERIFICATION) from None
+    targets = json.loads(json.dumps(targets, default=str))
     execution = (targets.get("outcome") or {}).get("execution") or {}
-    if not execution.get("complete") or execution.get("outcome") != "COMPLETED":
+    if execution.get("outcome") not in kit_cases.EXECUTIONS:
         raise C.ContribError("RUN_INCOMPLETE", "the engine run did not complete; nothing was packaged",
                              problems=[{k: execution.get(k) for k in ("outcome", "termination", "reason")}],
                              exit_code=C.EXIT_VERIFICATION)
     run_info = targets.get("run") or {}
     return {
-        "check": check,
+        "check": {"status": "ACCEPTED"},  # the run validated and accepted the Project
         "targets": targets,
         "engine": run_info.get("engine_version"),
         "engine_build_id": run_info.get("engine_build_id"),
-        "catalog": run_info.get("catalog_version") or check.get("catalog_version"),
+        "catalog": run_info.get("catalog_version") or (summary or {}).get("catalog_version"),
         "status": targets.get("validation_status") or targets.get("engine_status"),
         "execution": execution.get("outcome"),
+        "budgets_exhausted": list((execution.get("budgets") or {}).get("exhausted") or []),
     }
 
 
@@ -217,10 +220,10 @@ def render_images(run_dir: Path, workdir: Path, case_dir: Path, env: dict, warni
 def expected_document(verified: dict) -> dict:
     return {
         "schema": kit_cases.EXPECTED_SCHEMA,
-        "schema_version": 1,
+        "schema_version": kit_cases.EXPECTED_SCHEMA_VERSION,
         "engine": verified["engine"],
         "catalog": verified["catalog"],
-        "status": verified["status"],
+        "execution": verified["execution"],
         "targets": {t["target_id"]: t["assessment"] for t in verified["targets"].get("targets", [])},
     }
 
@@ -321,6 +324,7 @@ def prose_values(name: str, title: str, summary: str, tools: list[str], tags: li
         "tools": ", ".join(tools) if tools else "none",
         "tags": ", ".join(tags) if tags else "none",
         "status": verified["status"],
+        "execution": verified["execution"],
         "targets_rows": targets_rows(targets),
         "results_rows": results_rows(targets),
         "images": "\n\n".join(f"![{alt.get(Path(i).stem, Path(i).stem)}]({i})" for i in images)
@@ -453,6 +457,10 @@ def contribute_case(args) -> dict:
                                  f"{pins[0]}", exit_code=C.EXIT_VERIFICATION)
         if verified["status"] not in ("PASS", "WARNING"):
             warnings.append(f"RUN_STATUS_{verified['status']}: the case records this outcome; say why in CASE.md")
+        if verified["execution"] == "PARTIAL":
+            warnings.append("RUN_EXECUTION_PARTIAL: the run reached "
+                            + (", ".join(verified["budgets_exhausted"]) or "a compute budget")
+                            + "; the baseline records execution PARTIAL; say why in CASE.md")
         C.write_text(case_dir / "expected.json", C.dump_json(expected_document(verified)))
 
         if args.refresh:

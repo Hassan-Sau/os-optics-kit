@@ -2,7 +2,8 @@
 
 A case is a directory ``cases/<name>/`` holding ``project.json`` (an engine-written ProjectDocumentV2 with its
 targets), ``CASE.md`` (flat front matter and fixed sections), ``README.md`` with engine-rendered images and
-``expected.json`` (the verified run status and target assessments), plus optional case scripts, study specs and data.
+``expected.json`` (the verified execution outcome and target assessments), plus optional case scripts, study specs
+and data.
 ``cases.json`` indexes them. The cases ship inside the wheel, so every subcommand works without a clone.
 
 Subcommands (compact JSON on stdout, except ``show``):
@@ -11,7 +12,8 @@ Subcommands (compact JSON on stdout, except ``show``):
   show NAME                        the case's CASE.md
   copy NAME --dest DIR [--force]   copy the case to DIR/NAME
   verify NAME... | --all [--out DIR] [--catalog FILE] [--update-expected]
-                                   project check -> project run -> results targets -> compare with expected.json
+                                   one project run per case, its execution and target assessments compared
+                                   with expected.json (the run status is reported as run_status)
   index --write | --check          generate or validate cases.json and every case's format
 
 Every subcommand takes --root DIR (or OS_OPTICS_KIT_ROOT): a kit checkout to use instead of the installed cases.
@@ -43,11 +45,13 @@ from ._resources import ROOT_ENV, data_root
 INDEX_SCHEMA = "os-optics-kit.cases"
 EXPECTED_SCHEMA = "os-optics-kit.case-expected"
 SCHEMA_VERSION = 1
+#: expected.json version 2: the baseline pins the execution outcome and every target assessment.
+EXPECTED_SCHEMA_VERSION = 2
+EXECUTIONS = ("COMPLETED", "PARTIAL")
 FRONT_MATTER_KEYS = ("name", "title", "summary", "engine", "catalog", "project", "tools", "tags", "license")
 SECTIONS = ("What it shows", "Run", "Targets", "Baseline", "Files")
 REQUIRED_FILES = ("project.json", "CASE.md", "README.md", "expected.json")
 ASSESSMENTS = ("MET", "UNMET", "INDETERMINATE", "NOT_APPLICABLE")
-RUN_STATUSES = ("PASS", "WARNING", "FAIL", "UNKNOWN", "OUT_OF_MODEL_SCOPE", "NOT_APPLICABLE")
 CASE_TOKEN_BUDGET = fm.BUDGETS["CASE.md"]
 SUMMARY_MAX_CHARS = 300
 IMAGE_MAX_BYTES = 400 * 1024
@@ -233,13 +237,15 @@ def check_project(data):
 
 def check_expected(expected, target_ids, meta):
     problems = []
-    keys = {"schema", "schema_version", "engine", "catalog", "status", "targets"}
+    keys = {"schema", "schema_version", "engine", "catalog", "execution", "targets"}
     if not isinstance(expected, dict) or set(expected) != keys:
         return [("EXPECTED_SCHEMA", f"expected.json must have exactly the keys {sorted(keys)}")]
-    if expected["schema"] != EXPECTED_SCHEMA or expected["schema_version"] != SCHEMA_VERSION:
-        problems.append(("EXPECTED_SCHEMA", f"expected.json schema must be {EXPECTED_SCHEMA} version 1"))
-    if expected["status"] not in RUN_STATUSES:
-        problems.append(("EXPECTED_SCHEMA", f"expected.json status {expected['status']!r} is not a run status"))
+    if expected["schema"] != EXPECTED_SCHEMA or expected["schema_version"] != EXPECTED_SCHEMA_VERSION:
+        problems.append(("EXPECTED_SCHEMA", f"expected.json schema must be {EXPECTED_SCHEMA} version "
+                                            f"{EXPECTED_SCHEMA_VERSION}"))
+    if expected["execution"] not in EXECUTIONS:
+        problems.append(("EXPECTED_SCHEMA", f"expected.json execution {expected['execution']!r} is not one of "
+                                            f"{', '.join(EXECUTIONS)}"))
     targets = expected["targets"]
     if not isinstance(targets, dict) or any(v not in ASSESSMENTS for v in targets.values()):
         problems.append(("EXPECTED_SCHEMA", f"expected.json targets must map target ids to {', '.join(ASSESSMENTS)}"))
@@ -388,8 +394,8 @@ def engine_command():
     return [sys.executable, "-m", "os_optics"]
 
 
-def _engine(argv, env, *, json_out=True):
-    done = subprocess.run(engine_command() + argv, capture_output=True, text=True, encoding="utf-8", env=env)
+def _engine(argv, env, *, json_out=True, cwd=None):
+    done = subprocess.run(engine_command() + argv, capture_output=True, text=True, encoding="utf-8", env=env, cwd=cwd)
     document = None
     if json_out:
         try:
@@ -399,17 +405,33 @@ def _engine(argv, env, *, json_out=True):
     return done.returncode, document, done.stderr.strip()[-800:]
 
 
-def actual_outcome(targets_document):
-    run = targets_document.get("run") or {}
-    status = targets_document.get("validation_status") or targets_document.get("engine_status")
-    return {"status": status, "targets": {t["target_id"]: t.get("assessment") for t in targets_document["targets"]},
-            "engine": run.get("engine_version"), "catalog": run.get("catalog_version")}
+#: Exit code of ``os-optics project run`` for a Project the Engine refuses (its problems are on stdout).
+PROJECT_REFUSED_EXIT = 65
+
+
+def run_project(project_file, run_dir, env, *, cwd=None):
+    """One ``os-optics project run PROJECT --out-dir RUN`` process (the Engine validates the Project itself):
+    ``(exit code, the printed run summary or refusal document, stderr tail)``. Exit 65: the Project was refused, the
+    document holds the Engine's ``problems``; exits 0-3: the run completed and the document is its summary."""
+    return _engine(["project", "run", str(project_file), "--out-dir", str(run_dir)], env, cwd=cwd)
+
+
+def actual_outcome(summary):
+    """Baseline fields of a ``project run`` summary: execution outcome, target assessments, Engine version, catalog
+    release, and the aggregate run status (informational)."""
+    runtime = (summary.get("local_validation") or {}).get("runtime") or {}
+    return {"execution": ((summary.get("outcome") or {}).get("execution") or {}).get("outcome"),
+            "targets": {t["target_id"]: t.get("assessment") for t in summary.get("targets") or []},
+            "engine": runtime.get("engine_version"), "catalog": summary.get("catalog_version"),
+            "run_status": summary.get("status")}
 
 
 def compare_outcome(expected, actual):
+    """Differences of a run from its baseline: execution outcome, every target assessment, catalog release."""
     differences = []
-    if actual["status"] != expected["status"]:
-        differences.append({"field": "status", "expected": expected["status"], "actual": actual["status"]})
+    if actual["execution"] != expected.get("execution"):
+        differences.append({"field": "execution", "expected": expected.get("execution"),
+                            "actual": actual["execution"]})
     for target_id in sorted(set(expected["targets"]) | set(actual["targets"])):
         want, got = expected["targets"].get(target_id), actual["targets"].get(target_id)
         if want != got:
@@ -429,26 +451,20 @@ def verify_case(name, out_dir, env, *, root=None, update_expected=False):
         raise CaseError("OUTPUT_EXISTS", f"{work} is not empty; choose another --out directory")
     work.mkdir(parents=True, exist_ok=True)
     run_dir = work / "run"
-    entry = {"name": name, "result": "ERROR", "expected": {"status": expected["status"],
+    entry = {"name": name, "result": "ERROR", "expected": {"execution": expected.get("execution"),
                                                           "targets": expected["targets"]},
              "actual": None, "differences": [], "run": run_dir.as_posix()}
-    code, check, stderr = _engine(["project", "check", str(path / "project.json")], env)
-    if code != 0 or not check or check.get("status") != "ACCEPTED":
-        entry["error"] = {"stage": "project check", "exit": code,
-                          "status": (check or {}).get("status"), "problems": (check or {}).get("problems"),
-                          "stderr": stderr or None}
+    code, summary, stderr = run_project(path / "project.json", run_dir, env)
+    if code == PROJECT_REFUSED_EXIT:
+        entry["error"] = {"stage": "project run", "exit": code, "status": (summary or {}).get("status"),
+                          "problems": (summary or {}).get("problems"), "stderr": stderr or None}
         return entry
-    code, _run, stderr = _engine(["project", "run", str(path / "project.json"), "--out-dir", str(run_dir)], env,
-                                 json_out=False)
-    if code not in (0, 1, 2, 3):
+    if code not in (0, 1, 2, 3) or not summary:
         entry["error"] = {"stage": "project run", "exit": code, "stderr": stderr or None}
         return entry
-    code, targets, stderr = _engine(["results", "targets", str(run_dir)], env)
-    if code != 0 or not targets:
-        entry["error"] = {"stage": "results targets", "exit": code, "stderr": stderr or None}
-        return entry
-    actual = actual_outcome(targets)
-    entry["actual"] = {"status": actual["status"], "targets": actual["targets"]}
+    actual = actual_outcome(summary)
+    entry["actual"] = {"execution": actual["execution"], "targets": actual["targets"]}
+    entry["run_status"] = actual["run_status"]  # informational: not part of MATCH / MISMATCH
     entry["engine"] = {"expected": expected["engine"], "run": actual["engine"]}
     entry["differences"] = compare_outcome(expected, actual)
     entry["result"] = "MISMATCH" if entry["differences"] else "MATCH"
@@ -468,8 +484,8 @@ def write_expected(path, actual, run_dir):
     path = Path(path)
     _require_checkout(path)
     shutil.copyfile(Path(run_dir) / "project.json", path / "project.json")
-    expected = {"schema": EXPECTED_SCHEMA, "schema_version": SCHEMA_VERSION, "engine": actual["engine"],
-                "catalog": actual["catalog"], "status": actual["status"], "targets": actual["targets"]}
+    expected = {"schema": EXPECTED_SCHEMA, "schema_version": EXPECTED_SCHEMA_VERSION, "engine": actual["engine"],
+                "catalog": actual["catalog"], "execution": actual["execution"], "targets": actual["targets"]}
     (path / "expected.json").write_text(normalized_json(expected), encoding="utf-8", newline="\n")
     text = (path / "CASE.md").read_text(encoding="utf-8")
     text = re.sub(r"(?m)^engine:.*$", f"engine: {actual['engine']}", text, count=1)

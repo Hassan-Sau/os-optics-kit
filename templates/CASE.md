@@ -39,7 +39,8 @@ os-optics results targets run
 
 ## Baseline
 
-os-optics {{engine}}, {{catalog_text}}: run status {{status}} (`expected.json`).
+os-optics {{engine}}, {{catalog_text}}: execution {{execution}} and every target assessment (`expected.json`);
+run status {{status}}.
 `os-optics-kit cases verify {{name}}` repeats the run and compares it.
 
 ## Files

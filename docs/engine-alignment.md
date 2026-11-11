@@ -10,7 +10,7 @@ How os-optics-kit stays aligned with the os-optics engine and the optical catalo
 | Supported engine | `pyproject.toml` dependency, `baseline.json` `engine.requirement` | One engine minor series, e.g. `>=0.13,<0.14`; both files state the same range |
 | Verified engine | `baseline.json` `engine.verified_version` | The os-optics release the tests, tools and cases were verified with; inside the supported range |
 | Catalog snapshot | `baseline.json` `catalog` | The public catalog release the cases run on, with its schema version and SHA-256 |
-| Case baseline | each case's `CASE.md` (`engine`, `catalog`) and `expected.json` | The engine and catalog the case was verified with, and its verified run status and target assessments |
+| Case baseline | each case's `CASE.md` (`engine`, `catalog`) and `expected.json` | The engine and catalog the case was verified with, and its verified execution outcome and target assessments |
 | CI Python versions | `baseline.json` `python` | Oldest supported and newest; the CI matrices read this list |
 
 `python scripts/check_repo.py` fails when `baseline.json`, `pyproject.toml` and `_version.py` disagree, or when a

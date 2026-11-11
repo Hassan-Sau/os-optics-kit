@@ -5,7 +5,7 @@ The case and skill pages come from the contributor templates templates/CASE.md, 
 templates/SKILL.md (``_common.render_template``). Their ``{{key}}`` placeholders:
 
 CASE.md / README.case.md: name, title, summary, what_it_shows, engine, catalog, catalog_text, tools, tags, status,
-targets_rows, results_rows, images, extra_files (``case.prose_values``).
+execution, targets_rows, results_rows, images, extra_files (``case.prose_values``).
 SKILL.md: name, description, kind, command, requires, kit_version, when_to_use, when_not_to_use, inputs, outputs,
 example, limits (``tool.skill_values``).
 """

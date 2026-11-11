@@ -12,7 +12,7 @@ in `cases/<name>/` (kebab-case) and ship inside the `os-optics-kit` wheel, so `o
 | `CASE.md` | The agent-facing description: flat front matter and five sections, at most 700 tokens (ceil(characters / 4)). |
 | `README.md` | The illustrated page for people; `README.zh-CN.md` is its Simplified Chinese version. |
 | `images/*.png` | At most 4 images, each at most 400 KB, rendered by the engine from the case's own run and shown in the README. |
-| `expected.json` | The verified outcome: run status and every target assessment. |
+| `expected.json` | The verified outcome: execution outcome and every target assessment. |
 | optional | Case scripts (`workflow.py` or other `*.py`, importing only `os_optics`, `os_optics_kit` and their own pinned requirements), `studies/*.json`, `data/`, `requirements-*.txt`. |
 
 No file is larger than 1 MB. Run directories, GLB scenes, CSV dumps and the catalog are never committed, and no case
@@ -57,14 +57,15 @@ Copy the chosen PNG files to `images/` and show each one in the README.
   "catalog": null,
   "engine": "0.13.0",
   "schema": "os-optics-kit.case-expected",
-  "schema_version": 1,
-  "status": "PASS",
+  "schema_version": 2,
+  "execution": "COMPLETED",
   "targets": {"spot_radius": "MET"}
 }
 ```
 
-`status` is the run status and `targets` maps every target of `project.json` to its assessment (`MET`, `UNMET`,
-`INDETERMINATE` or `NOT_APPLICABLE`), both from `os-optics results targets RUN`. `engine` and `catalog` (`null` for a
+`execution` is the run's execution outcome (`COMPLETED`, or `PARTIAL` when a compute budget was reached) and
+`targets` maps every target of `project.json` to its assessment (`MET`, `UNMET`, `INDETERMINATE` or
+`NOT_APPLICABLE`), both from the run's summary. `engine` and `catalog` (`null` for a
 catalog-free case) equal the `engine` and `catalog` lines of `CASE.md`; a catalog case's components pin exactly that
 release. `baseline.json` at the repository root records the engine requirement, the verified engine version and the
 catalog release with its SHA-256 for the whole collection.
@@ -77,9 +78,10 @@ os-optics-kit cases verify --all --out runs
 os-optics-kit cases verify beam-expander --catalog public_optical_catalog.v2.json
 ```
 
-`verify` runs `os-optics project check`, `os-optics project run` and `os-optics results targets` with the installed
-engine and compares the run status, every target assessment and the catalog release with `expected.json`. It prints
-compact JSON and exits 0 when every case matches, 1 on a mismatch and 4 when the request is refused. `--catalog FILE`
+`verify` runs `os-optics project run` once per case with the installed engine (the run validates the Project; a
+refused Project is reported at stage `project run` with the engine's problems) and compares the execution outcome,
+every target assessment and the catalog release with `expected.json`; the aggregate run status is reported as
+`run_status` and is not compared. It prints compact JSON and exits 0 when every case matches, 1 on a mismatch and 4 when the request is refused. `--catalog FILE`
 imports a catalog release file into a private store under the output directory before running, leaving the default
 store untouched.
 

@@ -25,7 +25,7 @@ os-optics-kit skills show contrib-tool
 A case is a design that runs: a ProjectDocumentV2 with its targets, verified by the engine.
 
 1. `os-optics-kit contrib case design.json --name my-case --tags tag-a,tag-b --dry-run`
-   normalizes the design, runs `os-optics project check`, `project run` and `results targets`, renders two views
+   normalizes the design, runs it once with `os-optics project run` (which validates it), renders two views
    with `os-optics view --snapshot`, and writes `contrib-case-my-case/` with `case/` (project.json, CASE.md,
    README.md, expected.json, images/), the patch, `PR_BODY.md` and `bundle.json`.
 2. The agent replaces the generated summary and "What it shows" in `case/CASE.md` and the intro of
@@ -33,8 +33,9 @@ A case is a design that runs: a ProjectDocumentV2 with its targets, verified by 
 3. `os-optics-kit contrib case --refresh contrib-case-my-case` re-runs the engine, checks the case format
    (CASE.md within 700 tokens, required sections, at most 4 images of 400 KB) and rebuilds the patch.
 
-The case records the engine version and the catalog release its components pin; `expected.json` holds the run
-status and every target assessment, which `os-optics-kit cases verify` compares on every later run.
+The case records the engine version and the catalog release its components pin; `expected.json` holds the
+execution outcome and every target assessment, which `os-optics-kit cases verify` compares on every later run. A
+run that reached a compute budget (`PARTIAL`) is packaged with the warning `RUN_EXECUTION_PARTIAL`.
 
 ## Contribute a tool
 

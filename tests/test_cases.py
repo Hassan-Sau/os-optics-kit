@@ -143,6 +143,15 @@ class FormatCheckTests(unittest.TestCase):
         expected["targets"]["spot_radius"] = "PASSED"
         (self.case / "expected.json").write_text(C.normalized_json(expected), encoding="utf-8", newline="\n")
         self.assertIn("EXPECTED_SCHEMA", self.codes())
+        # version 1 (the aggregate status in place of the execution) is no longer a baseline
+        old = load(self.case / "expected.json")
+        old["targets"]["spot_radius"] = "MET"
+        old = {**{k: v for k, v in old.items() if k != "execution"}, "schema_version": 1, "status": "PASS"}
+        (self.case / "expected.json").write_text(C.normalized_json(old), encoding="utf-8", newline="\n")
+        self.assertIn("EXPECTED_SCHEMA", self.codes())
+        bad = {**{k: v for k, v in old.items() if k != "status"}, "schema_version": 2, "execution": "FAILED"}
+        (self.case / "expected.json").write_text(C.normalized_json(bad), encoding="utf-8", newline="\n")
+        self.assertIn("EXPECTED_SCHEMA", self.codes())
 
     def test_baseline_and_catalog_pins_agree(self):
         self.edit("CASE.md", "catalog: none", "catalog: 2026-10-28.1")
@@ -251,7 +260,8 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual((document["status"], document["counts"]), ("MATCH", {"MATCH": 1, "MISMATCH": 0, "ERROR": 0}))
         entry = document["cases"][0]
         expected = load(CASES / CATALOG_FREE / "expected.json")
-        self.assertEqual(entry["actual"], {"status": expected["status"], "targets": expected["targets"]})
+        self.assertEqual(entry["actual"], {"execution": expected["execution"], "targets": expected["targets"]})
+        self.assertEqual(entry["run_status"], "PASS")  # reported, not compared
         self.assertEqual(entry["differences"], [])
 
     def test_mismatch_is_reported_and_update_expected_records_the_run(self):
@@ -259,14 +269,18 @@ class VerifyTests(unittest.TestCase):
             root = copy_tree(["interop-diffraction"], Path(tmp) / "kit")
             case = root / "interop-diffraction"
             expected = load(case / "expected.json")
-            wrong = dict(expected, status="PASS", targets={"spot": "UNMET"})
+            wrong = dict(expected, execution="PARTIAL", targets={"spot": "UNMET"})
             (case / "expected.json").write_text(C.normalized_json(wrong), encoding="utf-8", newline="\n")
             project = load(case / "project.json")
             (case / "project.json").write_text(json.dumps(project), encoding="utf-8")
             document = C.verify(["interop-diffraction"], out=Path(tmp) / "runs", root=root)
             self.assertEqual(document["status"], "MISMATCH")
             self.assertEqual(sorted(d["field"] for d in document["cases"][0]["differences"]),
-                             ["status", "targets.spot"])
+                             ["execution", "targets.spot"])
+            # the aggregate run status alone is not compared
+            self.assertEqual(C.compare_outcome(
+                expected, {"execution": expected["execution"], "targets": expected["targets"],
+                           "catalog": expected["catalog"], "run_status": "WARNING"}), [])
             document = C.verify(["interop-diffraction"], out=Path(tmp) / "runs2", root=root, update_expected=True)
             self.assertEqual(document["cases"][0]["updated"], ["project.json", "expected.json", "CASE.md"])
             self.assertEqual(load(case / "expected.json"), expected)
@@ -284,6 +298,19 @@ class VerifyTests(unittest.TestCase):
             (Path(tmp) / CATALOG_FREE / "keep.txt").write_text("x", encoding="utf-8")
             code, _out, err = call(["verify", CATALOG_FREE, "--out", tmp])
         self.assertEqual((code, json.loads(err)["error"]["code"]), (4, "OUTPUT_EXISTS"))
+
+    def test_refused_project_is_reported_at_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree([CATALOG_FREE], Path(tmp) / "kit")
+            project = load(root / CATALOG_FREE / "project.json")
+            project["components"][0]["unknown_field"] = 1
+            (root / CATALOG_FREE / "project.json").write_text(C.normalized_json(project), encoding="utf-8",
+                                                              newline="\n")
+            document = C.verify([CATALOG_FREE], out=Path(tmp) / "runs", root=root)
+        entry = document["cases"][0]
+        self.assertEqual((entry["result"], entry["error"]["stage"], entry["error"]["exit"]),
+                         ("ERROR", "project run", 65))
+        self.assertEqual({p["code"] for p in entry["error"]["problems"]}, {"PROJECT_INVALID"})
 
 
 def workflow_module(case):
