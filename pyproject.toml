@@ -41,6 +41,7 @@ Homepage = "https://opensci-optics.com/"
 Documentation = "https://github.com/JunLin615/os-optics-kit#readme"
 Source = "https://github.com/JunLin615/os-optics-kit"
 Issues = "https://github.com/JunLin615/os-optics-kit/issues"
+Changelog = "https://github.com/JunLin615/os-optics-kit/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "tools/os_optics_kit/_version.py"
@@ -81,6 +82,7 @@ include = [
   "alignment-checks.json",
   "README.md",
   "README.zh-CN.md",
+  "CHANGELOG.md",
   "AGENT_GUIDE.md",
   "CONTRIBUTING.md",
   "LICENSE",

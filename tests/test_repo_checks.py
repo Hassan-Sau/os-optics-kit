@@ -46,6 +46,7 @@ class RepositoryTree(unittest.TestCase):
         self.write("docs/en/guide.md", "See [the case](../../cases/demo/CASE.md#run) and [top](#guide).\n")
         self.write("docs/zh-CN/guide.md", "见[案例](../../cases/demo/CASE.md)。\n")
         self.write("cases/demo/CASE.md", "---\nname: demo\n---\n## Run\n")
+        self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n\nRequires `os-optics>=0.12,<0.13`.\n\n### Added\n\n- x\n")
         (self.root / "cases/demo/images").mkdir(parents=True)
         (self.root / "cases/demo/images/plot.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 100)
 
@@ -108,6 +109,45 @@ class RepositoryCheckTests(RepositoryTree):
         self.assertEqual(self.problems("pins"), [("pins", "docs/en/guide.md", 1), ("pins", "docs/en/guide.md", 1),
                                                  ("pins", "docs/en/guide.md", 3), ("pins", "docs/en/guide.md", 4),
                                                  ("pins", "docs/en/guide.md", 4)])
+
+    def test_engine_ranges_must_equal_the_baseline_requirement(self):
+        self.write("docs/en/guide.md", 'Requires `os-optics>=0.12,<0.13`; "os-optics[protected] >= 0.12, < 0.14";\n'
+                                       "the kit range os-optics-kit>=0.2,<0.3 is not an engine range;\n"
+                                       'os-optics==0.12.0 is a pin; ["os-optics<0.13,>=0.12"]\n'
+                                       "recover with python -m pip install \"os-optics>=0.11,<0.12\"\n")
+        self.write("tests/test_x.py", '"os-optics>=0.6,<0.7"\n')
+        self.write("scripts/x.py", '"os-optics>=0.7,<0.8"\n')
+        self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n\nRequires `os-optics>=0.12,<0.13`.\n\n"
+                                   "## 0.0.9\n\nRequires `os-optics>=0.11,<0.12`.\n")
+        self.assertEqual(self.problems("ranges"), [("ranges", "docs/en/guide.md", 1),
+                                                   ("ranges", "docs/en/guide.md", 4)])
+        self.assertEqual(self.problems(), [("ranges", "docs/en/guide.md", 1), ("ranges", "docs/en/guide.md", 4)])
+
+    def test_changelog_has_a_section_for_the_kit_version_newest_first(self):
+        for text, fragment in (
+            (None, "missing"),
+            ("# Changelog\n\n## 0.0.9\n\n- x\n", "no section '## 0.1.0'"),
+            ("# Changelog\n\n## 0.0.9\n\n## 0.1.0\n", "follows 0.0.9"),
+            ("# Changelog\n\n## 0.1.0\n\n## 0.1.0\n", "appears twice"),
+            ("# Changelog\n\n## Unreleased\n\n## 0.1.0\n", "not a release version"),
+            ("# Changelog\n\n## 0.2.0\n\n## 0.1.0\n", "comes first"),
+        ):
+            with self.subTest(fragment=fragment):
+                if text is None:
+                    (self.root / "CHANGELOG.md").unlink()
+                else:
+                    self.write("CHANGELOG.md", text)
+                messages = [item["message"] for item in check_repo.run_checks(self.root)["problems"]
+                            if item["check"] == "changelog"]
+                self.assertTrue(any(fragment in message for message in messages), messages)
+                self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n")
+                self.assertEqual(self.problems("changelog"), [])
+        self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n\n### Added\n\n## 0.0.10\n\n## 0.0.9\n")
+        self.assertEqual(self.problems("changelog"), [])
+        # a version bump without its section fails
+        self.write("baseline.json", json.dumps(dict(BASELINE, kit_version="0.1.1")))
+        self.write("tools/os_optics_kit/_version.py", '__version__ = "0.1.1"\n')
+        self.assertEqual(self.problems("changelog"), [("changelog", "CHANGELOG.md", None)])
 
     def test_language_pairs(self):
         (self.root / "README.zh-CN.md").unlink()
@@ -173,8 +213,16 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_this_repository_has_no_size_path_secret_json_or_baseline_problems(self):
         problems = [item for item in check_repo.run_checks(ROOT)["problems"]
-                    if item["check"] in {"size", "forbidden", "paths", "secrets", "json", "baseline", "pins"}]
+                    if item["check"] in {"size", "forbidden", "paths", "secrets", "json", "baseline", "pins",
+                                         "ranges", "changelog"}]
         self.assertEqual(problems, [])
+
+    def test_the_source_archive_carries_the_changelog(self):
+        import tomllib
+        include = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["hatch"]["build"][
+            "targets"]["sdist"]["include"]
+        self.assertIn("CHANGELOG.md", include)
+        self.assertIn("CHANGELOG.md", check_dist.SDIST_REQUIRED)
 
 
 class DistributionCheckTests(unittest.TestCase):
