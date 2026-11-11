@@ -138,8 +138,8 @@
       "command": "os-optics-kit sensitivity",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sensitivity/SKILL.md",
-      "tokens": 768,
-      "sha256": "840e436f31a9da2904d52488ff2cec9d3a59c47fa1d38dc29da760ae2a7add7f"
+      "tokens": 775,
+      "sha256": "578fecc457d9288082c448e833fb693a2e43539354812a15003bcd6a02665c52"
     },
     {
       "name": "study",

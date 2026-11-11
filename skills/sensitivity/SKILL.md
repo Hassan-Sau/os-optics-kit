@@ -25,7 +25,7 @@ kind: tool
 - `base_project` (relative to the spec; `--base` overrides) or `design` `{builder, arguments}` (a builder
   of `os_optics_kit.optical_designs`).
 - `targets` (default: all), `max_evaluations` (optional cap; the study needs 1 + 2 x steps per parameter).
-- `parameters`: `{name, unit, ops, nominal?, steps? (>= 2 sizes), scale?}`; `ops` use the `edit`
+- `parameters`: `{name, unit, ops, nominal?, steps? (>= 1 size; two enable the step check), scale?}`; `ops` use the `edit`
   vocabulary with `"$value"` = nominal + perturbation; at zero perturbation they must reproduce the base
   Project hash (`NOMINAL_MISMATCH` otherwise).
 - Optional `consistency_threshold`, `resolution` per target.

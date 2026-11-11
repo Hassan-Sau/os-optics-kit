@@ -480,7 +480,7 @@ os-optics-kit sensitivity SPEC.json --out STUDY_DIR [--base BASE.json] [--no-plo
 | --- | --- |
 | `base_project` or `design` | Project file, or `{"builder": NAME, "arguments": {...}}` from `os_optics_kit.optical_designs` (catalog-free) |
 | `targets` | target ids to differentiate (unknown ids refused: `TARGET_UNKNOWN`) |
-| `parameters` | `{name, unit, ops, nominal = 0, steps (≥ 2; numbers, quantities or {"relative": r}), scale?}` |
+| `parameters` | `{name, unit, ops, nominal = 0, steps (≥ 1; numbers, quantities or {"relative": r}; with one step the consistency check is unavailable: `consistency` null, flag `STEP_CHECK_UNAVAILABLE`), scale?}` |
 | `consistency_threshold` | relative difference of two step estimates that is flagged (default 0.01) |
 | `resolution` | per-target change treated as none, e.g. `{"far_position_u": {"value": 1, "unit": "nm"}}` |
 | `max_evaluations` | optional cap (default: none); 1 + 2·(total steps) must fit a stated cap |

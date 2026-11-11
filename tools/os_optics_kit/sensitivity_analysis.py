@@ -17,7 +17,8 @@ SPEC.json (keys; quantities are a bare number in the stated unit or {"value": x,
                 "translation_mm": [0, 0, "$value"]}],
        "nominal": 0,                             # parameter value of the base Project (default 0: the ops move by
                                                  # the perturbation; give the field's value for set_* ops)
-       "steps": [0.01, 0.1],                     # >= 2 distinct step sizes h (or {"relative": r}: r * |nominal|)
+       "steps": [0.01, 0.1],                     # >= 1 distinct step sizes h (or {"relative": r}: r * |nominal|);
+                                                 # the step-consistency check needs two (default: two steps)
        "scale": {"value": 50, "unit": "um"}}     # optional normalization scale, e.g. the parameter's tolerance
     ],
     "consistency_threshold": 0.01,               # relative difference of the two step estimates that is flagged
@@ -376,8 +377,8 @@ def _steps(parameter, raw, common):
             raw, source = [{"value": 0.01, "unit": "deg"}, {"value": 0.1, "unit": "deg"}], "default rotation"
         else:
             raw, source = [{"relative": 1e-3}, {"relative": 1e-2}], "default relative"
-    if not isinstance(raw, list) or len(raw) < 2:
-        raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: steps must list at least two step sizes")
+    if not isinstance(raw, list) or not raw:
+        raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: steps must list one or more step sizes")
     steps = []
     for i, item in enumerate(raw):
         if isinstance(item, dict) and set(item) == {"relative"}:

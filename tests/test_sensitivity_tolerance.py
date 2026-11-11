@@ -164,6 +164,19 @@ class SensitivityAgainstClosedFormTests(unittest.TestCase):
         self.assertLess(abs(mrad["derivative"] / (expected * 180.0 / math.pi / 1000.0) - 1.0), 1e-6)
         self.assertAlmostEqual(mrad["scaled"], mrad["derivative"] * 1.0, places=18)
 
+    def test_one_step_reports_the_derivative_without_the_step_check(self):
+        summary = sa.run_sensitivity({
+            "targets": ["transmitted_power"],
+            "parameters": [{"name": "hwp_angle", "unit": "deg", "steps": [0.01], "ops": rotate("HWP", [0, 0, 1])}]},
+            self.dir / "one-step", base=D.polarization_control(hwp_angle_deg=10.0), plots=False, report=False)
+        self.assertEqual(summary["counts"]["requested"], 3)
+        entry = pair(summary, "hwp_angle", "transmitted_power")
+        self.assertEqual((entry["method"], entry["primary_step"]), ("central", 0.01))
+        self.assertLess(abs(entry["derivative"] / malus_slope_w_per_deg(10.0) - 1.0), 1e-6)
+        self.assertIsNone(entry["consistency"])
+        self.assertEqual(entry["flags"], ["STEP_CHECK_UNAVAILABLE"])
+        self.assertIsNotNone(entry["second_difference"])
+
     def test_extremum_reports_second_difference(self):
         entry = pair(self.peak, "hwp_angle", "transmitted_power")
         self.assertIn("NEAR_EXTREMUM", entry["flags"])
@@ -290,7 +303,9 @@ class SensitivityRefusalTests(unittest.TestCase):
         self.refused(self.spec(scale={"value": 1, "unit": "mW"}), "UNIT_INCOMPATIBLE")
 
     def test_spec_refusals(self):
-        self.refused(self.spec(steps=[0.1]), "SPEC_INVALID")
+        self.refused(self.spec(steps=[]), "SPEC_INVALID")
+        self.refused(self.spec(steps=0.1), "SPEC_INVALID")
+        self.refused(self.spec(steps=[0.1, 0.1]), "SPEC_INVALID")
         self.refused(self.spec(steps=[0.1, -0.2]), "SPEC_INVALID")
         self.refused({**self.spec(), "max_evaluations": 4}, "BUDGET_EXCEEDED")
         self.refused({**self.spec(), "targets": ["nope"]}, "TARGET_UNKNOWN")
