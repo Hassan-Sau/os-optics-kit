@@ -15,8 +15,8 @@ SPEC.json (keys; quantities are a bare number in the stated unit or {"value": x,
       {"name": "L2_axial", "unit": "mm",         # unit of nominal, steps, scale and the "$value" placeholder
        "ops": [{"op": "transform", "selector": {"ids": ["L2"]}, "frame": {"component": "L2"},
                 "translation_mm": [0, 0, "$value"]}],
-       "nominal": 0,                             # parameter value of the base Project (default 0: the ops move by
-                                                 # the perturbation; give the field's value for set_* ops)
+       "nominal": 0,                             # parameter value of the base Project; omitted: read from the
+                                                 # field the set_* ops write, 0 for transform ops
        "steps": [0.01, 0.1],                     # >= 1 distinct step sizes h (or {"relative": r}: r * |nominal|);
                                                  # the step-consistency check needs two (default: two steps)
        "scale": {"value": 50, "unit": "um"}}     # optional normalization scale, e.g. the parameter's tolerance
@@ -31,9 +31,11 @@ Parameters use the edit vocabulary of os-optics-kit edit and the placeholder syn
 or {"$value": {"scale", "offset"}}), substituted with nominal + perturbation. Position: op "transform" with
 "translation_mm" and an explicit "frame" (e.g. {"component": "L2"}: along the element's own axes). Angle: op
 "transform" with "rotation": {"axis": [...], "angle_deg": "$value"} and explicit "frame" and "pivot" (angle units
-deg/rad/mrad/urad). Scalar fields: set_* ops with "nominal" equal to the base value. Before any run the ops of every
-parameter at zero perturbation must reproduce the base Project hash (else NOMINAL_MISMATCH), every sample's ops must
-normalize (unit errors refused) and the base Project must pass json_api.check_project.
+deg/rad/mrad/urad). Scalar fields: set_* ops; an omitted "nominal" is the base Project's value of the field the ops
+write (converted to the parameter's unit, a {"$value": {scale, offset}} rule inverted; nominal_source "base"), and
+fields with different base values refuse the parameter (NOMINAL_AMBIGUOUS). Before any run a stated nominal must
+reproduce the base Project hash at zero perturbation (else NOMINAL_MISMATCH, with the base values), every sample's
+ops must normalize (unit errors refused) and the base Project must pass json_api.check_project.
 Default steps when "steps" is omitted: 0.01 and 0.1 mm for translations, 0.01 and 0.1 deg for rotations, relative
 1e-3 and 1e-2 of |nominal| for other fields.
 
@@ -140,8 +142,12 @@ def resolve_base(spec, *, spec_dir=None, base=None, base_path=None, build=None):
     raise wc.WorkflowError("SPEC_INVALID", "give base_project or design in the spec, or --base")
 
 
-def common_parameter(parameter, index, *, build=None):
-    """Name, unit, nominal (in the parameter's unit) and op templates of one parameter."""
+def common_parameter(parameter, index, *, build=None, base=None):
+    """Name, unit, nominal (in the parameter's unit), its source and op templates of one parameter.
+
+    ``nominal_source``: ``given`` (stated in the spec), ``base`` (omitted, read from the field its set_* ops edit in
+    the ``base`` document, ``base_nominal``) or ``default`` (omitted: 0, for transform ops, which move by the
+    perturbation, for a build function, and without a base document)."""
     if not isinstance(parameter, dict):
         raise wc.WorkflowError("SPEC_INVALID", f"parameters[{index}] must be an object")
     name = parameter.get("name")
@@ -151,14 +157,93 @@ def common_parameter(parameter, index, *, build=None):
     if unit is not None and unit not in wc.UNITLESS and unit not in KNOWN_UNITS:
         raise wc.WorkflowError("UNIT_UNKNOWN", f"parameter {name!r}: unknown unit {unit!r}; known: "
                                f"{list(KNOWN_UNITS)} or omitted for a plain number", unit=unit, parameter=name)
-    nominal = quantity(parameter.get("nominal", 0.0), unit, f"parameter {name} nominal")
     ops = parameter.get("ops")
     if build is None:
         if not isinstance(ops, list) or not ops:
             raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: ops must be a non-empty list of op templates")
         if sweep.substitute(ops, 0.0, unit) == sweep.substitute(ops, 1.0, unit):
             raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: the ops contain no \"$value\" placeholder")
-    return {"name": name, "unit": unit, "nominal": nominal, "ops": ops or []}
+    if "nominal" in parameter:
+        nominal, source = quantity(parameter["nominal"], unit, f"parameter {name} nominal"), "given"
+    else:
+        found = None if build is not None or base is None else base_nominal(base, {"name": name, "unit": unit,
+                                                                                    "ops": ops})
+        nominal, source = (0.0, "default") if found is None else (found, "base")
+    return {"name": name, "unit": unit, "nominal": nominal, "nominal_source": source, "ops": ops or []}
+
+
+#: placeholder values of the two probe edits ``base_nominal`` applies to find the fields a parameter's ops write
+_PROBES = (1.0, 2.0)
+
+
+def _written_fields(before, after, document):
+    """``{(kind, id, path, index): (base value, written value, field unit)}`` of the numeric fields that differ."""
+    from .edit_project import TARGET_VALUE_KEYS, _affected
+
+    targets = {t.get("target_id"): t for t in after.get("targets") or []}
+    out = {}
+    for entry in _affected(before, after):
+        for field in entry["fields"]:
+            key = field["path"].split(".")[-1]
+            unit = (targets.get(entry["id"], {}).get("unit") if entry["kind"] == "target"
+                    and key in TARGET_VALUE_KEYS else wc.field_unit(key))
+            old, new = field["before"], field["after"]
+            pairs = (list(enumerate(zip(old, new))) if isinstance(old, list) and isinstance(new, list)
+                     and len(old) == len(new) else [(None, (old, new))])
+            for index, (a, b) in pairs:
+                if a != b and isinstance(b, (int, float)) and not isinstance(b, bool):
+                    out[(entry["kind"], entry["id"], field["path"], index)] = (a, b, unit)
+    return out
+
+
+def base_nominal(document, parameter):
+    """The parameter value that reproduces ``document``: read from the scalar fields its set_* ops write (a
+    ``changes`` field of set_source_model / set_observation / set_target, a ``position_mm`` component of
+    set_component_pose / set_observation_pose, a compute_budget field), converted from the field's schema unit (the
+    target's unit for target bounds) to the parameter's unit, with a ``{"$value": {scale, offset}}`` rule inverted.
+    ``None`` for transform ops (they move by the perturbation) and when no written field has a number in the base.
+    Placeholders whose fields give different values refuse the parameter (``NOMINAL_AMBIGUOUS``)."""
+    ops, unit, name = parameter["ops"], parameter["unit"], parameter["name"]
+    if any(isinstance(op, dict) and op.get("op") == "transform" for op in ops):
+        return None
+    probes = []
+    for value in _PROBES:
+        try:
+            probes.append(apply_edits(document, sweep.substitute(copy.deepcopy(ops), value, unit),
+                                      validate=False)["project"])
+        except EditError as exc:
+            raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: {exc}", parameter=name,
+                                   error=exc.as_dict()) from None
+    first, second = (_written_fields(document, probe, document) for probe in probes)
+    candidates = {}
+    for key in sorted(set(first) | set(second), key=repr):
+        base_value, _, field_unit = (first.get(key) or second[key])
+        if isinstance(base_value, bool) or not isinstance(base_value, (int, float)):
+            continue
+        if key not in first or key not in second:
+            continue  # a probe value equal to the base value: the field is still found by the other probe
+        written = [first[key][1], second[key][1]]
+
+        def in_parameter_unit(value, field_unit=field_unit):
+            if field_unit is None or unit is None or unit in wc.UNITLESS:
+                return float(value)
+            return float(wc.convert(value, field_unit, unit, path=f"parameter {name} nominal"))
+
+        x_base = in_parameter_unit(base_value)
+        x1, x2 = (in_parameter_unit(v) for v in written)
+        if math.isclose(x1, _PROBES[0], rel_tol=1e-12) and math.isclose(x2, _PROBES[1], rel_tol=1e-12):
+            nominal = x_base  # plain "$value": the field holds the parameter value itself
+        else:
+            slope = (x2 - x1) / (_PROBES[1] - _PROBES[0])
+            nominal = _PROBES[0] + (x_base - x1) / slope
+        candidates[".".join(str(part) for part in key if part is not None)] = nominal
+    if not candidates:
+        return None
+    values = sorted(set(candidates.values()))
+    if len(values) > 1:
+        raise wc.WorkflowError("NOMINAL_AMBIGUOUS", f"parameter {name!r}: the fields its ops write hold different "
+                               "base values; state the parameter's nominal", parameter=name, base_values=candidates)
+    return values[0]
 
 
 def quantity(value, unit, path):
@@ -211,12 +296,21 @@ def check_base(document, parameters, *, build=None):
         except EditError as exc:
             raise wc.WorkflowError("SPEC_INVALID", f"parameter {parameter['name']!r}: {exc}",
                                    parameter=parameter["name"], error=exc.as_dict()) from None
+        if parameter.get("nominal_source") == "base":
+            continue  # the nominal was read from the base: the zero-offset ops write the base values back
         if wc.check(zero).get("project_hash") != checked["project_hash"]:
             mismatched.append(parameter["name"])
     if mismatched:
+        base_values = {}
+        for parameter in parameters:
+            if parameter["name"] in mismatched:
+                try:
+                    base_values[parameter["name"]] = base_nominal(document, parameter)
+                except wc.WorkflowError as exc:
+                    base_values[parameter["name"]] = exc.details.get("base_values")
         raise wc.WorkflowError("NOMINAL_MISMATCH", "at zero perturbation the ops of these parameters change the base "
-                               "Project; set each parameter's nominal to the base value of the field it edits",
-                               parameters=mismatched)
+                               "Project; set each parameter's nominal to the base value of the field it edits, or "
+                               "omit it to use the base value", parameters=mismatched, base_values=base_values)
     return checked
 
 
@@ -396,15 +490,16 @@ def _steps(parameter, raw, common):
     return sorted(steps), source
 
 
-def normalize_spec(spec, *, build=None):
+def normalize_spec(spec, *, build=None, base=None):
     """Validated parameters, steps, scales, budget; raises WorkflowError (SPEC_INVALID, UNIT_*, BUDGET_EXCEEDED,
-    STEP_REQUIRED) before anything runs."""
+    STEP_REQUIRED, NOMINAL_AMBIGUOUS) before anything runs. ``base``: the base Project, from which an omitted
+    nominal is read (``common_parameter``)."""
     parameters = spec.get("parameters")
     if not isinstance(parameters, list) or not parameters:
         raise wc.WorkflowError("SPEC_INVALID", "parameters must list at least one parameter")
     out, names = [], set()
     for index, parameter in enumerate(parameters):
-        common = common_parameter(parameter, index, build=build)
+        common = common_parameter(parameter, index, build=build, base=base)
         if common["name"] in names:
             raise wc.WorkflowError("SPEC_INVALID", f"duplicate parameter name {common['name']!r}")
         names.add(common["name"])
@@ -563,9 +658,9 @@ def plan_sensitivity(spec, study_dir, *, base=None, build=None, base_path=None, 
                      resume=False, plots=True, report=True, outputs=None):
     """Validate ``spec`` and write the planned study: s0000 nominal, then per parameter and step the -h and +h
     samples, every request written before any run. Returns the study directory."""
-    normalized = normalize_spec(spec, build=build)
-    parameters = normalized["parameters"]
     document, base_info = resolve_base(spec, spec_dir=spec_dir, base=base, base_path=base_path, build=build)
+    normalized = normalize_spec(spec, build=build, base=document)
+    parameters = normalized["parameters"]
     if build is not None:
         document = build({p["name"]: p["nominal"] for p in parameters})
     checked = check_base(document, parameters, build=build)
@@ -719,7 +814,8 @@ def aggregate_sensitivity(study_dir, *, plots=None, report=None):
                     "targets": [{k: t.get(k) for k in ("id", "value", "unit", "status", "assessment", "quantity_state", "power_upper_bound_W")} for t in nominal["targets"]
                                 if t["id"] in targets],
                     "run_dir": rows[0]["run_dir"]},
-        "parameters": [{"name": p["name"], "unit": p["unit"], "nominal": p["nominal"], "steps": p["steps"],
+        "parameters": [{"name": p["name"], "unit": p["unit"], "nominal": p["nominal"],
+                        "nominal_source": p.get("nominal_source"), "steps": p["steps"],
                         "steps_source": p["steps_source"], "scale": p["scale"]} for p in parameters],
         "consistency_threshold": normalized["consistency_threshold"],
         "selected_targets": targets, "sensitivities": pairs, "ranking": ranking, "unavailable": unavailable,

@@ -26,8 +26,8 @@ kind: tool
   of `os_optics_kit.optical_designs`).
 - `targets` (default: all), `max_evaluations` (optional cap; the study needs 1 + 2 x steps per parameter).
 - `parameters`: `{name, unit, ops, nominal?, steps? (>= 1 size; two enable the step check), scale?}`; `ops` use the `edit`
-  vocabulary with `"$value"` = nominal + perturbation; at zero perturbation they must reproduce the base
-  Project hash (`NOMINAL_MISMATCH` otherwise).
+  vocabulary with `"$value"` = nominal + perturbation. An omitted nominal is the base value of the
+  field a `set_*` op writes (0 for `transform`); a stated one must reproduce the base (`NOMINAL_MISMATCH`).
 - Optional `consistency_threshold`, `resolution` per target.
 
 Options: `--out STUDY_DIR`, `--overwrite`, `--no-plots`, `--no-report`.

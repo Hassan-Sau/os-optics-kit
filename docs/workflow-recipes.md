@@ -480,14 +480,17 @@ os-optics-kit sensitivity SPEC.json --out STUDY_DIR [--base BASE.json] [--no-plo
 | --- | --- |
 | `base_project` or `design` | Project file, or `{"builder": NAME, "arguments": {...}}` from `os_optics_kit.optical_designs` (catalog-free) |
 | `targets` | target ids to differentiate (unknown ids refused: `TARGET_UNKNOWN`) |
-| `parameters` | `{name, unit, ops, nominal = 0, steps (≥ 1; numbers, quantities or {"relative": r}; with one step the consistency check is unavailable: `consistency` null, flag `STEP_CHECK_UNAVAILABLE`), scale?}` |
+| `parameters` | `{name, unit, ops, nominal?, steps (≥ 1; numbers, quantities or {"relative": r}; with one step the consistency check is unavailable: `consistency` null, flag `STEP_CHECK_UNAVAILABLE`), scale?}` |
 | `consistency_threshold` | relative difference of two step estimates that is flagged (default 0.01) |
 | `resolution` | per-target change treated as none, e.g. `{"far_position_u": {"value": 1, "unit": "nm"}}` |
 | `max_evaluations` | optional cap (default: none); 1 + 2·(total steps) must fit a stated cap |
 
-`"$value"` is nominal + perturbation. For a `transform` translation or rotation keep
-`nominal` 0 (the ops move by the step); for a `set_*` op give the field's base value as
-`nominal`, otherwise `NOMINAL_MISMATCH`. Default steps: 0.01 and 0.1 mm, 0.01° and 0.1°,
+`"$value"` is nominal + perturbation. For a `transform` translation or rotation the
+nominal is 0 (the ops move by the step). For a `set_*` op an omitted `nominal` is the base
+Project's value of the field the ops write, converted to the parameter's unit
+(`nominal_source: "base"` in `study.json` and `summary.json`); fields with different base
+values are refused (`NOMINAL_AMBIGUOUS`). A stated `nominal` must reproduce the base
+(`NOMINAL_MISMATCH` lists the base values otherwise). Default steps: 0.01 and 0.1 mm, 0.01° and 0.1°,
 relative 1e-3 and 1e-2. Method: central difference at each step, forward or backward
 (labelled, with the reason) when one side is ERROR, out of model or without an exact valid selected quantity;
 second difference reported; flags `STEP_DEPENDENT`, `NEAR_EXTREMUM` (use the second
@@ -509,7 +512,7 @@ os-optics-kit tolerance --verify-seed STUDY_DIR
 | `base_project` or `design` | as for sensitivity |
 | `targets` | all selected target assessments must be `MET` for a sample to PASS |
 | `samples`, `seed`, `max_evaluations` | sample count (nominal run extra), integer seed, optional cap ≥ samples + 1 |
-| `parameters` | `{name, unit, ops, nominal = 0, distribution}`, sampled independently in this order |
+| `parameters` | `{name, unit, ops, nominal?, distribution}`, sampled independently in this order; `nominal` as in `sensitivity` |
 | `distribution` | `{"kind": "uniform", "low", "high"}` or `{"kind": "normal", "sigma", "mean_offset" = 0, "truncate_sigma" \| "bounds": [low, high]}` (offsets in the parameter unit; normal bounds holding less than 1e-9 of the distribution are refused with `SPEC_INVALID`) |
 
 Offsets come from `numpy.random.Generator(PCG64(seed))`, one uniform number per sample
@@ -559,7 +562,7 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `PROJECT_REJECTED` | the Engine check refuses the edited Project; `problems` list codes and locations | change the offending values |
 | `RUN_REFUSED` (`run.status`) | the edit was written but the Engine refused the run | read `run.problems`; adjust geometry or models |
 | `BUDGET_EXCEEDED` | more evaluations than a stated `max_evaluations` | fewer values, a larger cap, or no cap |
-| `SPEC_INVALID`, `TARGET_UNKNOWN`, `COLUMN_UNKNOWN`, `NOMINAL_MISMATCH`, `STEP_REQUIRED` | spec structure, unknown target, objective / constraint / derived column the spec cannot produce, `set_*` parameter without its base `nominal`, relative step at nominal 0 | fix the spec as the message states; `known` lists the valid ids or columns |
+| `SPEC_INVALID`, `TARGET_UNKNOWN`, `COLUMN_UNKNOWN`, `NOMINAL_MISMATCH`, `NOMINAL_AMBIGUOUS`, `STEP_REQUIRED` | spec structure, unknown target, objective / constraint / derived column the spec cannot produce, a stated `nominal` that is not the base value, `set_*` fields with different base values, relative step at nominal 0 | fix the spec as the message states; `known` lists the valid ids or columns |
 | `INPUT_INVALID` | a workflow input cannot build a design | change the named input |
 | `CATALOG_NOT_AVAILABLE` | no catalog release installed | `os-optics catalog sync` (or `catalog import FILE`) |
 | `STUDY_STARTED` | `study run` on a study that already has sample results | `--resume`, or plan it again with its planning command and `--overwrite` |

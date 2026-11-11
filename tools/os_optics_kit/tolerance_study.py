@@ -20,7 +20,8 @@ SPEC.json (keys; quantities are a bare number in the parameter's unit or {"value
       {"name": "L2_axial", "unit": "mm",
        "ops": [{"op": "transform", "selector": {"ids": ["L2"]}, "frame": {"component": "L2"},
                 "translation_mm": [0, 0, "$value"]}],
-       "nominal": 0,                             # as in os-optics-kit sensitivity ("$value" = nominal + offset)
+       "nominal": 0,                             # as in os-optics-kit sensitivity ("$value" = nominal + offset;
+                                                 # omitted: the base value of the field set_* ops write)
        "distribution": {"kind": "uniform", "low": -0.5, "high": 0.5}},
       {"name": "hwp_angle", "unit": "deg", "ops": [...],
        "distribution": {"kind": "normal", "sigma": 2, "mean_offset": 0,
@@ -161,14 +162,18 @@ def describe_distribution(parameter):
     return text.replace("  ", " ").strip()
 
 
-def normalize_spec(spec, *, build=None, seed=None, samples=None, zero_tolerance=False):
-    """Validated parameters with distributions, sample count, seed and budget (WorkflowError before any run)."""
+def normalize_spec(spec, *, build=None, base=None, seed=None, samples=None, zero_tolerance=False, nominals=None):
+    """Validated parameters with distributions, sample count, seed and budget (WorkflowError before any run).
+    ``base``: the base Project an omitted nominal is read from (as in os-optics-kit sensitivity); ``nominals``:
+    ``{name: nominal}`` recorded by the study (a redraw does not need the base)."""
     parameters = spec.get("parameters")
     if not isinstance(parameters, list) or not parameters:
         raise wc.WorkflowError("SPEC_INVALID", "parameters must list at least one parameter")
     out, names = [], set()
     for index, parameter in enumerate(parameters):
-        common = sa.common_parameter(parameter, index, build=build)
+        common = sa.common_parameter(parameter, index, build=build, base=None if nominals else base)
+        if nominals and common["name"] in nominals and "nominal" not in parameter:
+            common["nominal"] = nominals[common["name"]]
         if common["name"] in names:
             raise wc.WorkflowError("SPEC_INVALID", f"duplicate parameter name {common['name']!r}")
         names.add(common["name"])
@@ -268,8 +273,9 @@ def verify_samples(study_dir):
     study_dir = Path(study_dir)
     study = wc.read_json(study_dir / "study.json")
     options = study["options"]
+    nominals = {p["name"]: p["nominal"] for p in (study.get("normalized") or {}).get("parameters") or []}
     normalized = normalize_spec(study["spec"], seed=options["seed"], samples=options["samples"],
-                                zero_tolerance=options["zero_tolerance"],
+                                zero_tolerance=options["zero_tolerance"], nominals=nominals,
                                 build=(lambda values: None) if options.get("build_function") else None)
     drawn = draw_samples(normalized["parameters"], normalized["samples"], normalized["seed"])
     import io
@@ -339,9 +345,10 @@ def zero_offset_check(rows, nominal_row, targets):
 
 def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_tolerance, plots, report):
     """Validate ``spec`` and draw its samples: ``(normalized, document, header, targets, drawn)``."""
-    normalized = normalize_spec(spec, build=build, seed=seed, samples=samples, zero_tolerance=zero_tolerance)
-    parameters = normalized["parameters"]
     document, base_info = sa.resolve_base(spec, spec_dir=spec_dir, base=base, base_path=base_path, build=build)
+    normalized = normalize_spec(spec, build=build, base=document, seed=seed, samples=samples,
+                                zero_tolerance=zero_tolerance)
+    parameters = normalized["parameters"]
     if build is not None:
         document = build({p["name"]: p["nominal"] for p in parameters})
     checked = sa.check_base(document, parameters, build=build)
@@ -475,6 +482,7 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
                      "zero_tolerance": normalized["zero_tolerance"], "samples_csv_sha256": digest,
                      "assumptions": list(ASSUMPTIONS)},
         "parameters": [{"name": p["name"], "unit": p["unit"], "nominal": p["nominal"],
+                        "nominal_source": p.get("nominal_source"),
                         "distribution": p["distribution"], "description": p["description"],
                         "sampled": _sampled_range([o[p["name"]] for o in offsets_by_sample])} for p in parameters],
         "selected_targets": targets,

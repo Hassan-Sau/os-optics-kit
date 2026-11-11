@@ -138,8 +138,8 @@
       "command": "os-optics-kit sensitivity",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sensitivity/SKILL.md",
-      "tokens": 775,
-      "sha256": "578fecc457d9288082c448e833fb693a2e43539354812a15003bcd6a02665c52"
+      "tokens": 788,
+      "sha256": "a22099f51ff5d0aeda2d05de0b164da980c807781a9517b922faf608b48db379"
     },
     {
       "name": "study",
@@ -182,8 +182,8 @@
       "command": "os-optics-kit tolerance",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/tolerance/SKILL.md",
-      "tokens": 762,
-      "sha256": "7049dd791a26a4eb8e6d5d04c30f443ec9e7cf68113f6d1bbaac24f3fd03766b"
+      "tokens": 773,
+      "sha256": "2df089f1f95ee0622853ca4da5f309412bc4822c3806dcdd9fa9978682f3f2a9"
     }
   ]
 }
