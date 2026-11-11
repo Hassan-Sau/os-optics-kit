@@ -72,8 +72,8 @@
       "command": "os-optics-kit measurements",
       "requires": "os-optics-kit[plot]",
       "path": "skills/measurements/SKILL.md",
-      "tokens": 571,
-      "sha256": "4bd2593b9ac141c5b66d55c18d3dff8c0524e9e7db14ca6a7a5f5a8bf2f12061"
+      "tokens": 582,
+      "sha256": "6c66e2edd54bbc815033e42b1faebfa401880b9f96f299f79517c68b57ffff0e"
     },
     {
       "name": "plot",

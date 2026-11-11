@@ -11,7 +11,7 @@ Subcommands (compact JSON on stdout, except ``show``):
   list [--tag TAG]                 the case index
   show NAME                        the case's CASE.md
   copy NAME --dest DIR [--force]   copy the case to DIR/NAME
-  verify NAME... | --all [--out DIR] [--catalog FILE] [--update-expected]
+  verify NAME... | --all [--out DIR] [--overwrite] [--catalog FILE] [--update-expected]
                                    one project run per case, its execution and target assessments compared
                                    with expected.json (the run status is reported as run_status)
   index --write | --check          generate or validate cases.json and every case's format
@@ -441,16 +441,19 @@ def compare_outcome(expected, actual):
     return differences
 
 
-def verify_case(name, out_dir, env, *, root=None, update_expected=False):
+def verify_case(name, out_dir, env, *, root=None, update_expected=False, overwrite=False):
     path = case_dir(name, root)
     if update_expected:
         _require_checkout(path)
     expected = json.loads((path / "expected.json").read_text(encoding="utf-8"))
     work = Path(out_dir) / name
-    if work.exists() and any(work.iterdir()):
-        raise CaseError("OUTPUT_EXISTS", f"{work} is not empty; choose another --out directory")
-    work.mkdir(parents=True, exist_ok=True)
     run_dir = work / "run"
+    if work.exists() and any(work.iterdir()):
+        if not overwrite:
+            raise CaseError("OUTPUT_EXISTS", f"{work} is not empty; choose another --out directory, or give "
+                                             "--overwrite to replace the run there")
+        shutil.rmtree(run_dir, ignore_errors=True)  # this command's own output; other files stay
+    work.mkdir(parents=True, exist_ok=True)
     entry = {"name": name, "result": "ERROR", "expected": {"execution": expected.get("execution"),
                                                           "targets": expected["targets"]},
              "actual": None, "differences": [], "run": run_dir.as_posix()}
@@ -494,7 +497,7 @@ def write_expected(path, actual, run_dir):
     return ["project.json", "expected.json", "CASE.md"]
 
 
-def verify(names, *, out=None, catalog=None, root=None, update_expected=False):
+def verify(names, *, out=None, catalog=None, root=None, update_expected=False, overwrite=False):
     env = dict(os.environ)
     temporary = None
     if out is None:
@@ -514,7 +517,8 @@ def verify(names, *, out=None, catalog=None, root=None, update_expected=False):
                 raise CaseError("CATALOG_IMPORT_FAILED", f"os-optics catalog import failed (exit {code}): {stderr}")
             active = (imported or {}).get("active") or {}
             catalog_info = {"version": active.get("catalog_version"), "sha256": active.get("sha256")}
-        results = [verify_case(name, out, env, root=root, update_expected=update_expected) for name in names]
+        results = [verify_case(name, out, env, root=root, update_expected=update_expected, overwrite=overwrite)
+                   for name in names]
     finally:
         if temporary is not None:
             shutil.rmtree(temporary, ignore_errors=True)
@@ -571,6 +575,7 @@ def _parser():
     check.add_argument("names", nargs="*", metavar="NAME")
     check.add_argument("--all", action="store_true", help="every case")
     check.add_argument("--out", type=Path, help="keep the runs in OUT/NAME/run (default: a temporary directory)")
+    check.add_argument("--overwrite", action="store_true", help="replace an earlier run in OUT/NAME/run")
     check.add_argument("--catalog", type=Path, help="import this catalog release file into a private store under "
                                                     "OUT first (no download)")
     check.add_argument("--update-expected", action="store_true",
@@ -607,7 +612,8 @@ def run(argv):
         for name in names:
             case_dir(name)
         engine_command()
-        document = verify(names, out=args.out, catalog=args.catalog, update_expected=args.update_expected)
+        document = verify(names, out=args.out, catalog=args.catalog, update_expected=args.update_expected,
+                          overwrite=args.overwrite)
         _emit(document)
         return EXIT_OK if document["status"] == "MATCH" else EXIT_DIFFERENT
     problems = check_all()

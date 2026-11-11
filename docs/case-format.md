@@ -81,7 +81,9 @@ os-optics-kit cases verify beam-expander --catalog public_optical_catalog.v2.jso
 `verify` runs `os-optics project run` once per case with the installed engine (the run validates the Project; a
 refused Project is reported at stage `project run` with the engine's problems) and compares the execution outcome,
 every target assessment and the catalog release with `expected.json`; the aggregate run status is reported as
-`run_status` and is not compared. It prints compact JSON and exits 0 when every case matches, 1 on a mismatch and 4 when the request is refused. `--catalog FILE`
+`run_status` and is not compared. It prints compact JSON and exits 0 when every case matches, 1 on a mismatch and 4
+when the request is refused. `--out DIR` keeps the runs in `DIR/NAME/run`; an earlier run there is refused
+(`OUTPUT_EXISTS`) unless `--overwrite`, which replaces only that run. `--catalog FILE`
 imports a catalog release file into a private store under the output directory before running, leaving the default
 store untouched.
 

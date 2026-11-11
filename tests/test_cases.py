@@ -297,7 +297,13 @@ class VerifyTests(unittest.TestCase):
             (Path(tmp) / CATALOG_FREE).mkdir()
             (Path(tmp) / CATALOG_FREE / "keep.txt").write_text("x", encoding="utf-8")
             code, _out, err = call(["verify", CATALOG_FREE, "--out", tmp])
-        self.assertEqual((code, json.loads(err)["error"]["code"]), (4, "OUTPUT_EXISTS"))
+            self.assertEqual((code, json.loads(err)["error"]["code"]), (4, "OUTPUT_EXISTS"))
+            self.assertIn("--overwrite", json.loads(err)["error"]["message"])
+            code, out, err = call(["verify", CATALOG_FREE, "--out", tmp, "--overwrite"])
+            self.assertEqual((code, json.loads(out)["status"]), (0, "MATCH"), err)
+            self.assertEqual((Path(tmp) / CATALOG_FREE / "keep.txt").read_text(encoding="utf-8"), "x")
+            code, out, err = call(["verify", CATALOG_FREE, "--out", tmp, "--overwrite"])  # replaces the earlier run
+            self.assertEqual((code, json.loads(out)["status"]), (0, "MATCH"), err)
 
     def test_refused_project_is_reported_at_the_run(self):
         with tempfile.TemporaryDirectory() as tmp:
