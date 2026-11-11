@@ -92,7 +92,7 @@ class StudySyntaxTests(unittest.TestCase):
             parameters = D.DESIGN_INFO[design]["parameters"]
             parsed = [dw.parse_study(text, parameters) for text in module.DEFAULT_STUDIES]
             self.assertEqual(sum(len(s["values"]) for s in parsed), samples, design)
-            self.assertLessEqual(1 + samples + 1, module.config()["max_evaluations"])
+            self.assertNotIn("max_evaluations", module.config())  # no cap unless --max-evaluations states one
 
     def test_help_is_english_on_stdout(self):
         for case in ("expansion-focus", "polarization-control", "mirror-alignment"):

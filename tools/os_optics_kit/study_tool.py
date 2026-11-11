@@ -143,7 +143,7 @@ def plan_candidates(projects, study_dir, *, targets=None, overwrite=False, resum
                     "targets": targets},
         parameters=[{"name": "candidate", "unit": ""}], row_labels=["candidate"], candidates=candidates,
         base_project=None, seed=None, sampling="candidate list",
-        budget={"max_evaluations": len(items), "samples": len(items)}, stop_on=[])
+        budget={"max_evaluations": None, "samples": len(items)}, stop_on=[])
     store.plan_study(study_dir, header, requests, resume=resuming)
     return study_dir
 

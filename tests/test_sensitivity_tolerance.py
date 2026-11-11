@@ -298,6 +298,14 @@ class SensitivityRefusalTests(unittest.TestCase):
         self.assertEqual(error.details["parameters"], ["p"])
         self.refused(self.spec(unit="nm", ops=WAVELENGTH_OPS, steps=None), "STEP_REQUIRED")
 
+    def test_cap_is_optional(self):
+        spec = self.spec()
+        del spec["max_evaluations"]
+        self.assertIsNone(sa.normalize_spec(spec)["max_evaluations"])
+        self.assertIsNone(ts.normalize_spec({"samples": 10, "seed": 1, "parameters": [
+            {"name": "p", "unit": "mm", "ops": translate("L2", [0, 0, "$value"]),
+             "distribution": {"kind": "uniform", "low": -1, "high": 1}}]})["max_evaluations"])
+
     def test_default_steps(self):
         normalized = sa.normalize_spec({"max_evaluations": 20, "parameters": [
             {"name": "shift", "unit": "um", "ops": translate("L2", [0, 0, "$value"])},

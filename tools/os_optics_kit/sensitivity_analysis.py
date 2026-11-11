@@ -22,7 +22,8 @@ SPEC.json (keys; quantities are a bare number in the stated unit or {"value": x,
     ],
     "consistency_threshold": 0.01,               # relative difference of the two step estimates that is flagged
     "resolution": {"spot_radius": {"value": 1e-9, "unit": "mm"}},   # optional: target change treated as none
-    "max_evaluations": 20                        # required; refused before any run when 1 + 2 * steps exceeds it
+    "max_evaluations": 20                        # optional cap (default: none); refused before any run when
+                                                 # 1 + 2 * steps exceeds it
   }
 
 Parameters use the edit vocabulary of os-optics-kit edit and the placeholder syntax of os-optics-kit sweep ("$value"
@@ -414,13 +415,7 @@ def normalize_spec(spec, *, build=None):
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not threshold > 0:
         raise wc.WorkflowError("SPEC_INVALID", "consistency_threshold must be a positive number")
     samples = 1 + 2 * sum(len(p["steps"]) for p in out)
-    budget = spec.get("max_evaluations")
-    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
-        raise wc.WorkflowError("SPEC_INVALID", "max_evaluations must be a positive integer")
-    if samples > budget:
-        raise wc.WorkflowError("BUDGET_EXCEEDED", f"the study needs {samples} runs (1 nominal + 2 per step), more "
-                               f"than max_evaluations {budget}; nothing was run", samples=samples,
-                               max_evaluations=budget)
+    budget = wc.evaluation_cap(spec, samples, f"the study needs {samples} runs (1 nominal + 2 per step)")
     return {"parameters": out, "samples": samples, "max_evaluations": budget, "targets": spec.get("targets"),
             "consistency_threshold": float(threshold)}
 

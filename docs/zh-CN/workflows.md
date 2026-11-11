@@ -37,7 +37,7 @@ os-optics results freshness run --project project.json
 
 ### 选择计算限额
 
-研究的 `max_evaluations` 限制设计数量，各 Project 的 `compute_budget` 限制单次设计内的工作量。
+研究可选的 `max_evaluations` 限制设计数量（默认不限），各 Project 的 `compute_budget` 限制单次设计内的工作量。
 [预算示例](../workflow-recipes.md#computation-budgets)先将三透镜设计限制为每路径一次相互作用，
 再将上限提高到八次。受限运行仍保存文件，并报告部分完成及受影响目标无法判定。
 修改预算会使旧结果成为历史结果。选择更大的限额前应检查这些信息，并保留两次运行以便比较。

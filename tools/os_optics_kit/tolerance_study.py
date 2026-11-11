@@ -14,7 +14,8 @@ SPEC.json (keys; quantities are a bare number in the parameter's unit or {"value
     "targets": ["spot_radius"],                  # targets that must all PASS for a sample to PASS (default: all)
     "samples": 200,                              # number of sampled designs (the nominal run is extra)
     "seed": 20261018,                            # integer >= 0; --seed overrides
-    "max_evaluations": 201,                      # required; refused before any run when samples + 1 exceeds it
+    "max_evaluations": 201,                      # optional cap (default: none); refused before any run when
+                                                 # samples + 1 exceeds it
     "parameters": [                              # sampled independently, in this order
       {"name": "L2_axial", "unit": "mm",
        "ops": [{"op": "transform", "selector": {"ids": ["L2"]}, "frame": {"component": "L2"},
@@ -180,13 +181,7 @@ def normalize_spec(spec, *, build=None, seed=None, samples=None, zero_tolerance=
     seed = spec.get("seed") if seed is None else seed
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise wc.WorkflowError("SPEC_INVALID", "seed must be an integer >= 0 (spec seed or --seed)")
-    budget = spec.get("max_evaluations")
-    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
-        raise wc.WorkflowError("SPEC_INVALID", "max_evaluations must be a positive integer")
-    if count + 1 > budget:
-        raise wc.WorkflowError("BUDGET_EXCEEDED", f"the study needs {count + 1} runs ({count} samples + nominal), "
-                               f"more than max_evaluations {budget}; nothing was run", samples=count + 1,
-                               max_evaluations=budget)
+    budget = wc.evaluation_cap(spec, count + 1, f"the study needs {count + 1} runs ({count} samples + nominal)")
     return {"parameters": out, "samples": count, "seed": seed, "max_evaluations": budget,
             "targets": spec.get("targets"), "zero_tolerance": bool(zero_tolerance)}
 

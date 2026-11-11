@@ -97,7 +97,7 @@ def child(design, samples, workers, study_dir):
 
     t0 = time.perf_counter()
     name, unit, values, documents = BUILDERS[design](samples)
-    spec = {"parameters": [{"name": name, "unit": unit, "values": values}], "max_evaluations": len(values)}
+    spec = {"parameters": [{"name": name, "unit": unit, "values": values}]}
     built = time.perf_counter()
     summary = sp.run_sweep(spec, study_dir, documents=documents, workers=workers)
     done = time.perf_counter()

@@ -63,6 +63,21 @@ class WorkflowError(Exception):
         return {"code": self.code, "message": str(self), **json_safe(self.details)}
 
 
+def evaluation_cap(spec, count, what):
+    """The optional ``max_evaluations`` of a study spec: ``None`` (absent or null: no cap) or a positive integer;
+    a stated cap smaller than the ``count`` planned Engine runs refuses the request (``BUDGET_EXCEEDED``) before
+    any run. ``what`` describes the count in the refusal."""
+    budget = spec.get("max_evaluations")
+    if budget is None:
+        return None
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+        raise WorkflowError("SPEC_INVALID", "max_evaluations must be a positive integer or null (no cap)")
+    if count > budget:
+        raise WorkflowError("BUDGET_EXCEEDED", f"{what}, more than max_evaluations {budget}; nothing was run",
+                            samples=count, max_evaluations=budget)
+    return budget
+
+
 # --------------------------------------------------------------------------------------------- units
 
 # factor to the dimension's base unit (mm, rad, W); Decimal strings keep decimal conversions exact

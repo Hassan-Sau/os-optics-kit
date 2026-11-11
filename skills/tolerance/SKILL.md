@@ -24,7 +24,7 @@ kind: tool
 
 - `base_project` or `design` (as in `sensitivity`); `--base` overrides.
 - `targets` (all must PASS for a sample to PASS), `samples`, `seed` (integer >= 0),
-  `max_evaluations` (required; samples + 1).
+  `max_evaluations` (optional cap; the study needs samples + 1).
 - `parameters`: `{name, unit, ops, nominal?, distribution}` with distribution
   `{"kind": "uniform", "low", "high"}` or `{"kind": "normal", "sigma", "mean_offset"?, "truncate_sigma" | "bounds"}`
   (offsets from nominal, parameter unit).

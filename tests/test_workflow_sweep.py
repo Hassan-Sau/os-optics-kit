@@ -121,6 +121,17 @@ class SweepSpecTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "BUDGET_EXCEEDED")
         self.assertFalse((self.dir / "study").exists())
 
+    def test_cap_is_optional(self):
+        spec = {key: value for key, value in MIXED_SPEC.items() if key != "max_evaluations"}
+        sp.run_sweep(spec, self.dir / "study", base=expander(), plan_only=True)
+        study = wc.read_json(self.dir / "study" / "study.json")
+        self.assertEqual(study["budget"], {"max_evaluations": None, "samples": 6})
+        self.assertIsNone(sp.normalize_spec({**spec, "max_evaluations": None})["max_evaluations"])
+        for bad in (0, -1, 2.5, True, "6"):
+            with self.assertRaises(wc.WorkflowError) as caught:
+                sp.normalize_spec({**spec, "max_evaluations": bad})
+            self.assertEqual(caught.exception.code, "SPEC_INVALID", bad)
+
     def test_unit_error_is_refused_before_running(self):
         spec = {"parameters": [{"name": "w", "unit": "deg", "values": [1.0],
                                 "ops": [{"op": "set_source_model", "instance_id": "SRC",

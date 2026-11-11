@@ -112,7 +112,7 @@ Absolute assignments are unchanged when reapplied, but relative moves accumulate
 
 ## Computation budgets
 
-Study `max_evaluations` caps the number of designs. A Project `compute_budget` caps work
+A study's optional `max_evaluations` caps the number of designs. A Project `compute_budget` caps work
 inside each design. Inspect effective limits in `project check` or `capabilities`.
 To see a limited run with the catalog-free expansion design, copy its case
 (`os-optics-kit cases copy expansion-focus --dest .`, then `cd expansion-focus`; its
@@ -299,7 +299,7 @@ os-optics-kit sweep SPEC.json [--base BASE.json] --out STUDY_DIR [--workers N|au
 | --- | --- |
 | `base_project` | Project file relative to the spec; `--base` overrides |
 | `parameters` | 1 or 2 entries `{name, unit?, values \| range {start, stop, count}, ops}`; two give the full grid, first outermost |
-| `max_evaluations` | required; refused with `BUDGET_EXCEEDED` before any run when the sample count exceeds it |
+| `max_evaluations` | optional (default: no cap); a stated cap the sample count exceeds is refused with `BUDGET_EXCEEDED` before any run |
 | `targets` | ids deciding each sample's outcome (default all) |
 | `constraints` | all must hold: `{"outcome": [...]}`, `{"target": ID, "assessment": ["MET"]}`, `{"column": C, "min"?, "max"?}` (quantities convert to the column unit) |
 | `objective` | `{"column": C, "sense": "minimize" \| "maximize"}` over feasible samples (finite exact objective with applicable dependencies, every explicit constraint met) |
@@ -483,7 +483,7 @@ os-optics-kit sensitivity SPEC.json --out STUDY_DIR [--base BASE.json] [--no-plo
 | `parameters` | `{name, unit, ops, nominal = 0, steps (≥ 2; numbers, quantities or {"relative": r}), scale?}` |
 | `consistency_threshold` | relative difference of two step estimates that is flagged (default 0.01) |
 | `resolution` | per-target change treated as none, e.g. `{"far_position_u": {"value": 1, "unit": "nm"}}` |
-| `max_evaluations` | required; 1 + 2·(total steps) must fit |
+| `max_evaluations` | optional cap (default: none); 1 + 2·(total steps) must fit a stated cap |
 
 `"$value"` is nominal + perturbation. For a `transform` translation or rotation keep
 `nominal` 0 (the ops move by the step); for a `set_*` op give the field's base value as
@@ -508,7 +508,7 @@ os-optics-kit tolerance --verify-seed STUDY_DIR
 | --- | --- |
 | `base_project` or `design` | as for sensitivity |
 | `targets` | all selected target assessments must be `MET` for a sample to PASS |
-| `samples`, `seed`, `max_evaluations` | sample count (nominal run extra), integer seed, budget ≥ samples + 1 |
+| `samples`, `seed`, `max_evaluations` | sample count (nominal run extra), integer seed, optional cap ≥ samples + 1 |
 | `parameters` | `{name, unit, ops, nominal = 0, distribution}`, sampled independently in this order |
 | `distribution` | `{"kind": "uniform", "low", "high"}` or `{"kind": "normal", "sigma", "mean_offset" = 0, "truncate_sigma" \| "bounds": [low, high]}` (offsets in the parameter unit; normal bounds holding less than 1e-9 of the distribution are refused with `SPEC_INVALID`) |
 
@@ -540,7 +540,7 @@ Engine values with an independent closed-form reference and writes reports.
 `--list-parameters` prints every input with unit, default, meaning and role. Inputs take
 a bare number in the option's unit or a unit suffix (`--gap-error-mm 250um`,
 `--min-power-w 0.85mW`). `--study NAME=V1,V2` or `NAME=START..STOP:COUNT` (repeatable)
-replaces the default studies; `--max-evaluations` (default 40) bounds nominal plus all
+replaces the default studies; `--max-evaluations N` (default: no bound) bounds nominal plus all
 samples before anything runs; `--workers N` runs the samples of every study in one pool of N
 worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 `DIR/studies/<NAME>/` (sweep study, `compare/`, `plots/`, `closed_form.json`, `report/`),
@@ -558,7 +558,7 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `PROJECT_OP_INVALID` with `TRANSFORM_REFUSED` | transform selector, frame or pivot cannot be applied | inspect the named operation and its problems |
 | `PROJECT_REJECTED` | the Engine check refuses the edited Project; `problems` list codes and locations | change the offending values |
 | `RUN_REFUSED` (`run.status`) | the edit was written but the Engine refused the run | read `run.problems`; adjust geometry or models |
-| `BUDGET_EXCEEDED` | more evaluations than `max_evaluations` | fewer values or a deliberate larger budget |
+| `BUDGET_EXCEEDED` | more evaluations than a stated `max_evaluations` | fewer values, a larger cap, or no cap |
 | `SPEC_INVALID`, `TARGET_UNKNOWN`, `COLUMN_UNKNOWN`, `NOMINAL_MISMATCH`, `STEP_REQUIRED` | spec structure, unknown target, objective / constraint / derived column the spec cannot produce, `set_*` parameter without its base `nominal`, relative step at nominal 0 | fix the spec as the message states; `known` lists the valid ids or columns |
 | `INPUT_INVALID` | a workflow input cannot build a design | change the named input |
 | `CATALOG_NOT_AVAILABLE` | no catalog release installed | `os-optics catalog sync` (or `catalog import FILE`) |

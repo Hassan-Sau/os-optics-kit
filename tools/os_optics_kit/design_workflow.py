@@ -152,15 +152,15 @@ def add_design_options(parser, design_info, defaults, choices=None):
                                default=default, metavar="VALUE", help=text)
 
 
-def add_study_options(parser, default_studies, max_evaluations):
+def add_study_options(parser, default_studies, max_evaluations=None):
     group = parser.add_argument_group("study and output")
     group.add_argument("--study", action="append", metavar="NAME=VALUES",
                        help="one-parameter study, repeatable: NAME=V1,V2,... or NAME=START..STOP:COUNT; replaces "
                             "the default studies: " + "; ".join(default_studies))
     group.add_argument("--no-studies", action="store_true", help="run the nominal design only")
     group.add_argument("--max-evaluations", type=int, default=max_evaluations,
-                       help=f"upper bound on Engine runs (nominal + all samples), checked before running "
-                            f"(default {max_evaluations})")
+                       help="upper bound on Engine runs (nominal + all samples), checked before running "
+                            + ("(default: no bound)" if max_evaluations is None else f"(default {max_evaluations})"))
     group.add_argument("--max-plots", type=int, default=3, help="plots per study (targets that change; default 3)")
     group.add_argument("--workers", type=opts.workers_argument, default=1, metavar="N|auto",
                        help="worker processes for the study samples (default 1: serial; one pool serves every study; "
@@ -352,18 +352,20 @@ def _plot_sweep(study_dir, target_ids, out_dir):
     return written, None
 
 
-def run_workflow(config, inputs, studies, out_dir, *, max_evaluations, max_plots=3, overwrite=False, workers=1):
+def run_workflow(config, inputs, studies, out_dir, *, max_evaluations=None, max_plots=3, overwrite=False,
+                 workers=1):
     """Run the nominal design and the studies; write every artifact; return the full workflow summary.
 
     ``config``: ``workflow`` (script name), ``design`` (DESIGN_INFO key), ``info`` (its DESIGN_INFO entry),
     ``builder`` (keyword builder of optical_designs), ``checks(params, record) -> {"rows", "analysis"}`` (independent
     reference rows, optional analysis dict), ``reference_method`` (text), ``analysis_keys`` (analysis fields shown
     for notable samples), ``default_studies``. ``workers``: worker processes for the study samples (one pool for
-    every study; ``"auto"`` from the number of samples)."""
+    every study; ``"auto"`` from the number of samples). ``max_evaluations``: optional bound on the Engine runs
+    (nominal + samples), checked before any run (``None``: no bound)."""
     started = time.perf_counter()
     target_order = list(config["info"]["targets"])
     total = 1 + sum(len(s["values"]) for s in studies) + int(config.get("planned_extra_evaluations", 0))
-    if total > max_evaluations:
+    if max_evaluations is not None and total > max_evaluations:
         raise wc.WorkflowError("BUDGET_EXCEEDED", f"the request needs {total} Engine runs (nominal + samples), more "
                                f"than --max-evaluations {max_evaluations}; nothing was run", evaluations=total,
                                max_evaluations=max_evaluations)
@@ -412,8 +414,7 @@ def _run(config, inputs, planned, out_dir, *, record_inputs, max_plots, schedule
         unit = study["unit"] if study["unit"] in SWEEP_UNITS else None
         spec = {"description": f"{config['workflow']}: one-parameter study of {study['name']} "
                                f"({config['design']} design, other inputs as in nominal/project.json)",
-                "parameters": [{"name": study["name"], "unit": unit, "values": values}],
-                "max_evaluations": len(values)}
+                "parameters": [{"name": study["name"], "unit": unit, "values": values}]}
         summary = sp.run_sweep(spec, study_dir, base=nominal_doc, base_path=nominal_dir / "project.json",
                                documents=[docs[value][0] for value in values], scheduler=scheduler)
         if summary["status"] == "CANCELLED":
@@ -604,7 +605,7 @@ def main(config, defaults, argv=None, *, description, extra_options=None):
     def workflow():
         parser = wc.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
         add_design_options(parser, config["info"], defaults, config.get("choices"))
-        add_study_options(parser, config["default_studies"], config["max_evaluations"])
+        add_study_options(parser, config["default_studies"], config.get("max_evaluations"))
         if extra_options is not None:
             extra_options(parser)
         args = parser.parse_args(argv)
@@ -612,7 +613,7 @@ def main(config, defaults, argv=None, *, description, extra_options=None):
             return describe(config, defaults)
         if args.out is None:
             raise wc.WorkflowError("BAD_ARGUMENT", "--out DIR is required")
-        if args.max_evaluations < 1:
+        if args.max_evaluations is not None and args.max_evaluations < 1:
             raise wc.WorkflowError("BAD_ARGUMENT", "--max-evaluations must be at least 1")
         parameters = config["info"]["parameters"]
         texts = [] if args.no_studies else (args.study or config["default_studies"])

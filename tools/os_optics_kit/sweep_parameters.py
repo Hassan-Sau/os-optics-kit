@@ -15,7 +15,8 @@ SPEC.json (keys; units as in os-optics-kit edit):
        "ops": [{"op": "transform", "selector": {"ids": ["L2"]},
                 "translation_mm": ["$value", 0, 0]}]}
     ],
-    "max_evaluations": 50,                        # required; the sweep is refused before any run when exceeded
+    "max_evaluations": 50,                        # optional cap on Engine runs (default: none); the sweep is
+                                                  # refused before any run when its grid exceeds it
     "targets": ["spot_radius"],                   # optional: target ids deciding each sample's outcome (default
                                                   # all); an id not in the Project is refused (TARGET_UNKNOWN)
     "constraints": [                              # optional, all must hold for a sample to be feasible
@@ -153,12 +154,7 @@ def normalize_spec(spec, *, build=None):
             raise wc.WorkflowError("SPEC_INVALID", f"parameter {name!r}: ops must be a non-empty list of op templates")
         out.append({"name": name, "unit": unit, "values": parameter_values(parameter), "ops": ops or []})
     total = math.prod(len(p["values"]) for p in out)
-    budget = spec.get("max_evaluations")
-    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
-        raise wc.WorkflowError("SPEC_INVALID", "max_evaluations must be a positive integer")
-    if total > budget:
-        raise wc.WorkflowError("BUDGET_EXCEEDED", f"the sweep has {total} samples, more than max_evaluations "
-                               f"{budget}; nothing was run", samples=total, max_evaluations=budget)
+    budget = wc.evaluation_cap(spec, total, f"the sweep has {total} samples")
     derived = spec.get("derived") or []
     for item in derived:
         if item.get("op") not in DERIVED_OPS or not item.get("name"):

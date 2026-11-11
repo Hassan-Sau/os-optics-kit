@@ -138,8 +138,8 @@
       "command": "os-optics-kit sensitivity",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sensitivity/SKILL.md",
-      "tokens": 763,
-      "sha256": "0186eb6ba59ee92649bb00178067d53bf47761b71c22c2bd73e8141c8e0aedc4"
+      "tokens": 768,
+      "sha256": "840e436f31a9da2904d52488ff2cec9d3a59c47fa1d38dc29da760ae2a7add7f"
     },
     {
       "name": "study",
@@ -171,8 +171,8 @@
       "command": "os-optics-kit sweep",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/sweep/SKILL.md",
-      "tokens": 716,
-      "sha256": "394081c13fd94772499bb4ec0f8d4d85f718df907512c8d09c230db3ea8f5700"
+      "tokens": 721,
+      "sha256": "90e7e6d82700b8cb24dc2db9c68ea816205c75148a00f2077e02a5a76e45fc7d"
     },
     {
       "name": "tolerance",
@@ -182,8 +182,8 @@
       "command": "os-optics-kit tolerance",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/tolerance/SKILL.md",
-      "tokens": 757,
-      "sha256": "1fba852fb40b6400e637174eb57c271cde984b73c2a2c1909a3fee30bceeb7f1"
+      "tokens": 762,
+      "sha256": "7049dd791a26a4eb8e6d5d04c30f443ec9e7cf68113f6d1bbaac24f3fd03766b"
     }
   ]
 }

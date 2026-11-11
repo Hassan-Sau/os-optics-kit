@@ -75,8 +75,8 @@ poses and the user's actual target bounds. Coordinates are right-handed; quatern
 
 Inputs are never modified; an existing output is refused (`OUTPUT_EXISTS`) unless `--overwrite`.
 Invalid edits are refused atomically. Repeating an identical `edit` returns `already_applied`;
-`--expect-base-hash` refuses a changed base. Set both a study's `max_evaluations` and the Project's
-compute budget, and inspect limited or partial results before raising a limit. Time a pilot before a
+`--expect-base-hash` refuses a changed base. A study's optional `max_evaluations` caps its runs; the
+Project's compute budget caps the work inside each run. Time a pilot before a
 large study and choose a worker budget from it (`skills show study recipe.md`): one study per batch,
 `--workers N` (`auto` assumes 0.2 s per sample of a new plan; give N for heavier samples),
 `--time-limit-s` / `--max-memory-mib` per evaluation, workers x threads within the CPUs. Report commands,

@@ -40,7 +40,7 @@ interrupted-response retries.
 
 ### Choose computation limits
 
-A study's `max_evaluations` limits the number of designs; each Project's `compute_budget` limits work inside one
+A study's optional `max_evaluations` limits the number of designs; each Project's `compute_budget` limits work inside one
 design. The [working budget example](../workflow-recipes.md#computation-budgets) limits the three-lens design to one
 interaction per path, then raises the limit to eight. The limited run retains its artifacts and reports partial
 execution and indeterminate affected targets. Changing the budget makes the old result historical. Inspect those

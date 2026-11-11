@@ -23,8 +23,8 @@ kind: tool
 
 `SPEC.json`:
 
-- `base_project` (relative to the spec; `--base` overrides) and `max_evaluations` (required budget,
-  checked before any run).
+- `base_project` (relative to the spec; `--base` overrides) and `max_evaluations` (optional cap on
+  runs, checked before any run; default none).
 - `parameters`: 1 or 2 items `{name, unit, values | range {start, stop, count}, ops}`; `ops` use the
   `edit` vocabulary with the placeholder `"$value"` (or `{"$value": {"scale", "offset"}}`).
 - Optional: `targets` (ids deciding outcomes), `constraints`, `objective` `{column, sense}`, `derived`,
