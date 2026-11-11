@@ -13,8 +13,10 @@ How os-optics-kit stays aligned with the os-optics engine and the optical catalo
 | Case baseline | each case's `CASE.md` (`engine`, `catalog`) and `expected.json` | The engine and catalog the case was verified with, and its verified execution outcome and target assessments |
 | CI Python versions | `baseline.json` `python` | Oldest supported and newest; the CI matrices read this list |
 
-`python scripts/check_repo.py` fails when `baseline.json`, `pyproject.toml` and `_version.py` disagree, or when a
-document pins `os-optics==` / `os-optics-kit==` to anything other than the baseline.
+`python scripts/check_repo.py` fails when `baseline.json`, `pyproject.toml` and `_version.py` disagree, when a
+document pins `os-optics==` / `os-optics-kit==` to anything other than the baseline, when an engine range written
+out in a file (outside `tests/`, `scripts/` and `CHANGELOG.md`) differs from `engine.requirement`, or when
+`CHANGELOG.md` has no section for `kit_version` as its newest release.
 
 A kit release supports one engine minor series. When a new engine minor is released, a reviewed pull request moves
 the range, the verified version and, if the cases need it, the catalog snapshot; then the kit gets a new release.
@@ -144,6 +146,11 @@ A check that could not run is `SKIPPED` with the category of the check that bloc
   as a candidate when it is newer than the verified one. On demand, a candidate version and optional checks can be
   given.
 
+- **Release** (`.github/workflows/release.yml`, a published GitHub release; a manual run only builds and checks):
+  refuses a tag whose commit is not on `main`, runs `check_repo.py` (including the changelog section of the
+  version), fails when `engine.verified_version` is not on PyPI (`python scripts/engine_release.py
+  --require-published`), then builds and checks the wheel and the source archive before publishing them.
+
 Only the scheduled reporter job may write issues. It reads each report with the reporter from the scheduled
 commit and opens one issue per new observation: a new unverified engine release or a new failure pattern.
 Identical observations (same version, status and failed checks) share one issue, open or closed.
@@ -157,3 +164,72 @@ Identical observations (same version, status and failed checks) share one issue,
 3. In one reviewed pull request, update `baseline.json` (and the `pyproject.toml` range for a new engine minor),
    the cases, the indexes (`os-optics-kit cases index --write`) and every document `check_repo.py` reports.
 4. Release the kit with a new version once the pull request is merged.
+
+A new engine minor moves the supported range; the next section is that procedure in full.
+
+## Move the kit to a new engine minor
+
+A kit release supports one engine minor, so moving to a new minor is one reviewed pull request that ends in a new
+kit minor release. The pull request can be prepared and verified before the engine release is on PyPI; it is
+merged and released only after.
+
+### Files that move together
+
+| Group | Files | Kept equal by |
+| --- | --- | --- |
+| Engine requirement | `pyproject.toml` (the `os-optics` dependency), `tools/os_optics_kit/_engine.py` (`ENGINE_REQUIREMENT`), `baseline.json` (`engine.requirement`, `engine.verified_version`) | `check_repo.py` (`baseline`) |
+| Kit version | `tools/os_optics_kit/_version.py`, `baseline.json` `kit_version`, a new `CHANGELOG.md` section, `cases.json` and `skills.json` (`cases index --write`, `skills index --write`) | `check_repo.py` (`baseline`, `changelog`), `cases index --check`, `skills index --check` |
+| Skill pages | the `requires:` line of every skill that needs the engine, and `templates/SKILL.md` | `skills index --check`, `check_repo.py` (`ranges`) |
+| Ranges written out | recovery messages, docstrings, guides, the engine line of the case requirement files | `check_repo.py` (`ranges`) |
+| Exact pins | documents and case requirement files that pin `os-optics==` or `os-optics-kit==` | `check_repo.py` (`pins`) |
+| Cases | each case's `CASE.md` (`engine`, the baseline sentence), `expected.json`, the verified-with lines of its READMEs, recorded data that names the engine build, images whose outcome changed | `cases verify --all` |
+| Guides | the version statements of `README.md`, `README.zh-CN.md`, `AGENT_GUIDE.md` and the guides under `docs/` | review (`check_repo.py` reports the ranges and pins among them) |
+| Tests | tests that state the requirement or skip with it | the test suite |
+
+A new engine minor can change every engine input hash: runs made with the previous minor then read as not current,
+and the changelog section says so ("run the Project again").
+
+### Verify against a local engine wheel
+
+Before the engine release is on PyPI, verify the branch against the engine's wheel:
+
+```bash
+python scripts/check_alignment.py --engine-wheel os_optics-X.Y.Z-py3-none-any.whl \
+  --catalog-file RELEASE.json --out run-local
+python scripts/check_alignment.py --engine-wheel os_optics-X.Y.Z-py3-none-any.whl \
+  --catalog-file RELEASE.json --only cases-verify --out run-local-cases
+```
+
+The report records `engine_source.mode = local-wheel` and `publication_verified = false`: evidence that the kit
+works with that build, not with the published release. Re-verify every case on it and commit the outcomes that
+changed with the pull request.
+
+### The engine job must have run
+
+While `engine.verified_version` is not on PyPI, the CI job "Engine checks (published os-optics)" passes without
+running anything and says so in its summary. For this pull request that is not a result. Merge it only after the
+engine release is on PyPI and a CI run of the final head shows the job ran: `baseline.json` changed, so every case
+is verified against the published release. The release workflow enforces the same rule: a kit release whose
+verified engine is not on PyPI fails to build.
+
+### Order of publication
+
+1. Release the current kit minor, if it has unreleased changes, while it still requires the previous engine minor.
+2. Prepare the move on a branch: the files above, the new kit minor version and its changelog section, verified
+   against the local engine wheel.
+3. The engine release is published on PyPI.
+4. Re-run CI on the pull request; the engine job runs against the published release. Merge.
+5. Tag the merge commit and publish the kit release.
+
+Never publish the kit release before the engine release: `pip install os-optics-kit` would keep resolving the
+previous kit, and the new kit version could not be installed at all. Between steps 3 and 5 the latest kit holds the
+engine at the previous minor; finishing step 2 before step 3 keeps that window short. The weekly candidate check
+reports the new engine release as unverified until step 5.
+
+### Study evaluation
+
+The study executor evaluates every sample through a replaceable evaluator; today's evaluator runs each sample as
+one complete engine run. The kit's study evaluator adopts the engine's session-based evaluation (one evaluation
+session per worker that keeps the loaded catalog and compiled elements between samples, and can evaluate only the
+selected targets and what they read) in the kit release that moves the supported range to the engine minor that
+offers it. The kit uses an engine interface only in a release whose required engine range offers it.
