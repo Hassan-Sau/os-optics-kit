@@ -361,6 +361,16 @@ class EngineReleaseTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "run=false\nversion=0.12.0\n")
             self.assertEqual(summary.read_text(), "not yet\n")
 
+    def test_require_published_fails_the_release_build_for_an_unpublished_engine(self):
+        for run, code in ((False, 1), (True, 0)):
+            with self.subTest(run=run), patch.object(engine_release, "decide", return_value={
+                    "run": run, "version": "0.12.0", "verified": "0.12.0", "message": None if run else "not yet"}), \
+                    patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()) as stderr:
+                self.assertEqual(engine_release.main(["--require-published"]), code)
+                self.assertEqual("publish the engine release first" in stderr.getvalue(), not run)
+        with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            engine_release.main(["--require-published", "--candidate", "latest"])
+
 
 class WorkflowTests(unittest.TestCase):
     """Text-level guarantees of the workflows; full validation is actionlint's job."""
@@ -390,6 +400,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("github.event_name == 'schedule'", workflows["scheduled.yml"])
         self.assertEqual([name for name, text in workflows.items() if "id-token: write" in text], ["release.yml"])
         self.assertIn("environment:", workflows["release.yml"])
+
+    def test_release_builds_only_merged_commits_with_a_published_engine(self):
+        release = self.workflows()["release.yml"]
+        build = release[release.index("  build:"):release.index("  publish:")]
+        self.assertIn("fetch-depth: 0", build)
+        self.assertIn('git merge-base --is-ancestor "$GITHUB_SHA" origin/main', build)
+        self.assertIn("python scripts/engine_release.py --require-published", build)
+        # both guards run before anything is built
+        self.assertLess(build.index("--require-published"), build.index("python -m build"))
+        self.assertLess(build.index("merge-base"), build.index("python -m build"))
 
 
 if __name__ == "__main__":
