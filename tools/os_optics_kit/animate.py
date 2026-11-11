@@ -44,6 +44,7 @@ from typing import Any
 
 from . import presentation as pr
 from . import render_views as rv
+from ._engine import install_hint
 from . import workflow_common as wc
 
 SEQUENCE_SCHEMA = "os-optics-kit.animation-sequence"
@@ -993,7 +994,7 @@ def _load_view(path, axis=None):
     try:
         return rv.ViewScene(path, axis=axis)
     except rv.RenderError as error:
-        recovery = ('python -m pip install "os-optics>=0.13,<0.14"' if error.code == "ENGINE_NOT_INSTALLED"
+        recovery = (install_hint() if error.code == "ENGINE_NOT_INSTALLED"
                     else "check the run directory with 'os-optics-kit summary RUN'")
         raise pr.PresentationError(error.code, str(error), recovery=recovery) from None
 
