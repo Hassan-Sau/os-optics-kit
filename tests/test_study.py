@@ -438,6 +438,21 @@ class DefaultEvaluatorTests(unittest.TestCase):
             self.assertEqual(again["identity"]["result_hash"], first["identity"]["result_hash"])
             self.assertEqual(again["outcome"], first["outcome"])
 
+    def test_run_that_does_not_verify_is_run_again_not_adopted(self):
+        with TempDir() as tmp:
+            study_dir = tmp / "study"
+            request = rq.make_request("s0001", expander(), selected_targets=["spot_radius"])
+            store.plan_study(study_dir, header(), [request])
+            execute.execute_study(study_dir)
+            store.sample_path(study_dir, "s0001").unlink()
+            result = store.sample_dir(study_dir, "s0001") / "run" / "simulation_result.json"
+            result.write_text(result.read_text(encoding="utf-8").replace("PASS", "FAIL", 1), encoding="utf-8")
+            store.write_attempt(study_dir, "s0001", request["request_hash"], 1,
+                                evaluator=evaluators.DEFAULT_EVALUATOR)
+            summary = execute.execute_study(study_dir, resume=True)
+            self.assertEqual((summary.recovered, summary.ran), (0, 1))
+            self.assertEqual(events(study_dir, "recovery_failed"), ["s0001"])
+
     def test_ctrl_c_inside_an_engine_run_cancels_the_study_and_exits_130(self):
         import _thread
 

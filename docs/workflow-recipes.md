@@ -24,6 +24,11 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
   are unitless; rotation angles are degrees unless given as a quantity.
 - Paths in stdout are as given on the command line; paths recorded inside a study are
   relative to its study directory.
+- Every saved run is read with its `integrity` record (`checked`, `consistent`, `problems`):
+  `summary`, `compare` and `report` show a run whose files do not match their recorded
+  hashes as stored, with that record (`summary` also writes the warning
+  `RUN_INTEGRITY_FAILED` on stderr; a report lists such runs under Diagnostics). A study
+  resume runs such a sample again instead of adopting it.
 - `installed_catalog` describes the local cache only. Run and study catalog identity
   comes from saved results; a catalog-free run retains a null `catalog_version` even
   with a catalog installed. A study's `catalog_versions` preserves distinct run

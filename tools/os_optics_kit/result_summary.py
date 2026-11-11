@@ -2,6 +2,8 @@
 
 Usage: os-optics-kit summary RUN_DIR [--details]   (or: python -m os_optics_kit summary RUN_DIR)
 
+A run whose files do not match their recorded hashes is summarized as stored: "integrity" holds consistent false
+and the problems, and one JSON line {"warning": {"code": "RUN_INTEGRITY_FAILED", ...}} goes to stderr.
 Exit codes follow requirement_outcome, the class of the declared targets' assessments: 0 every target that applies
 is met, or none applies or is declared; 1 an unmet target; 2 an indeterminate target; 3 a target reads a quantity
 outside its model; 4 invalid input or artifact, or a FAILED or CANCELLED run. A PARTIAL run (a budget was reached)
@@ -70,14 +72,12 @@ def summarize_results(results, *, artifacts=None, details=False):
     """Return JSON-safe results using the public RunResults API; never simulate.
 
     All targets and diagnostics are retained. Only the power overview is reduced;
-    complete power entries and rays remain in the supplied artifact files.
+    complete power entries and rays remain in the supplied artifact files. ``integrity``
+    (``checked``, ``consistent``, ``problems``) states whether the run's files match their recorded hashes; a run
+    that does not verify is summarized as stored, with that record.
     """
-    from os_optics.results import ResultsError
-
     description = results.describe()
     integrity = description["integrity"]
-    if integrity["checked"] and not integrity["consistent"]:
-        raise ResultsError("RUN_INTEGRITY_FAILED", "; ".join(integrity["problems"]))
     statuses = description["status"]
     status = statuses.get("validation_status")
     if status is None:
@@ -162,7 +162,13 @@ def main(argv=None):
         parser.add_argument("directory", type=Path, help="Saved local run directory")
         parser.add_argument("--details", action="store_true", help="Include the complete power ledger")
         args = parser.parse_args(argv)
-        return summarize_run(args.directory, details=args.details)
+        summary = summarize_run(args.directory, details=args.details)
+        integrity = summary["integrity"]
+        if integrity["checked"] and not integrity["consistent"]:
+            print(json.dumps({"warning": {"code": "RUN_INTEGRITY_FAILED", "problems": integrity["problems"],
+                                          "check": f'os-optics project verify "{args.directory}"'}},
+                             ensure_ascii=True, separators=(",", ":")), file=sys.stderr)
+        return summary
 
     return emit_cli(workflow)
 

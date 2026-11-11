@@ -614,11 +614,17 @@ def sample_from_summary(summary, selected=None):
     }
 
 
-def read_saved_run(run_dir, selected=None):
-    """Summary + sample fields of a saved run directory (never reruns)."""
+def read_saved_run(run_dir, selected=None, *, require_integrity=False):
+    """Summary + sample fields of a saved run directory (never reruns). The summary's ``integrity`` states whether
+    the run's files verify; with ``require_integrity`` a run that does not verify is refused
+    (``RUN_INTEGRITY_FAILED``), for a reader that would adopt the run as a result."""
     from .result_summary import summarize_run
 
     summary = summarize_run(run_dir)
+    integrity = summary.get("integrity") or {}
+    if require_integrity and integrity.get("checked") and not integrity.get("consistent"):
+        raise WorkflowError("RUN_INTEGRITY_FAILED", "; ".join(integrity.get("problems") or []),
+                            run_dir=Path(run_dir).as_posix(), problems=integrity.get("problems"))
     fields = sample_from_summary(summary, selected)
     identity = summary.get("identity") or {}
     fields["identity"] = {key: identity.get(key) for key in (

@@ -92,6 +92,30 @@ class CompareTests(unittest.TestCase):
         path.write_text(path.read_text(encoding="utf-8").replace("PASS", "FAIL", 1), encoding="utf-8")
         result = wc.freshness(self.dir / "base.json", target)
         self.assertIn("RUN_UNVERIFIED", result["reasons"])
+        # compare labels the run that does not verify instead of aborting; an unreadable run is an ERROR entry
+        broken = self.dir / "broken"
+        shutil.copytree(self.dir / "a" / "run", broken)
+        (broken / "simulation_result.json").unlink()
+        document = cr.compare([self.dir / "a" / "run", target, broken], labels=["a", "tampered", "broken"])
+        runs = {r["label"]: r for r in document["runs"]}
+        self.assertTrue(runs["a"]["integrity"]["consistent"])
+        self.assertFalse(runs["tampered"]["integrity"]["consistent"])
+        self.assertTrue(runs["tampered"]["integrity"]["problems"])
+        self.assertEqual((runs["broken"]["outcome"], runs["broken"]["error"]["code"]), ("ERROR", "RUN_NOT_READABLE"))
+        self.assertIn("integrity", cr.compact(document)["runs"][1])
+        outcome_rows = {r["run"]: r for r in cr.csv_rows(document) if r["section"] == "outcome"}
+        self.assertEqual(outcome_rows["tampered"]["integrity"], "INCONSISTENT")
+        from os_optics_kit import build_report as br
+
+        report = br.build_report([self.dir / "a" / "run", target], out_dir=self.dir / "tampered-report")
+        self.assertEqual(report["diagnostics"]["runs_not_verified"], ["tampered"])
+        from os_optics_kit import result_summary
+
+        code, summary, err = invoke(result_summary.main, [str(target)])
+        self.assertFalse(summary["integrity"]["consistent"])
+        self.assertEqual(code, result_summary.EXIT_CODES[summary["requirement_outcome"]])
+        warning = json.loads(err.strip().splitlines()[-1])["warning"]
+        self.assertEqual(warning["code"], "RUN_INTEGRITY_FAILED")
 
     def test_cli_writes_json_and_csv(self):
         code, out, _err = invoke(cr.main, [str(self.dir / "a" / "run"), str(self.dir / "b" / "run"), "--labels",

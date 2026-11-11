@@ -28,8 +28,8 @@
       "command": "os-optics-kit compare",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/compare/SKILL.md",
-      "tokens": 548,
-      "sha256": "bc42b5bce4ef0fda4b4a42c34aabc6d4ae305bd25dd324e955d7d9e8b1ca2946"
+      "tokens": 580,
+      "sha256": "0f3293254999fc4845742e22440ae0c91629971c0086493704244f0f46cc837c"
     },
     {
       "name": "contrib-case",
@@ -160,8 +160,8 @@
       "command": "os-optics-kit summary",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/summary/SKILL.md",
-      "tokens": 574,
-      "sha256": "d0713eb0f528a99d0feebbd3a70683b7c4e72ca0e39180779cd8bc8f7ead7c51"
+      "tokens": 595,
+      "sha256": "703b6f396d5e484ab086ba2d34e0643870cbd192fef7de017f91dc6312013e53"
     },
     {
       "name": "sweep",

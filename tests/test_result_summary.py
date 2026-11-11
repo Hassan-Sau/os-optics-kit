@@ -166,13 +166,17 @@ class ResultSummaryTests(unittest.TestCase):
         self.assertIsNone(summary["validation_status"])
 
     @requires_engine
-    def test_integrity_failure_never_emits_a_scientific_summary(self):
+    def test_integrity_failure_is_summarized_with_its_record(self):
+        from os_optics_kit.result_summary import EXIT_CODES
+
         results = RunResults(engine_result(), integrity_problems=("simulation_result hash mismatch",))
-        with self.assertRaises(ResultsError):
-            summarize_results(results)
+        summary = summarize_results(results)
+        self.assertEqual(summary["integrity"], {"checked": True, "consistent": False,
+                                                "problems": ["simulation_result hash mismatch"]})
+        self.assertEqual(summary["status"], "PASS")
         code, stdout, stderr = invoke(lambda: summarize_results(results))
-        self.assertEqual((code, stdout), (4, ""))
-        self.assertEqual(json.loads(stderr)["error"]["code"], "RUN_INTEGRITY_FAILED")
+        self.assertEqual((code, stderr), (EXIT_CODES[summary["requirement_outcome"]], ""))
+        self.assertFalse(json.loads(stdout)["integrity"]["consistent"])
 
     @requires_engine
     def test_unknown_future_status_fails_closed(self):

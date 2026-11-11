@@ -191,7 +191,7 @@ def _clear_sample(study_dir, sample_id):
 def recover_record(study_dir, request, attempt=1, evaluator=evaluators.DEFAULT_EVALUATOR):
     """The record of a sample whose complete run directory has no ``sample.json`` (read back, not rerun)."""
     folder = store.sample_dir(study_dir, request["sample_id"])
-    _summary, fields = wc.read_saved_run(folder / "run", request["selected_targets"])
+    _summary, fields = wc.read_saved_run(folder / "run", request["selected_targets"], require_integrity=True)
     project = folder / "project.json"
     record = {**wc._empty_record(None, project if project.is_file() else None, request["selected_targets"]),
               **fields}

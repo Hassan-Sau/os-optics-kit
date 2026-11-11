@@ -47,7 +47,8 @@ os-optics-kit summary run
 
 ## Limits
 
-- Reads one run; a run whose files fail the integrity check is refused (`RUN_INTEGRITY_FAILED`).
+- Reads one run. `integrity.consistent` false: the files do not match their recorded hashes; the
+  values are shown as stored and stderr carries the warning `RUN_INTEGRITY_FAILED`.
 - A bounded quantity is an interval, not an exact value; read `quantity_state` before ranking values.
 - The example Project uses catalog products: it needs an installed catalog release (`os-optics catalog sync`).
 

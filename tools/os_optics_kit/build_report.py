@@ -146,7 +146,10 @@ def _diagnostics(section):
         for codes in (entry.get("target_issue_codes") or {}).values():  # compared runs: {target id: codes}
             for code in codes:
                 issues[code] = issues.get(code, 0) + 1
-    return {"target_issue_codes": issues, "model_scope_issues": scope, "warnings": warnings, "refusals": errors}
+    unverified = [entry.get("sample_id") or entry.get("label") for entry in entries
+                  if (entry.get("integrity") or {}).get("checked") and not entry["integrity"].get("consistent")]
+    return {"target_issue_codes": issues, "model_scope_issues": scope, "warnings": warnings, "refusals": errors,
+            "runs_not_verified": unverified}
 
 
 def build_report(paths, *, out_dir=None, project=None, plots=None, changes=None, sections=None, artifacts=None):
@@ -306,6 +309,8 @@ def render_markdown(report):
                         ("warnings", "Warnings"), ("refusals", "Refusals / not run")):
         values = diag[name]
         lines.append(f"- {title}: " + (", ".join(f"{k} x{v}" for k, v in values.items()) if values else "none"))
+    lines.append("- Runs whose files do not match their recorded hashes: "
+                 + (", ".join(diag.get("runs_not_verified") or []) or "none"))
     lines.append("")
     for extra in report.get("sections") or []:
         lines += [f"## {extra['title']}", "", *extra["lines"], ""]

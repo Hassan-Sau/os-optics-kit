@@ -28,7 +28,8 @@ kind: tool
 
 ## Outputs
 
-Stdout: runs with outcome, status, freshness and identity; targets by ID with values, units, statuses
+Stdout: runs with outcome, status, freshness, `integrity` (whether the run's files verify) and identity;
+a run directory the Engine cannot read is an `ERROR` entry (`RUN_NOT_READABLE`); targets by ID with values, units, statuses
 and deltas to the reference; observation planes (power, arriving beams); input differences keyed by
 object ID (at most 8 runs and 10 differences shown; the files hold everything).
 Exit 0 compared, 4 invalid input.

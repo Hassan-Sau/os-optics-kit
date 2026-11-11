@@ -151,15 +151,26 @@ def load_entry(label, run_dir, record, selected=None):
                       "model_scope_issues": [], "out_of_model_issues": [], "warnings": [], "identity": (record or {}).get("identity") or {},
                       "error": (record or {}).get("error") or {"code": "RUN_MISSING"}, "power_budget": None})
         return entry
-    from os_optics.results import load_run
+    from os_optics.results import ResultsError, load_run
 
-    summary, fields = wc.read_saved_run(run_dir, selected)
-    results = load_run(run_dir, verify=False)
+    try:
+        summary, fields = wc.read_saved_run(run_dir, selected)
+        results = load_run(run_dir, verify=False)
+    except ResultsError as exc:
+        if exc.code != "RUN_NOT_READABLE":
+            raise
+        entry.update({"run_dir": None, "outcome": "ERROR", "status": None, "targets": [], "observations": {},
+                      "inputs": {}, "model_scope_issues": [], "out_of_model_issues": [], "warnings": [],
+                      "identity": (record or {}).get("identity") or {}, "power_budget": None,
+                      "error": {"code": exc.code, "path": Path(run_dir).as_posix(),
+                                "problems": [{"code": exc.code, "message": str(exc)}]}})
+        return entry
     entry.update({"outcome": fields["outcome"], "status": fields["status"], "targets": fields["targets"],
                   "execution": fields["execution"], "requirements": fields["requirements"],
                   "model_scope_issues": fields["model_scope_issues"],
                   "out_of_model_issues": fields["out_of_model_issues"], "warnings": fields["warnings"],
                   "identity": fields["identity"], "power_budget": summary.get("power_budget"),
+                  "integrity": summary.get("integrity"),
                   "observations": {m["observation_id"]: {"total_power_W": m["total_power_W"],
                                                          "arrival_count": m["arrival_count"], "status": m["status"],
                                                          "quantity_state": m["quantity_state"],
@@ -267,7 +278,7 @@ def compare(paths, *, labels=None, reference=None, project=None, targets=None, v
                 "target_issue_codes": {t["id"]: list(t["issue_codes"]) for t in entry["targets"]
                                        if t.get("issue_codes")},
                 "run_dir": entry["run_dir"], "identity": entry["identity"]}
-        for key in ("freshness", "outcome_label", "error", "power_budget", "execution", "requirements"):
+        for key in ("freshness", "outcome_label", "error", "power_budget", "execution", "requirements", "integrity"):
             if entry.get(key) is not None:
                 item[key] = entry[key]
         runs.append(item)
@@ -311,12 +322,15 @@ def csv_rows(document):
             rows.append({"section": "input", "id": diff["input"], "field": diff["input"].split(".")[-1],
                          "unit": diff["unit"], "run": label, "value": value})
     for run in document["runs"]:
+        integrity = run.get("integrity") or {}
         rows.append({"section": "outcome", "id": run["label"], "field": "outcome", "run": run["label"],
-                     "value": run.get("outcome_label", run["outcome"]), "status": run["status"]})
+                     "value": run.get("outcome_label", run["outcome"]), "status": run["status"],
+                     "integrity": None if not integrity else "NOT_CHECKED" if not integrity.get("checked")
+                     else "CONSISTENT" if integrity.get("consistent") else "INCONSISTENT"})
     return rows
 
 
-CSV_COLUMNS = ["section", "id", "field", "unit", "run", "value", "status", "assessment", "quantity_state", "exact", "power_complete", "power_upper_bound_W", "delta", "reference"]
+CSV_COLUMNS = ["section", "id", "field", "unit", "run", "value", "status", "assessment", "quantity_state", "exact", "power_complete", "power_upper_bound_W", "delta", "reference", "integrity"]
 
 
 def write_outputs(document, out_dir):
@@ -332,7 +346,7 @@ def compact(document, paths=None):
     labels = [r["label"] for r in shown]
     return {
         "status": document["status"], "reference": document["reference"], "run_count": len(runs),
-        "runs": [{key: r.get(key) for key in ("label", "outcome", "outcome_label", "status", "model_scope_issues", "execution", "requirements")
+        "runs": [{key: r.get(key) for key in ("label", "outcome", "outcome_label", "status", "model_scope_issues", "execution", "requirements", "integrity")
                   if r.get(key) is not None}
                  | ({"out_of_model_issues": r["out_of_model_issues"]} if r.get("out_of_model_issues") else {})
                  | ({"warnings": r["warnings"]} if r.get("warnings") else {})
