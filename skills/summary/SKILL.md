@@ -1,6 +1,6 @@
 ---
 name: summary
-description: Read a saved os-optics run directory into one compact JSON document (targets, assessments, power budget, issues, identity) with an exit code per requirement outcome. Use it after every run before deciding anything.
+description: Read a saved os-optics run directory into one compact JSON document (targets, assessments, power budget, issues, identity) with an exit code per requirement outcome. It returns the execution, every target's assessment and the integrity record of the run.
 version: 0.2.0
 command: os-optics-kit summary
 requires: os-optics>=0.13,<0.14
@@ -49,7 +49,8 @@ os-optics-kit summary run
 
 - Reads one run. `integrity.consistent` false: the files do not match their recorded hashes; the
   values are shown as stored and stderr carries the warning `RUN_INTEGRITY_FAILED`.
-- A bounded quantity is an interval, not an exact value; read `quantity_state` before ranking values.
+- `quantity_state` states a power target's quantity (`BOUNDED`: an interval); a study table states
+  each target value's kind in `target:<id>:value_kind`.
 - The example Project uses catalog products: it needs an installed catalog release (`os-optics catalog sync`).
 
 ## Version

@@ -64,9 +64,8 @@ study the columns `execution_outcome` and `budgets_exhausted` and the count
 `by_execution`); the sweep constraint `{"execution": ["COMPLETED"]}` makes only complete
 runs feasible. A `FAILED` or `CANCELLED` run is `ERROR`, exit 4.
 
-`edit --run` uses the outcome of its selected targets. It retains the
-engine's execution, requirements, quantity validity and issue fields. Outcome classes
-are workflow routing summaries; inspect those fields for the scientific meaning.
+`edit --run` exits by the outcome of its selected targets; execution, requirements,
+quantity states and issues are in `run`.
 
 ## Outcome classes
 

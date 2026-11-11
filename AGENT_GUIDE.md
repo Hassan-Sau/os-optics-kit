@@ -22,7 +22,7 @@ DIR, the skills directory of your agent host; it never overwrites a different fi
 | Task | Skill / command |
 | --- | --- |
 | Start from a worked design | `run-case`: `os-optics-kit cases list`, `cases copy NAME --dest .`, `cases verify NAME` |
-| Read a run before deciding | `summary RUN` |
+| Read a run's outcome | `summary RUN` |
 | Discover IDs, units, axes; edit by ID | `edit P.json --describe --ids ID`; `edit P.json --edits OPS.json --out NEW.json --run RUN` |
 | Explore a parameter grid | `sweep SPEC.json --base P.json --out STUDY` |
 | Explain what an edit changed | `compare RUN_A RUN_B --project CURRENT.json --out CMP` |
@@ -45,22 +45,24 @@ Cases `expansion-focus`, `polarization-control` and `mirror-alignment` include a
 `workflow.py` (`--list-parameters`, unit-bearing inputs such as `--gap-error-mm 250um`,
 `--study NAME=START..STOP:COUNT`, `--no-studies`).
 
-## Interpret before deciding
+## What the outputs state
 
-Read computation completion, quantity validity, target assessment and freshness separately. Engine
-assessments are `MET`, `UNMET`, `INDETERMINATE` or `NOT_APPLICABLE`. A bounded quantity is an
-interval; an unrelated unavailable quantity does not invalidate every result. No configured target
-means no requirement was assessed.
+A run states separate facts: `outcome.execution` (`COMPLETED`, or `PARTIAL` with the budgets it
+reached), each quantity's state (a `BOUNDED` quantity is an interval), each target's assessment
+(`MET`, `UNMET`, `INDETERMINATE`, `NOT_APPLICABLE`) and `integrity` (whether its files match their
+hashes). A Project without targets has no assessed requirement.
 
-Study `PASS`/`FAIL` classes summarize the selected targets. Keep
-every sample, including invalid, partial and indeterminate ones. Objective validity and feasibility
-are separate; report `NO_FEASIBLE` when no sample meets the constraints. Fractions state their
-denominator; a tolerance fraction describes simulated samples under the declared distributions.
+A sample's class (`PASS`, `FAIL`, `OUT_OF_MODEL`, `UNKNOWN`, `NOT_APPLICABLE`, `ERROR`) is the class
+of its selected targets' assessments. A study table holds every requested sample; each target value
+has a `value_kind` (`EXACT`, `BOUNDED`, ...). `objective_valid` and `feasible` are separate fields;
+`NO_FEASIBLE`: no sample meets the constraints. `pass_fraction` divides by all requested samples,
+`pass_fraction_among_evaluable` by PASS + FAIL; a tolerance fraction counts simulated samples under
+the declared distributions.
 
 Saved results keep their identities after edits. `compare` and `os-optics results freshness RUN
 --project P` report `CURRENT`, `HISTORICAL` or `UNDETERMINED` with reasons (`PHYSICS_CHANGED`,
-`TARGETS_CHANGED`, ...). A historical result describes the earlier design; rerun when the task needs
-the edited one.
+`TARGETS_CHANGED`, ...); a historical result describes the earlier design. A study has one
+freshness record.
 
 Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN or
 `INCOMPLETE`; 3 OUT_OF_MODEL (a `PARTIAL` run exits by its targets); 4 refused input, with a JSON
@@ -79,8 +81,7 @@ Invalid edits are refused atomically. Repeating an identical `edit` returns `alr
 Project's compute budget caps the work inside each run. Time a pilot before a
 large study and choose a worker budget from it (`skills show study recipe.md`): one study per batch,
 `--workers N` (`auto` assumes 0.2 s per sample of a new plan; give N for heavier samples),
-`--time-limit-s` / `--max-memory-mib` per evaluation, workers x threads within the CPUs. Report commands,
-versions, units, selected assessments, freshness and artifact paths.
+`--time-limit-s` / `--max-memory-mib` per evaluation, workers x threads within the CPUs.
 
 ## Contribute
 

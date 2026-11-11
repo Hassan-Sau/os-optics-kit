@@ -155,13 +155,13 @@
     {
       "name": "summary",
       "kind": "tool",
-      "description": "Read a saved os-optics run directory into one compact JSON document (targets, assessments, power budget, issues, identity) with an exit code per requirement outcome. Use it after every run before deciding anything.",
+      "description": "Read a saved os-optics run directory into one compact JSON document (targets, assessments, power budget, issues, identity) with an exit code per requirement outcome. It returns the execution, every target's assessment and the integrity record of the run.",
       "version": "0.2.0",
       "command": "os-optics-kit summary",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/summary/SKILL.md",
-      "tokens": 595,
-      "sha256": "703b6f396d5e484ab086ba2d34e0643870cbd192fef7de017f91dc6312013e53"
+      "tokens": 619,
+      "sha256": "f1a08c875f51d2de2e57c45367cfd220ba07bd250d6001a7e3f19b0460a14361"
     },
     {
       "name": "sweep",
