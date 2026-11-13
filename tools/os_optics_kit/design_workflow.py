@@ -31,8 +31,8 @@ Output directory layout:
   report/report.md, report.json     nominal run, inputs, closed-form check and the study index with links
 
 Outcome classes per sample (workflow_common): ERROR, OUT_OF_MODEL (selected target applicability),
-UNKNOWN (indeterminate), FAIL (unmet), PASS (all selected targets met), NOT_APPLICABLE (no selected requirements); their
-warning codes are listed.
+UNKNOWN (indeterminate or not applicable), FAIL (unmet), PASS (all selected targets met), NOT_APPLICABLE (no
+selected requirements); their warning codes are listed.
 """
 
 from __future__ import annotations

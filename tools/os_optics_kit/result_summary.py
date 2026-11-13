@@ -5,8 +5,7 @@ Usage: os-optics-kit summary RUN_DIR [--details]   (or: python -m os_optics_kit 
 A run whose files do not match their recorded hashes is summarized as stored: "integrity" holds consistent false
 and the problems, and one JSON line {"warning": {"code": "RUN_INTEGRITY_FAILED", ...}} goes to stderr.
 Exit codes follow requirement_outcome, the class of the declared targets' assessments: 0 every target is met, or
-none applies or is declared; 1 an unmet target; 2 an indeterminate target, or a target that does not apply beside
-others that do; 3 a target reads a quantity outside its model; 4 invalid input or artifact, or a FAILED or CANCELLED
+none is declared; 1 an unmet target; 2 an indeterminate target or a target that does not apply; 3 a target reads a quantity outside its model; 4 invalid input or artifact, or a FAILED or CANCELLED
 run. A PARTIAL run (a budget was reached) exits by its targets; outcome.execution states the execution and the
 budgets. The aggregate status is in "status".
 """

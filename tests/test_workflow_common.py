@@ -49,7 +49,18 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(wc.classify("PASS", [], mixed, selected=["a"]), "PASS")
         self.assertEqual(wc.classify("FAIL", [], [row("a", "FAIL"), na]), "FAIL")
         self.assertEqual(wc.classify("UNKNOWN", [], [row("a", "UNKNOWN"), na]), "UNKNOWN")
-        self.assertEqual(wc.classify("NOT_APPLICABLE", [], [na, {**na, "id": "m"}]), "NOT_APPLICABLE")
+
+    def test_every_selected_target_not_applicable_is_unknown(self):
+        """Selected targets that are all assessed NOT_APPLICABLE leave the run UNKNOWN (exit 2), as under the
+        Engine's ``requirements`` contract; NOT_APPLICABLE is the class of a run with no selected target."""
+        na = {"id": "n", "status": "NOT_APPLICABLE", "value": None, "assessment": "NOT_APPLICABLE"}
+        both = [na, {**na, "id": "m"}]
+        self.assertEqual(wc.classify("NOT_APPLICABLE", [], both), "UNKNOWN")
+        self.assertEqual(wc.WORKFLOW_EXIT_CODES[wc.classify("NOT_APPLICABLE", [], both)], 2)
+        self.assertEqual(wc.classify("PASS", [], [row("a", "PASS"), na], selected=["n"]), "UNKNOWN")
+        for execution in ("COMPLETED", "PARTIAL"):
+            self.assertEqual(wc.requirement_outcome("NOT_APPLICABLE", {"outcome": execution}, [], both), "UNKNOWN")
+        self.assertEqual(wc.classify("NOT_APPLICABLE", [], both, selected=[]), "NOT_APPLICABLE")
 
     def test_unmet_outranks_out_of_model(self):
         scoped = {"id": "s", "status": "OUT_OF_MODEL_SCOPE", "value": None, "assessment": "INDETERMINATE",
