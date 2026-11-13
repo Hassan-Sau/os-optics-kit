@@ -36,9 +36,17 @@ class ClassifyTests(unittest.TestCase):
             self.assertEqual(wc.classify(status, [], []), "NOT_APPLICABLE", status)
         self.assertEqual(wc.classify("PASS", [], [row("a", "PASS")], selected=[]), "NOT_APPLICABLE")
 
-    def test_not_applicable_targets_are_left_out(self):
+    def test_not_applicable_target_beside_met_ones_is_not_a_pass(self):
+        """A selected target assessed NOT_APPLICABLE beside met ones leaves the run UNKNOWN (exit 2), the code of
+        the Engine's ``requirements`` contract for a declared target that does not apply; a target that is not
+        selected is not assessed."""
         na = {"id": "n", "status": "NOT_APPLICABLE", "value": None, "assessment": "NOT_APPLICABLE"}
-        self.assertEqual(wc.classify("PASS", [], [row("a", "PASS"), na]), "PASS")
+        mixed = [row("a", "PASS"), na]
+        self.assertEqual(wc.classify("PASS", [], mixed), "UNKNOWN")
+        self.assertEqual(wc.WORKFLOW_EXIT_CODES[wc.classify("PASS", [], mixed)], 2)
+        self.assertEqual(wc.requirement_outcome("PASS", {"outcome": "COMPLETED"}, [], mixed), "UNKNOWN")
+        self.assertEqual(wc.requirement_outcome("PASS", {"outcome": "PARTIAL"}, [], mixed), "UNKNOWN")
+        self.assertEqual(wc.classify("PASS", [], mixed, selected=["a"]), "PASS")
         self.assertEqual(wc.classify("FAIL", [], [row("a", "FAIL"), na]), "FAIL")
         self.assertEqual(wc.classify("UNKNOWN", [], [row("a", "UNKNOWN"), na]), "UNKNOWN")
         self.assertEqual(wc.classify("NOT_APPLICABLE", [], [na, {**na, "id": "m"}]), "NOT_APPLICABLE")

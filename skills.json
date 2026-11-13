@@ -160,8 +160,8 @@
       "command": "os-optics-kit summary",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/summary/SKILL.md",
-      "tokens": 619,
-      "sha256": "f1a08c875f51d2de2e57c45367cfd220ba07bd250d6001a7e3f19b0460a14361"
+      "tokens": 629,
+      "sha256": "a23840555cbac20dcb66539d39bd0682e54ec357e4beb131f94e7d7e1f5062b6"
     },
     {
       "name": "sweep",

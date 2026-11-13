@@ -74,8 +74,8 @@ Selected requirements determine a sample's class:
 1. `ERROR`: an edit, load or run was refused, or the sample was not run.
 2. `FAIL`: at least one selected requirement is unmet; out-of-model and indeterminate requirements remain listed per target.
 3. `OUT_OF_MODEL`: no selected requirement is unmet, and a selected target depends on a quantity outside its model. A missing selected target ID is `UNKNOWN`.
-4. `UNKNOWN`: no selected requirement is unmet or out of its model, but one is indeterminate or its quantity is unavailable.
-5. `PASS`: every selected requirement that applies is met; targets assessed `NOT_APPLICABLE` are left out and stay listed in `requirements.not_applicable`.
+4. `UNKNOWN`: no selected requirement is unmet or out of its model, but one is indeterminate, its quantity is unavailable, or it is assessed `NOT_APPLICABLE` while another selected requirement applies.
+5. `PASS`: every selected requirement is met.
 6. `NOT_APPLICABLE`: no selected requirement applies, including a target-free run.
 
 Unrelated scope findings remain in the record without invalidating an otherwise

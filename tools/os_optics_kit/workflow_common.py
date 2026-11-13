@@ -17,10 +17,10 @@ What it provides:
   a sample record whatever happens (an Engine refusal at load or at run is recorded, never raised);
 * the requirement class of a sample, from the Engine's assessments of the selected targets: ERROR (no result),
   FAIL (a selected requirement is unmet), OUT_OF_MODEL (a selected target reads a quantity outside its model),
-  UNKNOWN (a selected requirement is indeterminate), PASS (every selected requirement that applies is met),
-  NOT_APPLICABLE (no selected requirement applies). The execution outcome (COMPLETED or PARTIAL, with the exhausted
-  budgets) is a separate fact of the record and does not change the class: a budget that leaves a target undecided
-  shows in that target's assessment;
+  UNKNOWN (a selected requirement is indeterminate, or one does not apply while another does), PASS (every selected
+  requirement is met), NOT_APPLICABLE (no selected requirement applies). The execution outcome (COMPLETED or
+  PARTIAL, with the exhausted budgets) is a separate fact of the record and does not change the class: a budget
+  that leaves a target undecided shows in that target's assessment;
 * ``freshness`` delegates to the Engine's CURRENT / HISTORICAL / UNDETERMINED decision with its reasons;
 * sha256 / JSON / CSV writers (LF line endings) and bounded-output helpers.
 
@@ -383,9 +383,11 @@ def classify(status, model_scope_issues, targets, selected=None, out_of_model_is
     In this order: ``ERROR`` without a result; ``NOT_APPLICABLE`` when no target is selected; ``UNKNOWN`` when a
     selected id is not in the run; ``FAIL`` when a selected target is ``UNMET``; ``OUT_OF_MODEL`` when a selected
     target carries model-applicability codes or the status ``OUT_OF_MODEL_SCOPE``; ``UNKNOWN`` when one is
-    ``INDETERMINATE`` or has no assessment; then the targets assessed ``NOT_APPLICABLE`` are left out:
-    ``NOT_APPLICABLE`` when none remains, ``PASS`` when every remaining one is ``MET``. Scope findings on quantities
-    no selected target reads do not change the class; the per-target rows keep every assessment and code.
+    ``INDETERMINATE`` or has no assessment; ``NOT_APPLICABLE`` when every selected target is assessed
+    ``NOT_APPLICABLE``; ``PASS`` when every selected target is ``MET``; else ``UNKNOWN``: a target assessed
+    ``NOT_APPLICABLE`` beside met ones is not met, as under the Engine's ``requirements`` exit contract. Scope
+    findings on quantities no selected target reads do not change the class; the per-target rows keep every
+    assessment and code.
     """
     if status is None:
         return "ERROR"
@@ -404,10 +406,9 @@ def classify(status, model_scope_issues, targets, selected=None, out_of_model_is
         return "OUT_OF_MODEL"
     if "INDETERMINATE" in assessments or any(value is None for value in assessments):
         return "UNKNOWN"
-    applicable = [value for value in assessments if value != "NOT_APPLICABLE"]
-    if not applicable:
+    if all(value == "NOT_APPLICABLE" for value in assessments):
         return "NOT_APPLICABLE"
-    return "PASS" if all(value == "MET" for value in applicable) else "UNKNOWN"
+    return "PASS" if all(value == "MET" for value in assessments) else "UNKNOWN"
 
 
 def requirement_outcome(status, execution, model_scope_issues, targets, selected=None, out_of_model_issues=()):
