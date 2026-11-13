@@ -69,12 +69,41 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(wc.classify("OUT_OF_MODEL_SCOPE", [], [row("a", "PASS"), scoped]), "OUT_OF_MODEL")
 
     def test_saved_record_is_classed_again(self):
-        record = {"outcome": "UNKNOWN", "status": "WARNING", "error": None,
+        """A saved record is classed again from its targets, selection and execution: a PARTIAL run whose selected
+        target is met is UNKNOWN, not PASS, as under the Engine's ``requirements`` exit contract."""
+        record = {"outcome": "PASS", "status": "WARNING", "error": None,
                   "execution": {"outcome": "PARTIAL", "budgets": {"exhausted": ["max_return_analysis_work"]}},
                   "targets": [row("a", "PASS"), row("b", "FAIL")], "selected_targets": ["a"]}
-        self.assertEqual(wc.record_outcome(record), "PASS")
+        self.assertEqual(wc.record_outcome(record), "UNKNOWN")
+        self.assertEqual(wc.record_outcome({**record, "execution": {"outcome": "COMPLETED"}}), "PASS")
         self.assertEqual(wc.record_outcome({**record, "selected_targets": None}), "FAIL")
         self.assertEqual(wc.record_outcome({**record, "error": {"code": "NOT_RUN"}}), "ERROR")
+
+    def test_partial_run_exits_3_whatever_its_class(self):
+        """The exit code of a run under the Engine's ``requirements`` contract: a PARTIAL execution exits 3 (the
+        calculation did not complete) before an unmet (1) or undecided (2) target; an error stays 4."""
+        partial = {"outcome": "PARTIAL", "budgets": {"exhausted": ["max_trace_steps"]}}
+        for label, completed in (("PASS", 0), ("NOT_APPLICABLE", 0), ("FAIL", 1), ("UNKNOWN", 2),
+                                 ("OUT_OF_MODEL", 3), ("OUT_OF_MODEL_SCOPE", 3), ("ERROR", 4)):
+            with self.subTest(label=label):
+                self.assertEqual(wc.requirement_exit_code(label, {"outcome": "COMPLETED"}), completed)
+                self.assertEqual(wc.requirement_exit_code(label, None), completed)
+                self.assertEqual(wc.requirement_exit_code(label, partial), 4 if label == "ERROR" else 3)
+        self.assertEqual(wc.EXECUTION_INCOMPLETE_EXIT, 3)
+
+    def test_emit_exits_3_for_a_partial_run(self):
+        """``emit`` with ``execution_of``: the status's code, or 3 when the classed run is PARTIAL."""
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        def emitted(summary):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return wc.emit(lambda: summary, execution_of=lambda s: (s.get("run") or {}).get("execution"))
+
+        self.assertEqual(emitted({"status": "FAIL", "run": {"execution": {"outcome": "COMPLETED"}}}), 1)
+        self.assertEqual(emitted({"status": "FAIL", "run": {"execution": {"outcome": "PARTIAL"}}}), 3)
+        self.assertEqual(emitted({"status": "UNKNOWN", "run": {"execution": {"outcome": "PARTIAL"}}}), 3)
+        self.assertEqual(emitted({"status": "EDITED"}), 0)
 
 
 if __name__ == "__main__":

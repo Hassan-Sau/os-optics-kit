@@ -33,10 +33,10 @@ unit, bounds, `assessment` MET / UNMET / INDETERMINATE / NOT_APPLICABLE, quantit
 `power_budget`, `issues`, `model_scope_issues`, `identity` (engine build, catalog release, hashes),
 `integrity`, `artifacts`, `view_command`.
 
-Exit: 0 every target is met, or none is declared; 1 an unmet target, 2 an indeterminate or
-`NOT_APPLICABLE` target, 3 a target outside its model, 4 invalid input,
-broken artifact or a `FAILED` / `CANCELLED` run (JSON error on stderr). A `PARTIAL` run exits by its
-targets; `outcome.execution` names the budgets.
+Exit: 0 the run completed and every target is met, or none is declared; 1 an unmet target, 2 an
+indeterminate or `NOT_APPLICABLE` target, 3 a target outside its model or a `PARTIAL` run (a compute
+budget was reached; never `PASS`), 4 invalid input, broken artifact or a `FAILED` / `CANCELLED` run
+(JSON error on stderr). `outcome.execution` names the budgets.
 
 ## Minimal example
 

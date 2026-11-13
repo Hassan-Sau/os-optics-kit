@@ -58,6 +58,29 @@ class ResultSummaryTests(unittest.TestCase):
                 self.assertEqual(json.loads(stdout)["outcome"]["execution"]["outcome"], state)
 
     @requires_engine
+    def test_partial_execution_is_unknown_and_exits_3(self):
+        """A PARTIAL run (a compute budget was reached) did not complete: without targets it is UNKNOWN, not
+        NOT_APPLICABLE, and it exits 3, the Engine's ``requirements`` code for an incomplete calculation."""
+        results = results_from_engine(engine_result("WARNING"))
+        native = results.targets()
+        native["outcome"] = {"execution": {"outcome": "PARTIAL", "budgets": {"exhausted": ["max_trace_steps"]}},
+                             "requirements": {}}
+        with patch.object(RunResults, "targets", return_value=native):
+            summary = summarize_results(results)
+        self.assertEqual(summary["requirement_outcome"], "UNKNOWN")
+        code, stdout, stderr = invoke(lambda: summary)
+        self.assertEqual((code, stderr), (3, ""))
+        self.assertEqual(json.loads(stdout)["outcome"]["execution"]["outcome"], "PARTIAL")
+
+    def test_exit_code_of_a_partial_run_comes_before_its_class(self):
+        for outcome, completed in (("UNKNOWN", 2), ("FAIL", 1), ("OUT_OF_MODEL", 3)):
+            for execution, expected in (("COMPLETED", completed), ("PARTIAL", 3)):
+                with self.subTest(outcome=outcome, execution=execution):
+                    code, _stdout, stderr = invoke(lambda: {"status": "WARNING", "requirement_outcome": outcome,
+                                                            "outcome": {"execution": {"outcome": execution}}})
+                    self.assertEqual((code, stderr), (expected, ""))
+
+    @requires_engine
     def test_all_scientific_statuses_produce_json_and_matching_exit_codes(self):
         for status, expected in (
             ("PASS", 0), ("WARNING", 0), ("NOT_APPLICABLE", 0),

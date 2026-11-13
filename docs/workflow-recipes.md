@@ -36,8 +36,8 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 
 | Command | Exit 0 | 1 | 2 | 3 | 4 |
 | --- | --- | --- | --- | --- | --- |
-| `summary` | `PASS`, `NOT_APPLICABLE` | `FAIL` | `UNKNOWN` | `OUT_OF_MODEL` | error, including a `FAILED` or `CANCELLED` run |
-| `edit` | `EDITED`, `ALREADY_APPLIED`, `DESCRIBED`; with `--run` outcome `PASS` or `NOT_APPLICABLE` | outcome `FAIL` | outcome `UNKNOWN` | outcome `OUT_OF_MODEL` | refused, `RUN_REFUSED` |
+| `summary` | `PASS`, `NOT_APPLICABLE` | `FAIL` | `UNKNOWN` | `OUT_OF_MODEL`; a `PARTIAL` run | error, including a `FAILED` or `CANCELLED` run |
+| `edit` | `EDITED`, `ALREADY_APPLIED`, `DESCRIBED`; with `--run` outcome `PASS` or `NOT_APPLICABLE` | outcome `FAIL` | outcome `UNKNOWN` | outcome `OUT_OF_MODEL`; a `PARTIAL` run | refused, `RUN_REFUSED` |
 | `sweep` | `COMPLETED`, `PLANNED` | `NO_FEASIBLE` (constraints given, none met) | | | refused |
 | `sensitivity` | `COMPLETED`, `PLANNED` | | `INCOMPLETE` (a derivative unavailable) | | refused |
 | `tolerance` | `COMPLETED` (at least one PASS), `DRAWN`, `PLANNED`, `REPRODUCED` | `NO_FEASIBLE` (no PASS), `MISMATCH` | | | refused |
@@ -48,23 +48,26 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 | `candidates` | `COMPLETED` | `NO_MATCH` | | | invalid input, no catalog |
 | `measurements` | `PASS`, `WARNING` | `FAIL` (RMSE bound exceeded) | `UNKNOWN` (no fit) | | error |
 | `cases verify` | every case matches `expected.json` | a case differs | | | usage error, unknown case, no engine |
-| case `workflow.py` | nominal `PASS` | nominal `FAIL` | `UNKNOWN` | `OUT_OF_MODEL` | `ERROR`, refused |
+| case `workflow.py` | nominal `PASS` | nominal `FAIL` | `UNKNOWN` | `OUT_OF_MODEL`; a `PARTIAL` nominal run | `ERROR`, refused |
 
 A study command whose execution was cancelled (Ctrl-C, or `cancel()` of its scheduler)
 prints status `CANCELLED` and exits 130, with any number of workers; its `next` command
 (`study run DIR --resume`) continues it. Ctrl-C outside an execution (planning,
 aggregation) prints the error `INTERRUPTED` and exits 130.
 
-A partial run (execution `PARTIAL`: a compute budget was reached) takes the class of
-its selected targets. A target the budget left undecided is `INDETERMINATE` and makes the
-run `UNKNOWN`; a run whose selected targets are all met is `PASS`, for example a reached
-`max_return_analysis_work` (`RETURN_ANALYSIS_BUDGET`) with every target `MET`. The
+A partial run (execution `PARTIAL`: a compute budget was reached) did not complete. It is
+never `PASS` or `NOT_APPLICABLE`: a run whose selected targets are all met, or that selects
+none, is `UNKNOWN`, for example a reached `max_return_analysis_work`
+(`RETURN_ANALYSIS_BUDGET`) with every target `MET`; an unmet or out-of-model target keeps
+`FAIL` or `OUT_OF_MODEL`. `summary`, `edit --run` and a case `workflow.py` (by its nominal
+run) exit 3 for a partial run whatever its class, the os-optics `requirements` exit code
+for a calculation that did not complete. The
 execution outcome and the exhausted budgets stay in the record (`outcome.execution`; in a
 study the columns `execution_outcome` and `budgets_exhausted` and the count
 `by_execution`); the sweep constraint `{"execution": ["COMPLETED"]}` makes only complete
 runs feasible. A `FAILED` or `CANCELLED` run is `ERROR`, exit 4.
 
-`edit --run` exits by the outcome of its selected targets; execution, requirements,
+`edit --run` exits by the outcome of its selected targets (3 for a partial run); execution, requirements,
 quantity states and issues are in `run`.
 
 ## Outcome classes
@@ -75,8 +78,8 @@ Selected requirements determine a sample's class:
 2. `FAIL`: at least one selected requirement is unmet; out-of-model and indeterminate requirements remain listed per target.
 3. `OUT_OF_MODEL`: no selected requirement is unmet, and a selected target depends on a quantity outside its model. A missing selected target ID is `UNKNOWN`.
 4. `UNKNOWN`: no selected requirement is unmet or out of its model, but one is indeterminate, its quantity is unavailable, or it is assessed `NOT_APPLICABLE`.
-5. `PASS`: every selected requirement is met.
-6. `NOT_APPLICABLE`: no target is selected, including a target-free run.
+5. `PASS`: every selected requirement is met and the run completed.
+6. `NOT_APPLICABLE`: no target is selected, including a target-free run, and the run completed.
 
 Unrelated scope findings remain in the record without invalidating an otherwise
 usable selected quantity. Each target value has a `value_kind` (table column

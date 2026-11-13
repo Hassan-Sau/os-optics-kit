@@ -54,8 +54,10 @@ plan, with the plots and report chosen here); --resume continues a planned or in
 
 Each sample retains execution, quantity evidence and target assessments. Its shorthand is ERROR (not run),
 FAIL (unmet), OUT_OF_MODEL (selected target applicability), UNKNOWN (indeterminate, or a target that does not
-apply), PASS (every selected target is met), or NOT_APPLICABLE (no target is selected); a PARTIAL run has the class of its targets. Counts use every requested sample as denominator; the PASS fraction
-among evaluable samples (PASS + FAIL) is listed separately. These are simulated sample fractions for the stated
+apply), PASS (every selected target is met), or NOT_APPLICABLE (no target is selected); a PARTIAL run (a
+compute budget was reached) is never PASS or NOT_APPLICABLE but UNKNOWN when its targets are met or none is
+selected. Counts use every requested sample as denominator; the PASS fraction among evaluable samples (PASS + FAIL)
+is listed separately. These are simulated sample fractions for the stated
 independent distributions. Per-target statistics use finite exact values with applicable dependencies; bounded
 or unavailable values and unrelated diagnostics remain visible in the sample records.
 Stdout: one compact JSON document (counts with denominators, target distributions, samples whose runs carry

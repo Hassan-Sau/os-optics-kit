@@ -438,11 +438,13 @@ def main(argv=None):
             result["status"] = outcome_status(result["run"])
         return result
 
-    return wc.emit(workflow, {**wc.WORKFLOW_EXIT_CODES, "DESCRIBED": 0, "RUN_REFUSED": 4})
+    return wc.emit(workflow, {**wc.WORKFLOW_EXIT_CODES, "DESCRIBED": 0, "RUN_REFUSED": 4},
+                   execution_of=lambda summary: (summary.get("run") or {}).get("execution"))
 
 
 def outcome_status(run):
-    """Exit status of the selected requirements; execution evidence is kept separately."""
+    """Exit status of the selected requirements; the execution is kept separately in ``run`` (a PARTIAL run exits 3
+    whatever this status, ``wc.requirement_exit_code``)."""
     outcome = run.get("outcome")
     if outcome == "OUT_OF_MODEL":
         return "OUT_OF_MODEL_SCOPE"

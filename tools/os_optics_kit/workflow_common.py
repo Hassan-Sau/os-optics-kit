@@ -19,8 +19,10 @@ What it provides:
   FAIL (a selected requirement is unmet), OUT_OF_MODEL (a selected target reads a quantity outside its model),
   UNKNOWN (a selected requirement is indeterminate or does not apply), PASS (every selected requirement is met),
   NOT_APPLICABLE (no target is selected, including a target-free run). The execution outcome (COMPLETED or
-  PARTIAL, with the exhausted budgets) is a separate fact of the record and does not change the class: a budget
-  that leaves a target undecided shows in that target's assessment;
+  PARTIAL, with the exhausted budgets) is a separate fact of the record. A PARTIAL run did not complete: it is
+  never PASS or NOT_APPLICABLE (UNKNOWN when its selected targets are met or none is selected), keeps FAIL /
+  OUT_OF_MODEL, and exits 3 whatever its class (``requirement_exit_code``), as under the Engine's ``requirements`` exit
+  contract;
 * ``freshness`` delegates to the Engine's CURRENT / HISTORICAL / UNDETERMINED decision with its reasons;
 * sha256 / JSON / CSV writers (LF line endings) and bounded-output helpers.
 
@@ -43,6 +45,7 @@ import time
 
 from .result_summary import ArgumentParser  # noqa: F401 - the tools' parser (usage errors exit 4)
 from .result_summary import EXIT_CODES, ERROR_EXIT, error_document, exit_status, json_cli_stdout, summarize_results
+from .result_summary import EXECUTION_INCOMPLETE_EXIT, requirement_exit_code  # noqa: F401 - used by the tools
 
 OUTCOMES = ("ERROR", "OUT_OF_MODEL", "UNKNOWN", "FAIL", "PASS", "NOT_APPLICABLE")
 #: Exit codes of the workflow tools: the run statuses of result_summary plus the study / edit outcomes.
@@ -409,12 +412,19 @@ def classify(status, model_scope_issues, targets, selected=None, out_of_model_is
 
 
 def requirement_outcome(status, execution, model_scope_issues, targets, selected=None, out_of_model_issues=()):
-    """``classify`` for a run record: a ``FAILED`` or ``CANCELLED`` calculation has no result and is ``ERROR``;
-    every other run, ``PARTIAL`` included, takes the class of its selected targets' assessments. What a reached
-    budget left undecided is ``INDETERMINATE`` on the targets it affects; ``execution`` stays beside the class."""
-    if (execution or {}).get("outcome") in ("FAILED", "CANCELLED"):
+    """``classify`` for a run record: a ``FAILED`` or ``CANCELLED`` calculation has no result and is ``ERROR``; a
+    ``PARTIAL`` one (a compute budget was reached) did not complete and is never ``PASS`` or ``NOT_APPLICABLE``
+    but ``UNKNOWN``, as under the Engine's ``requirements`` exit contract, while an unmet or out-of-model selected
+    target keeps ``FAIL`` / ``OUT_OF_MODEL``. What a reached budget left undecided is ``INDETERMINATE`` on the
+    targets it affects; ``execution`` stays beside the class, and ``requirement_exit_code`` gives every ``PARTIAL``
+    run exit 3."""
+    state = (execution or {}).get("outcome")
+    if state in ("FAILED", "CANCELLED"):
         return "ERROR"
-    return classify(status, model_scope_issues, targets, selected, out_of_model_issues)
+    outcome = classify(status, model_scope_issues, targets, selected, out_of_model_issues)
+    if state == "PARTIAL" and outcome in ("PASS", "NOT_APPLICABLE"):
+        return "UNKNOWN"
+    return outcome
 
 
 def record_outcome(record):
@@ -647,14 +657,17 @@ def freshness(project, run_dir, *, verify=True):
 
 # --------------------------------------------------------------------------------------------- CLI output
 
-def emit(workflow, exit_codes=None):
+def emit(workflow, exit_codes=None, *, execution_of=None):
     """Run ``workflow``; one compact JSON document on stdout (exit code from its ``status``), diagnostics on
-    stderr; any exception -> ``{"error": {...}}`` on stderr, empty stdout, exit 4."""
+    stderr; any exception -> ``{"error": {...}}`` on stderr, empty stdout, exit 4. ``execution_of(summary)``: the
+    ``execution`` of the run the status classes, if any; a PARTIAL one exits ``EXECUTION_INCOMPLETE_EXIT``
+    (``requirement_exit_code``)."""
     exit_codes = exit_codes or WORKFLOW_EXIT_CODES
     try:
         with json_cli_stdout():
             summary = workflow()
-        code = exit_codes[summary["status"]]
+        execution = execution_of(summary) if execution_of is not None else None
+        code = requirement_exit_code(summary["status"], execution, exit_codes)
         output = json.dumps(json_safe(summary), ensure_ascii=True, allow_nan=False, separators=(",", ":"))
     except SystemExit as exc:  # --help
         return exit_status(exc)

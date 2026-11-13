@@ -141,35 +141,39 @@ class EngineControlsTests(unittest.TestCase):
             record = wc.run_sample(limited, directory / "limited_free")
             self.assertEqual(record["execution"]["outcome"], "PARTIAL")
             self.assertFalse(record["requirements"]["declared"])
-            # Without targets the class is NOT_APPLICABLE (exit 0); the execution stays PARTIAL beside it.
-            self.assertEqual((record["status"], record["outcome"]), ("UNKNOWN", "NOT_APPLICABLE"))
+            # Without targets a PARTIAL run is UNKNOWN, not NOT_APPLICABLE, and exits 3 (the calculation did not
+            # complete), as under the Engine's requirements exit contract; the execution is stated beside it.
+            self.assertEqual((record["status"], record["outcome"]), ("UNKNOWN", "UNKNOWN"))
             from os_optics_kit import result_summary
             from tests.workflow_fixtures import invoke
             code, summary, error = invoke(result_summary.main, [record["run_dir"]])
-            self.assertEqual((code, error), (0, ""))
+            self.assertEqual((code, error), (3, ""))
             self.assertEqual(summary["outcome"]["execution"]["outcome"], "PARTIAL")
-            self.assertEqual(summary["requirement_outcome"], "NOT_APPLICABLE")
+            self.assertEqual(summary["requirement_outcome"], "UNKNOWN")
 
-    def test_partial_execution_takes_the_class_of_its_targets(self):
+    def test_partial_execution_is_never_a_pass_and_exits_3(self):
+        """A PARTIAL run did not complete: met targets or none leave it UNKNOWN (not PASS / NOT_APPLICABLE), an
+        unmet or out-of-model target keeps FAIL / OUT_OF_MODEL, and every PARTIAL run exits 3, the Engine's
+        ``requirements`` code for an incomplete calculation."""
         met = [{"id": "t", "assessment": "MET", "status": "PASS"}]
         unmet = [{"id": "t", "assessment": "UNMET", "status": "FAIL"}]
         out = [{"id": "t", "assessment": "INDETERMINATE", "status": "OUT_OF_MODEL_SCOPE"}]
-        for execution, targets, expected in (
-            ({"outcome": "COMPLETED"}, met, "PASS"),
-            ({"outcome": "COMPLETED"}, [], "NOT_APPLICABLE"),
-            ({"outcome": "PARTIAL"}, met, "PASS"),
-            ({"outcome": "PARTIAL"}, [], "NOT_APPLICABLE"),
-            ({"outcome": "PARTIAL"}, [{"id": "t", "assessment": "INDETERMINATE", "status": "UNKNOWN"}], "UNKNOWN"),
-            ({"outcome": "PARTIAL"}, unmet, "FAIL"),
-            ({"outcome": "PARTIAL"}, out, "OUT_OF_MODEL"),
-            ({"outcome": "FAILED"}, met, "ERROR"),
-            ({"outcome": "CANCELLED"}, met, "ERROR"),
-            (None, met, "PASS"),
+        for execution, targets, expected, code in (
+            ({"outcome": "COMPLETED"}, met, "PASS", 0),
+            ({"outcome": "COMPLETED"}, [], "NOT_APPLICABLE", 0),
+            ({"outcome": "COMPLETED"}, unmet, "FAIL", 1),
+            ({"outcome": "PARTIAL"}, met, "UNKNOWN", 3),
+            ({"outcome": "PARTIAL"}, [], "UNKNOWN", 3),
+            ({"outcome": "PARTIAL"}, [{"id": "t", "assessment": "INDETERMINATE", "status": "UNKNOWN"}], "UNKNOWN", 3),
+            ({"outcome": "PARTIAL"}, unmet, "FAIL", 3),
+            ({"outcome": "PARTIAL"}, out, "OUT_OF_MODEL", 3),
+            ({"outcome": "FAILED"}, met, "ERROR", 4),
+            ({"outcome": "CANCELLED"}, met, "ERROR", 4),
+            (None, met, "PASS", 0),
         ):
             with self.subTest(execution=execution, targets=targets):
                 self.assertEqual(wc.requirement_outcome("UNKNOWN", execution, [], targets), expected)
-                self.assertEqual(wc.WORKFLOW_EXIT_CODES[expected], {"PASS": 0, "NOT_APPLICABLE": 0, "FAIL": 1,
-                                 "UNKNOWN": 2, "OUT_OF_MODEL": 3, "ERROR": 4}[expected])
+                self.assertEqual(wc.requirement_exit_code(expected, execution, wc.WORKFLOW_EXIT_CODES), code)
 
     def test_objective_validity_and_requirement_feasibility_are_separate(self):
         rows = [

@@ -46,7 +46,8 @@ Each sample keeps its execution outcome (COMPLETED or PARTIAL, columns execution
 quantity states and target assessments. The outcome class comes from the selected targets' assessments: ERROR, FAIL
 (unmet), OUT_OF_MODEL (a selected target reads a quantity outside its model), UNKNOWN (indeterminate, or a
 requirement that does not apply), PASS (every selected requirement is met) or NOT_APPLICABLE (no target is
-selected). A PARTIAL run has the class of its targets; the constraint {"execution": ["COMPLETED"]} makes only
+selected). A PARTIAL run (a compute budget was reached) did not complete: it is never PASS or NOT_APPLICABLE
+(UNKNOWN when its targets are met or none is selected); the constraint {"execution": ["COMPLETED"]} makes only
 complete runs feasible.
 No sample is dropped. Feasibility follows the explicit constraints and objective validity. An exact scalar
 objective must have a finite value with applicable dependencies; bounded values remain recorded but are not

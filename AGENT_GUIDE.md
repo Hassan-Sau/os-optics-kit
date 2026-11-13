@@ -53,7 +53,8 @@ reached), each quantity's state (a `BOUNDED` quantity is an interval), each targ
 hashes). A Project without targets has no assessed requirement.
 
 A sample's class (`PASS`, `FAIL`, `OUT_OF_MODEL`, `UNKNOWN`, `NOT_APPLICABLE`, `ERROR`) is the class
-of its selected targets' assessments. A study table holds every requested sample; each target value
+of its selected targets' assessments; a `PARTIAL` run did not complete and is never `PASS` or
+`NOT_APPLICABLE` (`UNKNOWN` when its targets are met or none is selected). A study table holds every requested sample; each target value
 has a `value_kind` (`EXACT`, `BOUNDED`, ...). `objective_valid` and `feasible` are separate fields;
 `NO_FEASIBLE`: no sample meets the constraints. `pass_fraction` divides by all requested samples,
 `pass_fraction_among_evaluable` by PASS + FAIL; a tolerance fraction counts simulated samples under
@@ -65,7 +66,7 @@ Saved results keep their identities after edits. `compare` and `os-optics result
 freshness record.
 
 Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN or
-`INCOMPLETE`; 3 OUT_OF_MODEL (a `PARTIAL` run exits by its targets); 4 refused input, with a JSON
+`INCOMPLETE`; 3 OUT_OF_MODEL, or a `PARTIAL` run whatever its class; 4 refused input, with a JSON
 error on stderr; 130 a cancelled study or Ctrl-C (`study run DIR --resume` continues a study). Stdout is compact JSON;
 details stay in files.
 

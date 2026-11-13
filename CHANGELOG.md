@@ -45,12 +45,13 @@ Requires `os-optics>=0.13,<0.14`; verified with os-optics 0.13.0 and catalog rel
 ### Changed
 
 - The requirement class of a run (`summary`, `edit --run`, study outcomes) is the class of its selected targets'
-  assessments. A `PARTIAL` run whose targets are all met is `PASS` (exit 0; it was `UNKNOWN`, exit 2, since 0.2.0),
-  a `PARTIAL` run without targets is `NOT_APPLICABLE`, and a target a reached budget left undecided keeps the run
-  `UNKNOWN`. An unmet target makes the run `FAIL` also when another target is outside its model.
-  A run whose selected targets are all assessed `NOT_APPLICABLE` is `UNKNOWN` (exit 2; it was `NOT_APPLICABLE`,
-  exit 0), as under the os-optics `requirements` exit contract. `outcome.execution` and the budgets stay beside the class; a `FAILED` or `CANCELLED` run is still an error
-  (exit 4).
+  assessments; a target a reached budget left undecided keeps the run `UNKNOWN`. An unmet target makes the run
+  `FAIL` also when another target is outside its model. A run whose selected targets are all assessed
+  `NOT_APPLICABLE` is `UNKNOWN` (exit 2; it was `NOT_APPLICABLE`, exit 0), as under the os-optics `requirements`
+  exit contract. A `PARTIAL` run is never `PASS` or `NOT_APPLICABLE` (`UNKNOWN` when its targets are all met or
+  none is selected, as before) and exits 3 whatever its class (it exited by its class), the os-optics
+  `requirements` code for a calculation that did not complete. `outcome.execution` and the budgets stay beside
+  the class; a `FAILED` or `CANCELLED` run is still an error (exit 4).
 - `sweep`, `sensitivity` and `tolerance` write a study directory with the files above next to the tables and
   reports they wrote before. The tables list the samples in plan order.
 - `max_evaluations` is optional in sweep, sensitivity and tolerance specs (absent: no cap); `--max-evaluations` of

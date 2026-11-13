@@ -186,7 +186,7 @@ os-optics-kit tolerance studies/tolerance_expander.json --out tolerance-zero --z
 
 `--out DIR` 的输出结构：`DIR/workflow.json`（完整摘要）、`DIR/nominal/`（项目、运行、解析对照、功率图）、
 `DIR/studies/<参数>/`（每个样本的项目和运行、`table.csv`、比较结果、图、报告）以及链接全部内容的
-`DIR/report/report.md`。退出码反映标称设计（0 PASS、1 FAIL、2 UNKNOWN、3 OUT_OF_MODEL）；研究中未通过的
+`DIR/report/report.md`。退出码反映标称设计（0 PASS、1 FAIL、2 UNKNOWN、3 OUT_OF_MODEL 或标称运行为 PARTIAL）；研究中未通过的
 样本计入摘要。
 
 ### 5.1 扩束与聚焦

@@ -201,7 +201,7 @@ calculation and writes a report. Show all inputs with units and defaults with `p
 Output layout of `--out DIR`: `DIR/workflow.json` (full summary), `DIR/nominal/` (project, run, closed-form
 comparison, power plot), `DIR/studies/<parameter>/` (one project and run per sample, `table.csv`, comparison, plots,
 report) and `DIR/report/report.md`, which links everything. The exit code reflects the nominal design (0 PASS,
-1 FAIL, 2 UNKNOWN, 3 OUT_OF_MODEL); study samples that miss are counted in the summary.
+1 FAIL, 2 UNKNOWN, 3 OUT_OF_MODEL or a PARTIAL nominal run); study samples that miss are counted in the summary.
 
 ### 5.1 Beam expansion and focusing
 

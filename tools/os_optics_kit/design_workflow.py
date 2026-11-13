@@ -32,7 +32,8 @@ Output directory layout:
 
 Outcome classes per sample (workflow_common): ERROR, OUT_OF_MODEL (selected target applicability),
 UNKNOWN (indeterminate or not applicable), FAIL (unmet), PASS (all selected targets met), NOT_APPLICABLE (no
-selected requirements); their warning codes are listed.
+selected requirements); their warning codes are listed. A PARTIAL run (a compute budget was reached) is never PASS
+or NOT_APPLICABLE; a PARTIAL nominal run exits 3.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ from . import compare_runs as cr
 from . import build_report as br
 from .study import aggregate as agg, options as opts, resources, schedulers
 
-#: exit code of a workflow = outcome class of its nominal run
+#: exit code of a workflow = outcome class of its nominal run; a PARTIAL nominal run exits 3 (wc.requirement_exit_code)
 EXIT_CODES = {"PASS": 0, "FAIL": 1, "UNKNOWN": 2, "OUT_OF_MODEL": 3, "ERROR": 4, "NOT_APPLICABLE": 0, "DESCRIBED": 0}
 SWEEP_UNITS = ("nm", "um", "µm", "mm", "m", "deg", "rad", "mrad", "urad", "W", "mW", "uW", "1", "")
 MAX_NOTABLE = 8
@@ -635,4 +636,4 @@ def main(config, defaults, argv=None, *, description, extra_options=None):
                                overwrite=args.overwrite, workers=args.workers)
         return compact(summary)
 
-    return wc.emit(workflow, EXIT_CODES)
+    return wc.emit(workflow, EXIT_CODES, execution_of=lambda summary: (summary.get("nominal") or {}).get("execution"))
