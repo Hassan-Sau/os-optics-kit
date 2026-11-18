@@ -233,6 +233,9 @@ jobs:
       - name: Tests and tools against the published engine and the pinned catalog
         if: steps.gate.outputs.run == 'true'
         # The cases are verified once, by the "Verify cases" step.
+        env:
+          # the fonts are installed above: a test that draws Chinese fails instead of skipping without one
+          OS_OPTICS_KIT_REQUIRE_CJK_FONT: "1"
         run: python scripts/check_alignment.py --out run-alignment --skip cases-verify
       - name: Render with published engine and Chrome
         if: steps.gate.outputs.run == 'true'

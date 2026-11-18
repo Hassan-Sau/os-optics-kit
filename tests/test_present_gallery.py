@@ -7,6 +7,7 @@ Tests that need Pillow, matplotlib, playwright or Chrome skip when those are mis
 
 import html.parser
 import importlib
+from importlib.util import find_spec
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ import zipfile
 
 from os_optics_kit import gallery
 from os_optics_kit import presentation as pr
+from tests.font_fixtures import REQUIRE_CJK_FONT, require_chinese_font
 
 REQUIRE = os.environ.get("OS_OPTICS_KIT_REQUIRE_PRESENTATION") == "1"
 SPEC_TITLE = {"en": "Beam expander results", "zh-CN": "扩束器结果"}
@@ -220,6 +222,8 @@ class GalleryPageTests(unittest.TestCase):
         self.assertTrue(all(asset["id"] for asset in data["assets"]))
 
     def test_both_languages_and_default_language(self):
+        if find_spec("matplotlib") is not None:
+            require_chinese_font(self)  # the contact sheet is drawn in Chinese
         out, _ = self.write(language="zh-CN")
         text_value, data = page_data(out / "index.html")
         self.assertIn('<html lang="zh-CN"', text_value)
@@ -366,7 +370,7 @@ class ContactSheetTests(unittest.TestCase):
         try:
             result = gallery.write_gallery(out)
         except pr.PresentationError as exc:
-            if exc.code == "FONT_MISSING" and not REQUIRE:
+            if exc.code == "FONT_MISSING" and not REQUIRE_CJK_FONT:
                 self.skipTest(exc.details.get("recovery", str(exc)))
             raise
         self.assertEqual(result, {"index": "index.html", "contact_sheet": "contact-sheet.png"})
