@@ -42,6 +42,7 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 | `present build` | `COMPLETED` | | `INCOMPLETE` (an asset has a missing input or could not be drawn) | | refused |
 | `candidates` | `COMPLETED` | `NO_MATCH` | | | invalid input, no catalog |
 | `measurements` | `PASS`, `WARNING` | `FAIL` (RMSE bound exceeded) | `UNKNOWN` (no fit) | | error |
+| `sfr` | `PASS`, `WARNING` | | `UNKNOWN` (too many empty ESF bins) | | refused input |
 | `cases verify` | every case matches `expected.json` | a case differs | | | usage error, unknown case, no engine |
 | case `workflow.py` | nominal `PASS` | nominal `FAIL` | `UNKNOWN` | `OUT_OF_MODEL` | `ERROR`, refused |
 
@@ -484,6 +485,23 @@ without a `--range`, `--near` or `--sort` field, per field), `shown` and `omitte
 `--out` writes every matched row. The command above returns 8 of
 471 plano-convex lenses valid at 780 nm. Use a returned `optical_sku` in
 `set_component_product`.
+
+## Slanted-edge SFR
+
+```bash
+os-optics-kit sfr edge.png --roi X,Y,W,H --pixel-pitch-um 3.45 --out sfr-run
+os-optics-kit sfr edge.png --roi X,Y,W,H --pixel-pitch-um 3.45 --design imaging.json --design-line SRC0#0 --out sfr-cmp
+```
+
+ISO 12233 e-SFR of one edge in the ROI, no engine needed. Read `edge.angle_deg`,
+`edge.fit_residual_rms_px`, `sfr.sfr50_cy_per_px`, `sfr.sfr_at_nyquist` and `issues`
+(`EDGE_ANGLE_SHALLOW`, `CLIPPED_PIXELS`, `EMPTY_BINS`, ...). Values are used as linear
+unless `--oecf gamma|srgb|table`. `--design` takes the JSON of
+`os-optics results imaging RUN --monitor PLANE` or a `frequency,value` CSV with
+`--design-unit`; a cy/mm curve needs the pixel pitch (`PIXEL_PITCH_REQUIRED`). The
+measured SFR is a system magnitude, the design curve signed optical MTF without pixel
+aperture, sampling or processing: report both with `comparison.json`'s
+`input_differences`, never one as the other. See [SFR](en/sfr.md).
 
 ## Sensitivity
 

@@ -10,7 +10,8 @@ English · [简体中文](https://github.com/JunLin615/os-optics-kit/blob/main/R
 os-optics-kit builds on the [OS Optics](https://github.com/JunLin615/os-optics) engine. It provides one command,
 `os-optics-kit`, with tools that edit Projects by ID, sweep parameters, compare saved runs, plot, report, render
 presentation-grade 3D figures, estimate sensitivity and tolerance, run independent evaluations as resumable studies in
-parallel worker processes, select catalog parts, analyze detector measurements and prepare presentation material; a
+parallel worker processes, select catalog parts, analyze detector measurements, measure slanted-edge SFR and prepare
+presentation material; a
 collection of cases, designs
 that rerun on the engine and compare with their recorded outcome; and a vendor-neutral skill page for each tool,
 which any coding agent can load.
@@ -22,7 +23,7 @@ which any coding agent can load.
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | Product documentation and feedback |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | This repository: tools, cases, skills and contributions |
 
-**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
+**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
 
 ## Install
 
@@ -133,6 +134,7 @@ Each case holds `project.json` (the Project with its targets), `CASE.md` (for ag
 | `study` | `os-optics-kit study` | Run, resume, inspect and aggregate a planned study, serially or in worker processes; plan candidate Projects |
 | `candidates` | `os-optics-kit candidates` | List catalog products that pass explicit filters, sorted by closeness to a value |
 | `measurements` | `os-optics-kit measurements` | Subtract backgrounds, normalize by a reference channel and fit detector CSV data |
+| `sfr` | `os-optics-kit sfr` | Measure slanted-edge SFR (ISO 12233 e-SFR) of an image, optionally beside a design MTF |
 | `run-case` | `os-optics-kit cases` | Find, copy, run, check and adapt a case |
 | `contrib-case` | `os-optics-kit contrib case` | Turn a finished design into a pull-request-ready case |
 | `contrib-tool` | `os-optics-kit contrib tool` | Package a helper as a kit command with its skill page and tests |
