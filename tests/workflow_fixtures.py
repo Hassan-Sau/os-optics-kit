@@ -98,10 +98,13 @@ def by_id(items, key, ident):
 
 
 class TempDir:
-    """A temporary directory (removed afterwards) that is not inside the repository."""
+    """A temporary directory (removed afterwards) that is not inside the repository.
+
+    The path is resolved, as the tools resolve the paths they report: the system temporary directory can be an alias
+    of its real path (/var -> /private/var on macOS, an 8.3 short name such as RUNNER~1 on Windows)."""
 
     def __enter__(self):
-        self.path = Path(tempfile.mkdtemp(prefix="opensci-wf-"))
+        self.path = Path(tempfile.mkdtemp(prefix="opensci-wf-")).resolve()
         return self.path
 
     def __exit__(self, *exc):

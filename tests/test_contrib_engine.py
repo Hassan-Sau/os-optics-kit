@@ -112,7 +112,8 @@ class NormalizationTests(unittest.TestCase):
 @unittest.skipUnless(HAS_ENGINE and HAS_GIT, "os-optics or git is not installed")
 class CaseFlowTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="contrib-engine-"))
+        # resolved like the paths the tool reports (the temporary directory can be an alias, e.g. RUNNER~1 on Windows)
+        self.tmp = Path(tempfile.mkdtemp(prefix="contrib-engine-")).resolve()
         env = {"OPENSCI_CATALOG_DIR": str(self.tmp / "catalog"), "OPENSCI_CATALOG_CHECK_INTERVAL": "0"}
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
