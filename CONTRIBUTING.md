@@ -76,7 +76,8 @@ For changes to `render` or `present` (presentation-grade figures; case images ne
 `python -m pip install -e ".[render]"` and Chrome/Chromium, then run `python -m pytest tests/test_render_browser.py`.
 The presentation tests (`tests/test_present*.py`) also draw Chinese figures and encode MP4: install `".[plot,render,media]"` and a CJK font (on Linux
 `fonts-noto-cjk`; Windows and macOS include one). With `OS_OPTICS_KIT_REQUIRE_PRESENTATION=1` a missing
-browser or encoder fails these tests instead of skipping them. These catalog-free tests check actual PNG
+font, browser or encoder fails these tests instead of skipping them; `OS_OPTICS_KIT_REQUIRE_CJK_FONT=1` (set by the
+scheduled checks) does so for the font alone. These catalog-free tests check actual PNG
 pixels, camera matrices, labels and capture errors. They skip when optional dependencies are missing;
 the published-engine CI job runs them with those dependencies installed.
 
