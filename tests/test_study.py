@@ -1246,12 +1246,15 @@ class OwnershipTests(unittest.TestCase):
     def test_a_file_system_without_locks_is_refused_at_once_and_by_name(self):
         with TempDir() as tmp:
             study_dir = self.plan(tmp / "study", fake_requests([1.0]))
+            executed = self.plan(tmp / "executed", fake_requests([1.0]))  # aggregation needs a result to read
+            execute.execute_study(executed, evaluator=FAKE)
             callers = {"study run": lambda: execute.execute_study(study_dir, evaluator=FAKE),
                        "planning": lambda: store.plan_study(study_dir, header(), fake_requests([1.0]), resume=True),
                        "overwrite": lambda: store.prepare_study_dir(study_dir, overwrite=True),
-                       "study aggregate": lambda: study_tool.aggregate_study(study_dir)}
+                       "study aggregate": lambda: study_tool.aggregate_study(executed)}
             for unsupported in (errno.ENOLCK, errno.ENOSYS):
                 for name, call in callers.items():
+                    folder = executed if name == "study aggregate" else study_dir
                     with self.subTest(errno=errno.errorcode[unsupported], caller=name):
                         refusal = OSError(unsupported, os.strerror(unsupported))
                         started = time.monotonic()
@@ -1260,11 +1263,11 @@ class OwnershipTests(unittest.TestCase):
                             call()
                         self.assertEqual(caught.exception.code, "STUDY_LOCK_UNAVAILABLE")
                         self.assertLess(time.monotonic() - started, store.TAKEOVER_WAIT_S / 2)
-                        self.assertIn(f"{study_dir.as_posix()}/{store.OWNER_LOCK} cannot be locked",
+                        self.assertIn(f"{folder.as_posix()}/{store.OWNER_LOCK} cannot be locked",
                                       str(caught.exception))
                         self.assertIn("use a study directory on a local disk", str(caught.exception))
-                        self.assertFalse((study_dir / store.OWNER_FILE).exists())
-                        self.assertFalse((study_dir / "summary.json").exists())
+                        self.assertFalse((folder / store.OWNER_FILE).exists())
+                        self.assertFalse((folder / "summary.json").exists())
             summary = execute.execute_study(study_dir, evaluator=FAKE)  # with locks: nothing was left behind
             self.assertEqual(summary.state, "COMPLETED")
 

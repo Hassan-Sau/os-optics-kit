@@ -808,6 +808,7 @@ def init(paths, out_dir, *, labels=None, title=None, theme=None, settings=(), an
     for index, path in enumerate(paths):
         kind = pres.source_kind(path)
         if kind is None:
+            pres.require_study_results(path)  # a planned study not executed (or in part) names the command to run
             raise pres.PresentationError("SOURCE_MISSING", f"{Path(path).name} is not a saved run or study directory",
                                          recovery="pass run directories (manifest.json) or sweep study directories "
                                                   "(summary.json)")

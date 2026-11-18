@@ -14,7 +14,8 @@ import argparse
 from pathlib import Path
 
 from .. import workflow_common as wc
-from . import evaluators, store
+from . import store
+from .progress import run_command
 
 #: Exit code of a study that was cancelled (Ctrl-C or the API): the study stays resumable.
 CANCELLED_EXIT = 130
@@ -86,7 +87,7 @@ def planned_summary(study_dir, kind, extra=None):
     study = store.read_study(study_dir)
     return {"status": "PLANNED", "kind": f"{kind}-plan", "samples": len(entries),
             "identity": study["identity"], **(extra or {}),
-            "next": f"os-optics-kit study run {study_dir.as_posix()}",
+            "next": run_command(study_dir, resume=False),
             "paths": {"study_dir": study_dir.as_posix(), "study": store.STUDY_FILE, "plan": store.PLAN_FILE,
                       "requests": store.REQUESTS_DIR}}
 
@@ -94,11 +95,8 @@ def planned_summary(study_dir, kind, extra=None):
 def cancelled_summary(study_dir, kind, execution):
     """The document of a cancelled execution (exit 130): what ran, and how to continue."""
     study_dir = Path(study_dir)
-    command = f"os-optics-kit study run {study_dir.as_posix()} --resume"
-    if execution.evaluator is not None and execution.evaluator != evaluators.DEFAULT_EVALUATOR:
-        command += f" --evaluator {execution.evaluator}"
     return {"status": "CANCELLED", "kind": f"{kind}-execution", "execution": execution.as_dict(),
-            "next": command,
+            "next": run_command(study_dir, resume=True, evaluator=execution.evaluator),
             "paths": {"study_dir": study_dir.as_posix(), "study": store.STUDY_FILE,
                       "journal": store.JOURNAL_FILE, "samples": store.SAMPLES_DIR}}
 

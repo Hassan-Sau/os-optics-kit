@@ -23,6 +23,9 @@ Python (an external optimiser handing over a batch of independent evaluations)::
 
 A complete script is in the studies guide (docs/en/studies.md).
 
+``study_progress(dir)`` says how far a saved study got (``NOT_RUN``, ``PARTIAL``, ``EXECUTED``) and the command that
+moves it on; ``require_results(dir)`` is the one refusal every reader of a saved study uses (``progress.py``).
+
 The evaluator (default ``evaluators.run_project``: one ``os_optics.local.run_optical_project`` call per request) and
 the scheduler (``SerialScheduler``, ``ProcessScheduler`` or any object with ``run`` and ``cancel``) are replaceable.
 """
@@ -33,6 +36,7 @@ from .aggregate import (aggregate_generic, collect_records, columns, counts, fin
                         rows_from_records, state_counts, target_units, write_summary, write_table)
 from .evaluators import DEFAULT_EVALUATOR, empty_record, load_evaluator, run_project
 from .execute import ExecutionSummary, execute_study, run_job
+from .progress import reading_error, require_results, study_progress
 from .requests import make_request, request_hash, sample_ids, sample_seed, validate_request
 from .resources import ResourceBudget, available_memory_bytes, peak_memory_bytes, suggest_workers
 from .schedulers import ProcessScheduler, SerialScheduler, make_scheduler
@@ -44,7 +48,7 @@ __all__ = [
     "aggregate_generic", "append_journal", "available_memory_bytes", "clear_plan", "collect_records", "columns",
     "counts", "empty_record", "execute_study", "finish_study", "has_study", "load_evaluator", "make_request",
     "make_scheduler", "peak_memory_bytes", "plan_study", "read_journal", "read_plan", "read_record", "read_request",
-    "read_study", "request_hash", "row_from_record", "rows_from_records", "run_job", "run_project", "sample_ids",
-    "sample_seed", "state_counts", "study_header", "suggest_workers", "target_units", "validate_request",
-    "write_plan", "write_summary", "write_table",
+    "read_study", "reading_error", "request_hash", "require_results", "row_from_record", "rows_from_records",
+    "run_job", "run_project", "sample_ids", "sample_seed", "state_counts", "study_header", "study_progress",
+    "suggest_workers", "target_units", "validate_request", "write_plan", "write_summary", "write_table",
 ]
