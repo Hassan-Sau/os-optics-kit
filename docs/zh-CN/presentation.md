@@ -151,7 +151,8 @@ os-optics-kit present build compare/presentation.json
 
 - 每个运行一张视图，全部使用同一取景范围（`framing_sources`），系统以同一比例显示；
 - `targets-compare`（图类型 `targets`）：每个目标在各运行中的取值，以及界限和判定；
-- `views-compare`（类型 `compose`）：视图并排，两个运行时布局为 `before-after`，更多时为 `row`。
+- `views-compare`（类型 `compose`）：视图以 `row` 布局并排；第二个运行是第一个运行调整后的结果时，把 `layout`
+  改为 `before-after`。
 
 组合图按顺序列出各分图，每个分图可带标签：
 
