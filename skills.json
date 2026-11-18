@@ -142,6 +142,17 @@
       "sha256": "0186eb6ba59ee92649bb00178067d53bf47761b71c22c2bd73e8141c8e0aedc4"
     },
     {
+      "name": "sfr",
+      "kind": "tool",
+      "description": "Measure the slanted-edge SFR (ISO 12233 e-SFR) of an image region, with edge angle, fit residuals, SFR50 and SFR at Nyquist; optionally put a saved os-optics imaging MTF on the same axes with the input differences stated. No engine run needed.",
+      "version": "0.1.0",
+      "command": "os-optics-kit sfr",
+      "requires": "os-optics-kit[plot] for PNG/TIFF and plots",
+      "path": "skills/sfr/SKILL.md",
+      "tokens": 744,
+      "sha256": "7f429554b8aeff495e2ad63c6b4e38323a26777ce006807554f4da01334242f9"
+    },
+    {
       "name": "study",
       "kind": "tool",
       "description": "Run independent Engine evaluations as a resumable study, serially or in worker processes; plan, execute, aggregate and present as separate steps. Use it for sweeps, tolerance samples, candidate Projects and batches handed over by your own search code.",
