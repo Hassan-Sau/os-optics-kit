@@ -13,9 +13,8 @@ os-optics-kit skills show NAME [PAGE]
 os-optics-kit skills install --dest DIR
 ```
 
-`skills list` prints the index as compact JSON. Read a skill before using its command; `skills show NAME PAGE`
-prints a page it names. `skills install` copies the skills and `skills.json` into DIR, your agent host's skills
-directory; it never overwrites a different file without `--force`.
+Read a skill before using its command; `skills show NAME PAGE` prints a page it names. `skills install` copies
+the skills into your agent host's skills directory and never overwrites a different file without `--force`.
 
 ## Route by task
 
@@ -43,9 +42,8 @@ Commands without the `os-optics` prefix are `os-optics-kit <command>`; `--help` 
 Case images and system views need no browser and no `render` extra; `render` and `present` need
 `os-optics-kit[render]` and Chrome or Chromium.
 [Workflow recipes](docs/workflow-recipes.md) give spec keys, outputs and error codes.
-Cases `expansion-focus`, `polarization-control` and `mirror-alignment` include a parameterized
-`workflow.py` (`--list-parameters`, unit-bearing inputs such as `--gap-error-mm 250um`,
-`--study NAME=START..STOP:COUNT`, `--no-studies`).
+Cases `expansion-focus`, `polarization-control` and `mirror-alignment` ship a parameterized `workflow.py`
+(`--list-parameters`).
 
 ## Interpret before deciding
 
@@ -54,19 +52,18 @@ assessments are `MET`, `UNMET`, `INDETERMINATE` or `NOT_APPLICABLE`. A bounded q
 interval; an unrelated unavailable quantity does not invalidate every result. No configured target
 means no requirement was assessed.
 
-Study `PASS`/`FAIL` classes summarize the selected targets. Keep
-every sample, including invalid, partial and indeterminate ones. Objective validity and feasibility
+Study `PASS`/`FAIL` classes summarize the selected targets. Keep every sample, including invalid, partial and
+indeterminate ones. Objective validity and feasibility
 are separate; report `NO_FEASIBLE` when no sample meets the constraints. Fractions state their
 denominator; a tolerance fraction describes simulated samples under the declared distributions.
 
-Saved results keep their identities after edits. `compare` and `os-optics results freshness RUN
---project P` report `CURRENT`, `HISTORICAL` or `UNDETERMINED` with reasons (`PHYSICS_CHANGED`,
-`TARGETS_CHANGED`, ...). A historical result describes the earlier design; rerun when the task needs
-the edited one.
+`compare` and `os-optics results freshness RUN --project P` report `CURRENT`, `HISTORICAL` or `UNDETERMINED`
+with reasons (`PHYSICS_CHANGED`, ...). A historical result describes the earlier design; rerun when the task
+needs the edited one.
 
 Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN (also
 a partial run, `PARTIAL`) or `INCOMPLETE`; 3 OUT_OF_MODEL; 4 refused input, with a JSON
-error on stderr; 130 a cancelled study or Ctrl-C (`study run DIR --resume` continues a study). Stdout is compact JSON;
+error on stderr; 130 cancelled (`study run DIR --resume` continues). Stdout is compact JSON;
 details stay in files.
 
 ## Inputs and recovery
@@ -79,18 +76,15 @@ Inputs are never modified; an existing output is refused (`OUTPUT_EXISTS`) unles
 Invalid edits are refused atomically. Repeating an identical `edit` returns `already_applied`;
 `--expect-base-hash` refuses a changed base. Set both a study's `max_evaluations` and the Project's
 compute budget, and inspect limited or partial results before raising a limit. Time a pilot before a
-large study and choose a worker budget from it (`skills show study recipe.md`): one study per batch,
-`--workers N` (`auto` assumes 0.2 s per sample of a new plan; give N for heavier samples),
-`--time-limit-s` / `--max-memory-mib` per evaluation, workers x threads within the CPUs. Report commands,
+large study and pick `--workers N` from it (`skills show study recipe.md`). Report commands,
 versions, units, selected assessments, freshness and artifact paths.
 
 ## Contribute a case
 
-`os-optics-kit skills show contrib-case`, then `os-optics-kit contrib case P.json --name NAME --class lens
---domain imaging --tags mtf --dry-run`: it runs the engine, renders the system views browser-free, writes the
-case and patches `cases.json` and the README case tables. By hand in a kit checkout: write `cases/NAME/`;
-`os-optics-kit cases images NAME` records the views (those recorded, else `iso` and a lens section); README.md
-and README.zh-CN.md link each other and show exactly the recorded images; `cases index --write`,
-`python scripts/case_tables.py --write`, `cases index --check`. Values: `cases vocabulary`.
+`skills show contrib-case`, then `contrib case P.json --name NAME --class lens --domain imaging --tags mtf
+--dry-run`: it runs the engine, renders the system views browser-free, writes the case and patches `cases.json`
+and the README case tables. By hand: write `cases/NAME/`; `cases images NAME` records the views; README.md and
+README.zh-CN.md show exactly the recorded images; `cases index --write`, `python scripts/case_tables.py --write`,
+`cases index --check`. Values: `cases vocabulary`.
 The user's own GitHub account opens the pull request (`--open-pr`); without it a bundle holds the patch.
 A helper script: `contrib-tool`. See [contributing with an agent](docs/contributing-with-an-agent.md).
