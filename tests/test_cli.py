@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from os_optics_kit import _engine, cli, interop
-from tests.workflow_fixtures import KIT, ROOT, TempDir
+from tests.workflow_fixtures import KIT, ROOT, TempDir, requires_numpy
 
 TOOLS = ("summary", "edit", "sweep", "compare", "plot", "report", "sensitivity", "tolerance", "candidates",
          "measurements", "sfr", "study")
@@ -127,6 +127,16 @@ class LazyImportTests(unittest.TestCase):
         self.assertEqual(error["code"], "PLOT_EXTRA_MISSING")
         self.assertIn("os-optics-kit[plot]", error["message"])
 
+    def test_sfr_without_numpy_is_a_structured_error(self):
+        help_ = run_blocked(["os_optics", "numpy"], "sfr", "--help")
+        self.assertEqual(help_.returncode, 0, help_.stderr)
+        with TempDir() as tmp:
+            done = run_blocked(["os_optics", "numpy"], "sfr", str(tmp / "edge.npy"), "--out", str(tmp / "a"))
+            self.assertFalse((tmp / "a").exists())
+        self.assertEqual((done.returncode, done.stdout), (4, ""))
+        self.assertEqual(json.loads(done.stderr)["error"]["code"], "NUMPY_MISSING")
+
+    @requires_numpy
     def test_sfr_needs_neither_the_engine_nor_the_plot_extra_with_no_plot(self):
         from os_optics_kit.sfr import synthetic_edge
 

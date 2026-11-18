@@ -42,7 +42,10 @@ import math
 from pathlib import Path
 import platform
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:  # numpy comes with os-optics; only an install without it lacks numpy
+    np = None  # type: ignore[assignment]
 
 from ._engine import require_matplotlib
 from .result_summary import ArgumentParser, emit_cli
@@ -1123,6 +1126,9 @@ def main(argv=None):
         parser.add_argument("--no-plot", action="store_true", help="write no PNG (no matplotlib needed)")
         parser.add_argument("--overwrite", action="store_true", help="write into a non-empty --out")
         args = parser.parse_args(argv)
+        if np is None:
+            raise SfrError("NUMPY_MISSING", "sfr needs numpy, which is installed with os-optics: "
+                                              "python -m pip install numpy")
         pitch_mm = args.pixel_pitch_mm if args.pixel_pitch_mm is not None else (
             args.pixel_pitch_um / 1000.0 if args.pixel_pitch_um is not None else None)
         config = SfrConfig(roi=_roi(args.roi) if args.roi is not None else None, channel=args.channel, oecf=args.oecf, gamma=args.gamma,

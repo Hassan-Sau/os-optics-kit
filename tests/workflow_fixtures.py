@@ -17,6 +17,8 @@ import shutil
 import tempfile
 import unittest
 
+from os_optics_kit._engine import ENGINE_DISTRIBUTION, ENGINE_REQUIREMENT
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -31,7 +33,7 @@ def _importable(name):
 HAS_ENGINE = _importable("os_optics")
 HAS_MATPLOTLIB = find_spec("matplotlib") is not None
 HAS_NUMPY = find_spec("numpy") is not None
-ENGINE_MISSING = "os-optics (the engine) is not installed: python -m pip install \"os-optics>=0.12,<0.13\""
+ENGINE_MISSING = f'os-optics (the engine) is not installed: python -m pip install "{ENGINE_DISTRIBUTION}{ENGINE_REQUIREMENT}"'
 PLOT_EXTRA_MISSING = "matplotlib is not installed: python -m pip install \"os-optics-kit[plot]\""
 NUMPY_MISSING = "numpy is not installed (it is installed with os-optics)"
 requires_engine = unittest.skipUnless(HAS_ENGINE, ENGINE_MISSING)

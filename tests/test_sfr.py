@@ -7,10 +7,14 @@ import json
 import math
 import unittest
 
-import numpy as np
+from tests.workflow_fixtures import HAS_NUMPY, NUMPY_MISSING, ROOT, TempDir, invoke, requires_matplotlib
 
-from os_optics_kit import sfr as S
-from tests.workflow_fixtures import ROOT, TempDir, invoke, requires_matplotlib
+if not HAS_NUMPY:  # the unit-test job without the engine has no numpy
+    raise unittest.SkipTest(NUMPY_MISSING)
+
+import numpy as np  # noqa: E402
+
+from os_optics_kit import sfr as S  # noqa: E402
 
 DESIGN = ROOT / "tests" / "data" / "sfr-design-imaging.json"  # trimmed 'os-optics results imaging' of a real run
 
