@@ -23,6 +23,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "tolerance": ("tolerance_study", "seeded tolerance sampling under declared distributions"),
     "candidates": ("catalog_candidates", "rank catalog products for a requirement"),
     "measurements": ("analyze_measurements", "clean, fit and reference-normalize detector CSV data"),
+    "sfr": ("sfr", "slanted-edge SFR (ISO 12233 e-SFR) of an image, optionally beside a design MTF"),
     "study": ("study_tool", "run, resume, inspect and aggregate planned studies, in parallel worker processes"),
     "render": (
         "render_views",

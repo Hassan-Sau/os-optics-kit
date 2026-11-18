@@ -14,7 +14,7 @@ os-optics-kit skills install --dest DIR
 ```
 
 Read a skill before using its command; `skills show NAME PAGE` prints a page it names. `skills install` copies
-the skills into your agent host's skills directory and never overwrites a different file without `--force`.
+them into your agent host's skills directory, overwriting a different file only with `--force`.
 
 ## Route by task
 
@@ -37,8 +37,9 @@ the skills into your agent host's skills directory and never overwrites a differ
 | Many independent runs, in parallel, resumable | `study` skill: `sweep SPEC.json --out S --workers 4`; `study run S --resume`; `study candidates P1.json P2.json --out C` |
 | Catalog parts | `candidates --category ... --wavelength-nm ...` |
 | Detector CSV data | `measurements DATA.csv --x ... --signal ... --out DIR` |
+| Slanted-edge SFR vs design MTF | `sfr IMG --roi X,Y,W,H --out DIR`; `--design imaging.json --pixel-pitch-um P` |
 
-Commands without the `os-optics` prefix are `os-optics-kit <command>`; `--help` holds the full specification.
+Commands without the `os-optics` prefix are `os-optics-kit <command>`; `--help` is the full specification.
 Case images and system views need no browser and no `render` extra; `render` and `present` need
 `os-optics-kit[render]` and Chrome or Chromium.
 [Workflow recipes](docs/workflow-recipes.md) give spec keys, outputs and error codes.
@@ -52,14 +53,13 @@ assessments are `MET`, `UNMET`, `INDETERMINATE` or `NOT_APPLICABLE`. A bounded q
 interval; an unrelated unavailable quantity does not invalidate every result. No configured target
 means no requirement was assessed.
 
-Study `PASS`/`FAIL` classes summarize the selected targets. Keep every sample, including invalid, partial and
-indeterminate ones. Objective validity and feasibility
-are separate; report `NO_FEASIBLE` when no sample meets the constraints. Fractions state their
-denominator; a tolerance fraction describes simulated samples under the declared distributions.
+Study `PASS`/`FAIL` classes cover the selected targets. Keep every sample, also invalid, partial and
+indeterminate ones. Objective validity and feasibility are separate; report `NO_FEASIBLE` when no sample
+meets the constraints. Fractions state their denominator; a tolerance fraction describes simulated samples under the declared distributions.
 
 `compare` and `os-optics results freshness RUN --project P` report `CURRENT`, `HISTORICAL` or `UNDETERMINED`
-with reasons (`PHYSICS_CHANGED`, ...). A historical result describes the earlier design; rerun when the task
-needs the edited one.
+with reasons (`PHYSICS_CHANGED`, ...). A historical result describes the earlier design; rerun for the
+edited one.
 
 Exit codes: 0 completed or PASS; 1 FAIL, `NO_FEASIBLE`, `NO_MATCH` or a case mismatch; 2 UNKNOWN (also
 a partial run, `PARTIAL`) or `INCOMPLETE`; 3 OUT_OF_MODEL; 4 refused input, with a JSON
@@ -75,7 +75,7 @@ poses and the user's actual target bounds. Coordinates are right-handed; quatern
 Inputs are never modified; an existing output is refused (`OUTPUT_EXISTS`) unless `--overwrite`.
 Invalid edits are refused atomically. Repeating an identical `edit` returns `already_applied`;
 `--expect-base-hash` refuses a changed base. Set both a study's `max_evaluations` and the Project's
-compute budget, and inspect limited or partial results before raising a limit. Time a pilot before a
+compute budget; inspect limited or partial results before raising one. Time a pilot before a
 large study and pick `--workers N` from it (`skills show study recipe.md`). Report commands,
 versions, units, selected assessments, freshness and artifact paths.
 

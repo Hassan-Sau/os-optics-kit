@@ -14,7 +14,7 @@ from os_optics_kit import _engine, cli, interop
 from tests.workflow_fixtures import KIT, ROOT, TempDir
 
 TOOLS = ("summary", "edit", "sweep", "compare", "plot", "report", "sensitivity", "tolerance", "candidates",
-         "measurements", "study")
+         "measurements", "sfr", "study")
 # Runs a kit command in a child process in which the engine (and optionally matplotlib) cannot be imported, even
 # when it is installed: any attempt raises ModuleNotFoundError, like a missing distribution.
 BLOCKED_RUN = """import sys
@@ -126,6 +126,25 @@ class LazyImportTests(unittest.TestCase):
         error = json.loads(done.stderr)["error"]
         self.assertEqual(error["code"], "PLOT_EXTRA_MISSING")
         self.assertIn("os-optics-kit[plot]", error["message"])
+
+    def test_sfr_needs_neither_the_engine_nor_the_plot_extra_with_no_plot(self):
+        from os_optics_kit.sfr import synthetic_edge
+
+        blocked = ["os_optics", "matplotlib", "PIL"]
+        with TempDir() as tmp:
+            import numpy as np
+
+            np.save(tmp / "edge.npy", synthetic_edge((60, 48), 5.0, 0.5))
+            (tmp / "edge.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            done = run_blocked(blocked, "sfr", str(tmp / "edge.npy"), "--out", str(tmp / "a"), "--no-plot")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(json.loads(done.stdout)["status"], "PASS")
+            plotted = run_blocked(blocked, "sfr", str(tmp / "edge.npy"), "--out", str(tmp / "b"))
+            png = run_blocked(blocked, "sfr", str(tmp / "edge.png"), "--out", str(tmp / "c"), "--no-plot")
+            self.assertFalse((tmp / "b").exists())
+            self.assertFalse((tmp / "c").exists())
+        self.assertEqual((plotted.returncode, json.loads(plotted.stderr)["error"]["code"]), (4, "PLOT_EXTRA_MISSING"))
+        self.assertEqual((png.returncode, json.loads(png.stderr)["error"]["code"]), (4, "IMAGE_READER_MISSING"))
 
 
 class EngineRequirementTests(unittest.TestCase):

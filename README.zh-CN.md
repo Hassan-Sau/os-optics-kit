@@ -9,7 +9,7 @@
 
 os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎，提供一个命令 `os-optics-kit`：
 其中的工具可以按标识修改 Project、扫描参数、比较已保存的运行、绘图、生成报告、渲染演示级三维图、估计灵敏度和公差、
-以可续跑的研究形式在并行工作进程中运行相互独立的评估、挑选目录元件、分析探测器测量数据以及制作演示材料；一组案例，即可在引擎上重新运行并与记录结果比较的设计；以及每个工具
+以可续跑的研究形式在并行工作进程中运行相互独立的评估、挑选目录元件、分析探测器测量数据、测量斜边 SFR 以及制作演示材料；一组案例，即可在引擎上重新运行并与记录结果比较的设计；以及每个工具
 对应的一份与厂商无关的技能说明，任何编程 Agent 都可以加载。
 
 | 名称 | 位置 | 内容 |
@@ -19,7 +19,7 @@ os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎�
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | 产品文档与问题反馈 |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | 本仓库：工具、案例、技能与贡献 |
 
-**[Agent 指南（英文）](AGENT_GUIDE.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
+**[Agent 指南（英文）](AGENT_GUIDE.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
 
 ## 安装
 
@@ -125,6 +125,7 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 | `study` | `os-optics-kit study` | 串行或在工作进程中运行、续跑、查看和汇总已规划的研究；规划候选 Project 研究 |
 | `candidates` | `os-optics-kit candidates` | 列出满足明确筛选条件的目录产品，按与给定值的接近程度排序 |
 | `measurements` | `os-optics-kit measurements` | 扣除背景、按参考通道归一化并拟合探测器 CSV 数据 |
+| `sfr` | `os-optics-kit sfr` | 按 ISO 12233 e-SFR 测量图像的斜边 SFR，可与设计 MTF 并列比较 |
 | `run-case` | `os-optics-kit cases` | 查找、复制、运行、核对并修改案例 |
 | `contrib-case` | `os-optics-kit contrib case` | 把完成的设计整理成可直接提交拉取请求的案例 |
 | `contrib-tool` | `os-optics-kit contrib tool` | 把辅助脚本打包为套件命令，附技能说明和测试 |
