@@ -558,9 +558,14 @@ def _truncate(text_artist, renderer, width_px):
     text_artist.set_text(full[:low].rstrip() + "…")
 
 
+#: lightest face weight the contact sheet draws with (thin and extra-light faces are dropped)
+LIGHTEST_WEIGHT = 250
+
+
 def regular_families(families):
     """``families`` without those installed only in thin weights (a variable Noto Sans SC registers as weight 100
-    and would draw every Chinese character hairline-thin); unchanged when nothing else would remain."""
+    and would draw every Chinese character hairline-thin); unchanged when nothing else would remain. A family whose
+    heaviest face is light (250-349) is kept, as the figures' font discovery accepts it."""
     try:
         from matplotlib import font_manager
     except ImportError:
@@ -569,7 +574,7 @@ def regular_families(families):
     for entry in font_manager.fontManager.ttflist:
         weight = entry.weight if isinstance(entry.weight, int) else font_manager.weight_dict.get(entry.weight, 400)
         weights.setdefault(entry.name, set()).add(int(weight))
-    kept = [family for family in families if family not in weights or max(weights[family]) >= 350]
+    kept = [family for family in families if family not in weights or max(weights[family]) >= LIGHTEST_WEIGHT]
     return kept or list(families)
 
 

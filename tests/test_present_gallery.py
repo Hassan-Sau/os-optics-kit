@@ -401,6 +401,20 @@ class ContactSheetTests(unittest.TestCase):
             gallery.write_contact_sheet(out, manifest, theme)
         self.assertEqual(caught.exception.code, "FONT_MISSING")
 
+    def test_light_only_families_are_kept_and_thin_ones_dropped(self):
+        # the figures accept a CJK family installed only in a light face (250-349); the contact sheet must too
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from matplotlib import font_manager
+
+        faces = [SimpleNamespace(name="Thin Sans", weight=100), SimpleNamespace(name="Light CJK", weight=300),
+                 SimpleNamespace(name="Regular Sans", weight=400), SimpleNamespace(name="Regular Sans", weight=700)]
+        with mock.patch.object(font_manager.fontManager, "ttflist", faces):
+            self.assertEqual(gallery.regular_families(["Thin Sans", "Light CJK", "Regular Sans", "Not Installed"]),
+                             ["Light CJK", "Regular Sans", "Not Installed"])
+            self.assertEqual(gallery.regular_families(["Thin Sans"]), ["Thin Sans"])  # nothing else: unchanged
+
 
 class BundleTests(unittest.TestCase):
     def setUp(self):
