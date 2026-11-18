@@ -405,6 +405,20 @@ class ContactSheetTests(unittest.TestCase):
             gallery.write_contact_sheet(out, manifest, theme)
         self.assertEqual(caught.exception.code, "FONT_MISSING")
 
+    def test_light_only_families_are_kept_and_thin_ones_dropped(self):
+        # the figures accept a CJK family installed only in a light face (250-349); the contact sheet must too
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from matplotlib import font_manager
+
+        faces = [SimpleNamespace(name="Thin Sans", weight=100), SimpleNamespace(name="Light CJK", weight=300),
+                 SimpleNamespace(name="Regular Sans", weight=400), SimpleNamespace(name="Regular Sans", weight=700)]
+        with mock.patch.object(font_manager.fontManager, "ttflist", faces):
+            self.assertEqual(gallery.regular_families(["Thin Sans", "Light CJK", "Regular Sans", "Not Installed"]),
+                             ["Light CJK", "Regular Sans", "Not Installed"])
+            self.assertEqual(gallery.regular_families(["Thin Sans"]), ["Thin Sans"])  # nothing else: unchanged
+
 
 class BundleTests(unittest.TestCase):
     def setUp(self):
@@ -655,6 +669,55 @@ class GalleryBrowserTests(unittest.TestCase):
             finally:
                 browser.close()
         self.assertEqual(aborted, [])
+        self.assertEqual(errors, [])
+
+    def test_video_controls_stay_below_the_frame(self):
+        # regression: the browser's own video controls covered the bottom line of an animation frame, where a
+        # parameter playback shows the recorded parameter value
+        import numpy as np
+        from playwright.sync_api import sync_playwright
+
+        imageio_ffmpeg = need(self, "imageio_ffmpeg")
+        out = make_presentation(self.tmp / "p")
+        video = out / "assets" / "orbit" / "orbit.mp4"
+        writer = imageio_ffmpeg.write_frames(str(video), (160, 96), fps=12, codec="libx264", pix_fmt_out="yuv420p",
+                                             macro_block_size=16)
+        writer.send(None)
+        for shade in range(24):
+            writer.send(np.full((96, 160, 3), 10 * shade, np.uint8).tobytes())
+        writer.close()
+        manifest = gallery.read_manifest(out)
+        orbit = next(e for e in manifest["assets"] if e["id"] == "orbit")
+        orbit["files"]["mp4"] = pr.file_record(video, out)
+        pr.write_manifest(out, manifest)
+        gallery.write_gallery(out)
+        errors = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(executable_path=self.browser, headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1280, "height": 860})
+                page.on("pageerror", lambda exc: errors.append(str(exc)))
+                page.goto((out / "index.html").resolve().as_uri() + "#orbit")
+                page.wait_for_selector("#full-video")
+                self.assertIsNone(page.get_attribute("#full-video", "controls"))  # no overlay on the frame
+                video_box = page.locator("#full-video").bounding_box()
+                bar_box = page.locator(".vctl").bounding_box()
+                self.assertGreaterEqual(bar_box["y"], video_box["y"] + video_box["height"] - 1)
+                self.assertEqual(page.inner_text("#video-play"), "Play")
+                page.wait_for_function("document.getElementById('full-video').readyState >= 1", timeout=10000)
+                page.click("#video-play")
+                page.wait_for_function("!document.getElementById('full-video').paused", timeout=10000)
+                self.assertEqual(page.inner_text("#video-play"), "Pause")
+                page.click("#video-play")
+                page.fill("#video-seek", "500")
+                page.dispatch_event("#video-seek", "input")
+                position = page.evaluate("(() => { const v = document.getElementById('full-video');"
+                                         " return v.currentTime / v.duration; })()")
+                self.assertAlmostEqual(position, 0.5, delta=0.1)
+                page.keyboard.press("Escape")
+                page.wait_for_selector("#viewer", state="hidden")
+            finally:
+                browser.close()
         self.assertEqual(errors, [])
 
 
