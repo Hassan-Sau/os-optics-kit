@@ -36,9 +36,9 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 | `sweep` | `COMPLETED`, `PLANNED` | `NO_FEASIBLE` (constraints given, none met) | | | refused |
 | `sensitivity` | `COMPLETED`, `PLANNED` | | `INCOMPLETE` (a derivative unavailable) | | refused |
 | `tolerance` | `COMPLETED` (at least one PASS), `DRAWN`, `PLANNED`, `REPRODUCED` | `NO_FEASIBLE` (no PASS), `MISMATCH` | | | refused |
-| `study run`, `study aggregate` | as the planning tool (candidates: `COMPLETED`) | as the planning tool | as the planning tool | | refused |
+| `study run`, `study aggregate` | as the planning tool (candidates: `COMPLETED`) | as the planning tool | as the planning tool; `INCOMPLETE` (`study aggregate` of a study executed in part) | | refused |
 | `study status`, `study bench` | `DESCRIBED`, `BENCHMARKED` | | | | refused |
-| `compare`, `plot`, `report` | `COMPLETED` | | | | invalid input |
+| `compare`, `plot`, `report` | `COMPLETED` | | | | invalid input, a study with nothing to read (`STUDY_NOT_RUN`, ...) |
 | `present build` | `COMPLETED` | | `INCOMPLETE` (an asset has a missing input or could not be drawn) | | refused |
 | `candidates` | `COMPLETED` | `NO_MATCH` | | | invalid input, no catalog |
 | `measurements` | `PASS`, `WARNING` | `FAIL` (RMSE bound exceeded) | `UNKNOWN` (no fit) | | error |
@@ -252,7 +252,7 @@ os-optics-kit study bench --samples 24                        # 1, 2, 4 workers 
 
 | Option (tools and `study run`) | Meaning |
 | --- | --- |
-| `--workers N\|auto` | worker processes (spawned once, Engine imported once each); 1 = serial in this process; `auto` = estimated from the samples to run x their run time (with `--resume` the median `timing.run_s` of the study's completed samples, else 0.2 s), serial unless workers (about 4 s start-up each) save at least 10 %, at most 4 workers; give N from a pilot for heavier samples |
+| `--workers N\|auto` | worker processes (spawned once, Engine imported once each); 1 = serial in this process; `auto` = estimated from the samples to run x their run time (with `--resume` the median `timing.run_s` of the study's completed samples, else 0.2 s), serial unless workers (about 4 s start-up each) save at least 10 %, at most 4 workers; every worker is counted at serial speed and start-up and memory are fixed estimates, so give N from a pilot for heavier samples |
 | `--resume` | keep samples whose record has the plan's `request_hash`, state `COMPLETED` / `REFUSED` and the same `evaluator` (an evaluator passed from Python without a `module:function` name keeps none: `study status` shows `resume_note`); read back a complete run directory without a record; run the rest. A tool run with a changed spec reruns only the changed requests; a kept record takes the new plan's labels. `study run`, with or without `--resume`, refuses a changed Engine build or catalog release (`STUDY_IDENTITY_CHANGED`, field named) |
 | `--plan-only` | write the plan and stop (`PLANNED`, exit 0); `study run` executes it with the planning tool's analysis and presentation choice |
 | `--time-limit-s S`, `--max-memory-mib M` | per evaluation, read at Engine checkpoints (each phase change and inside long phases); the run stops at the next checkpoint: state `CANCELLED`, error code `RUN_STOPPED`, problem code `TIME_LIMIT` / `MEMORY_LIMIT` (`error_problems` in `table.csv`); a worker still busy 5 s past its time limit is terminated and recorded the same way; the serial scheduler has no other preemption |
@@ -263,11 +263,11 @@ Files: `study.json` (tool keys + `schema` `os-optics-kit.study`, `identity` {pla
 Engine version and build, catalog version and sha256, kit version}, `execution` {scheduler,
 workers, BLAS threads, limits, evaluator, state, counts, worker start-up}); `plan.jsonl` (one
 line per request in plan order); `requests/<id>.json` (Project with the sample's edits,
-`refusal`, `selected_targets`, `labels`, `outputs`, `seed`, `request_hash`);
+`refusal`, `selected_targets`, `labels`, `outputs`, `seed` (null in the shipped tools, which draw random values while planning; `sample_seed(seed, sample_id)` for an evaluator of your own), `request_hash`);
 `samples/<id>/sample.json` (the sample record + `state` `COMPLETED | REFUSED | FAILED |
 CANCELLED | NOT_RUN`, `attempts`, `timing` {queued_s, run_s, phase_seconds}, `peak_memory_bytes`,
 `worker`, `evaluator`; paths study-relative); `journal.jsonl` (started, finished, failed,
-cancelled, reused, recovered, stopped, ...); `owner.json` (pid, host and start of the execution
+cancelled, reused, recovered, stopped, aggregated, ...); `owner.json` (pid, host and start of the execution
 that owns the study, removed when it ends); `owner.lock` (lets one process at a time take
 ownership; never removed). While an execution owns the study, a second execution, a planning
 command and `study aggregate` are refused with `STUDY_RUNNING`. `execution.state` is
@@ -579,14 +579,18 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `CATALOG_NOT_AVAILABLE` | no catalog release installed | `os-optics catalog sync` (or `catalog import FILE`) |
 | `STUDY_STARTED` | `study run` on a study that already has sample results | `--resume`, or plan it again with its planning command and `--overwrite` |
 | `STUDY_IDENTITY_CHANGED` | Engine build, catalog release or plan differ from the planned study (`changed` names them); `study run` refuses it with or without `--resume` | plan it again with its planning command (`sweep`, `sensitivity`, `tolerance`, `study candidates`) and `--overwrite` |
-| `STUDY_RUNNING` | another execution owns the study (`owner.json`; its process still runs): `study run`, planning and `study aggregate` are refused | wait for it or stop it, then run the command again (a stopped execution continues with `study run DIR --resume`) |
+| `STUDY_RUNNING` | another execution owns the study (`owner.json`; its process still runs): `study run`, planning and `study aggregate` are refused, and a reader of a study whose samples are not all recorded yet | wait for it or stop it, then run the command again (a stopped execution continues with `study run DIR --resume`) |
 | `STUDY_LOCK_UNAVAILABLE` | the file system of the study directory does not support file locks (`owner.lock`) | use a study directory on a local disk |
 | `STUDY_NOT_PLANNED`, `STUDY_KIND_CHANGED` | the directory holds no plan, or a study of another tool | plan with `--plan-only` / `study candidates`, or choose another `--out` |
 | `PLAN_INVALID`, `REQUEST_INVALID` | `plan.jsonl` or a request file is not a valid plan (sample id, duplicate, hash) | plan it again with its planning command and `--overwrite` |
 | `BUDGET_INVALID` | workers x threads exceed the logical CPUs | fewer `--workers` |
 | `INTERRUPTED` | Ctrl-C outside a study execution; exit 130 | run the command again (a study continues with `study run DIR --resume`) |
 | `EVALUATOR_INVALID` | `--evaluator` cannot be imported, or a worker process needs a named function | give `module:function` of an importable module |
+| `STUDY_NOT_RUN` | a reader (`study aggregate`, `plot sweep`, `report`, `compare`, `present`) got a planned study none of whose samples has a result | `next`: `study run DIR` (`--resume` after a cancellation) |
+| `STUDY_INCOMPLETE` | a reader other than `study aggregate` got a study executed in part and not aggregated since; `without_result` lists the samples | `next`: `study run DIR --resume`; or `study aggregate DIR` (exit 2 `INCOMPLETE`, the other samples as `NOT_RUN` rows) |
+| `STUDY_NOT_AGGREGATED` | every sample has a result, no `summary.json` | `study aggregate DIR` |
 | sample `state` `FAILED` / `CANCELLED` / `NOT_RUN` | the evaluation raised, was stopped by a limit or a cancellation, or never started | `study run DIR --resume` reruns exactly these samples |
 
 An `ERROR` sample inside a study is recorded with its stage and code in `table.csv`; the
-other samples still run. `study status DIR` lists the samples a resume would run.
+other samples still run. `study status DIR` lists the samples a resume would run, its
+`progress` (`NOT_RUN`, `PARTIAL`, `EXECUTED`) and the `next` command.

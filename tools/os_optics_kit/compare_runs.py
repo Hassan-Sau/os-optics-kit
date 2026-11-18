@@ -45,12 +45,16 @@ MAX_DIFFERENCES_SHOWN = 10
 
 def expand_inputs(paths, labels=None):
     """``[(label, run_dir or None, sample record or None)]`` for run directories and study directories."""
+    from .study import progress
+
     entries = []
     for path in [Path(p) for p in paths]:
         if (path / "manifest.json").is_file() or (path / "local_validation.json").is_file():
             name = path.resolve().parent.name if path.name == "run" else path.name  # samples/<id>/run -> <id>
             entries.append((name, path, None))
-        elif (path / "summary.json").is_file() and (path / "samples").is_dir():
+            continue
+        progress.require_results(path)  # a planned study not executed (or in part) names the command to run
+        if (path / "summary.json").is_file() and (path / "samples").is_dir():
             for sample_dir in sorted(p for p in (path / "samples").iterdir() if p.is_dir()):
                 record = wc.read_json(sample_dir / "sample.json") if (sample_dir / "sample.json").is_file() else None
                 run_dir = sample_dir / "run"

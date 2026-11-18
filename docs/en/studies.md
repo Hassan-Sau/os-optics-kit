@@ -32,8 +32,11 @@ the same values and result hashes; only `seconds`, the `timing` of each record, 
 execution block of `study.json` differ. `--workers auto` estimates the elapsed time from the number of samples to
 run and their run time: with `--resume`, the median `timing.run_s` of the study's completed samples; otherwise
 0.2 s per sample. It stays serial unless worker processes (about 4 s of start-up each) save at least 10 %, and
-uses at most 4 workers; a new plan of 31 or fewer samples therefore runs serially. With `--scheduler serial`,
-`--workers auto` runs serially. When a pilot shows heavier samples, give the worker count yourself.
+uses at most 4 workers; a new plan of 31 or fewer samples therefore runs serially. The estimate counts every
+worker at the serial per-sample speed, and the start-up (4 s) and memory (150 MiB) per worker are fixed
+estimates, also on `--resume`; the measurements below show slower workers, so `auto` can overrate a larger
+count. With `--scheduler serial`, `--workers auto` runs serially. When a pilot shows heavier samples, give the
+worker count yourself.
 
 Each worker uses one numerical-library thread (`OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`, `MKL_NUM_THREADS`), so
 workers x threads stay within the logical CPUs; more workers than CPUs are refused. Before the workers start, the
@@ -72,8 +75,28 @@ lambda, a nested function) has no identity: a resume runs its samples again, and
 A request is identified by the SHA-256 of its Project, selected targets, requested outputs and seed: rerunning a
 tool with `--resume` and a changed spec runs exactly the samples whose request changed (a kept record takes the
 labels of the new plan), and a larger tolerance `--samples` with the same seed keeps the samples already run.
+The shipped tools draw every random value while planning (tolerance: from its spec `seed`, into each sample's
+Project), so the `seed` of their requests is null; an evaluator that draws its own random numbers takes a request
+seed from `sample_seed(study_seed, sample_id)`, which does not depend on execution order.
 `study run`, with or without `--resume`, refuses a study planned with another Engine build or catalog release
 (`STUDY_IDENTITY_CHANGED` names the field): plan it again with its planning command and `--overwrite`.
+
+`study status` reports `progress` (`NOT_RUN`: no sample has a result; `PARTIAL`; `EXECUTED`) and the `next`
+command. The commands that read a saved study (`study aggregate`, `plot sweep`, `report`, `compare`, `present`)
+refuse one that has nothing to read with exit 4 and that command as `next`:
+
+| Error | The study | `next` |
+| --- | --- | --- |
+| `STUDY_NOT_RUN` | was planned (`--plan-only`) and never executed, or cancelled before its first sample | `study run DIR` (`--resume` once a sample has a record) |
+| `STUDY_INCOMPLETE` | was executed in part (interrupted, cancelled, or planned again since) and not aggregated since | `study run DIR --resume`; or `study aggregate DIR` for a table of what ran |
+| `STUDY_NOT_AGGREGATED` | has a result for every sample but no `summary.json` | `study aggregate DIR` |
+| `STUDY_RUNNING` | is being executed | wait for it, or stop it |
+
+`study aggregate` of a study executed in part writes the table with the other samples as `NOT_RUN` rows and exits 2
+with status `INCOMPLETE`, the planning tool's status as `analysis_status`, the samples `without_result` and the
+`--resume` command; the other readers accept that table until the plan changes or another execution starts.
+`present build` reports these codes on the assets that use the study. A failed, refused, time- or memory-limited
+or `stop_on`-stopped sample counts as a result.
 
 ## Candidate designs and external search code
 

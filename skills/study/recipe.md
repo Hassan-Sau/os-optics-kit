@@ -66,3 +66,5 @@ Presentation never reruns the Engine: `plot sweep DIR --y target:ID`, `report DI
 `present init RUN DIR --out PRESENT`. `sensitivity` and `tolerance` take `--no-plots --no-report`
 to present later (`sweep` and `study candidates` write no plots or report; `study run` follows the
 choice made when planning); re-aggregate with `study aggregate DIR [--no-plots] [--no-report]`.
+A study with nothing to read yet is refused (`STUDY_NOT_RUN`, `STUDY_INCOMPLETE`,
+`STUDY_NOT_AGGREGATED`): run the `next` command of the error.

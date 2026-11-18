@@ -7,7 +7,7 @@ Layout (``samples/``, ``table.csv`` and ``summary.json`` are what the plot, repo
       plan.jsonl           one line per request in plan order: {sample_id, request_hash, labels, role}
       requests/<id>.json   the full request (requests.py)
       samples/<id>/        project.json, run/ (Engine run directory), sample.json (the sample record)
-      journal.jsonl        append-only events: planned, started, finished, failed, cancelled, reused, ...
+      journal.jsonl        append-only events: planned, started, finished, failed, cancelled, reused, aggregated, ...
       owner.json           while an execution runs: its process (pid, host, process start), start time and id
       owner.lock           taken for a moment by whoever takes ownership (never removed)
       table.csv, summary.json   written by the aggregation step, rows in plan order
@@ -55,6 +55,9 @@ OWNER_FILE, OWNER_LOCK = "owner.json", "owner.lock"
 #: What a plan owns in a study directory (removed by an overwrite, next to the planning tool's own files).
 PLAN_FILES = (PLAN_FILE, JOURNAL_FILE)
 PLAN_DIRS = (REQUESTS_DIR,)
+#: Journal event of an aggregation (``aggregate.finish_study``): a table written after the last ``planned`` and
+#: ``execution_started`` event describes the current records.
+AGGREGATED_EVENT = "aggregated"
 
 
 # --------------------------------------------------------------------------------------------- paths

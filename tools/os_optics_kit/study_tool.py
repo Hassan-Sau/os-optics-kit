@@ -34,11 +34,21 @@ run        executes the samples that still need a result and aggregates the stud
            cancellation through the Python API) cancels the running sample, starts no other, records the rest
            NOT_RUN and exits 130; the printed "next" command (run --resume) continues.
 status     plan size, record states, execution block (state RUNNING only while the executing process runs;
-           INTERRUPTED when it ended without finishing), the samples a resume would run, last journal events;
+           INTERRUPTED when it ended without finishing), progress (NOT_RUN: no sample has a result; PARTIAL;
+           EXECUTED) with the next command, the samples a resume would run, last journal events;
            resume_note when the last execution's evaluator had no importable module:function name (a resume
            runs its samples again); never runs the Engine.
 aggregate  rewrites table.csv and summary.json (and the planning tool's analysis, plots and report) from the
-           saved records; never runs the Engine; refused (STUDY_RUNNING) while an execution of the study runs.
+           saved records; never runs the Engine; refused (STUDY_RUNNING) while an execution of the study runs and
+           (STUDY_NOT_RUN, with the study run command as "next") when no sample has a result. A study executed in
+           part (interrupted or cancelled) is aggregated with the other samples as NOT_RUN rows: status
+           INCOMPLETE (exit 2), analysis_status (the planning tool's status), without_result and next (run
+           --resume).
+
+plot sweep, report, compare and present read the same files and refuse a study that has no result to read with
+one error and its next command: STUDY_NOT_RUN (study run DIR), STUDY_INCOMPLETE (some samples have no result and
+no table was aggregated since: study run DIR --resume, or study aggregate DIR), STUDY_NOT_AGGREGATED (study
+aggregate DIR), STUDY_RUNNING.
 candidates plans (and unless --plan-only runs) one sample per Project file, in the order given: parameter
            "candidate" = 1-based index, label "candidate" = file stem; compare, report and present read the
            result like any study.
@@ -52,7 +62,8 @@ worker. Results are written in plan order, so 1 and N workers give the same tabl
 seconds, timing, worker, peak memory and the execution block.
 
 Stdout: one compact JSON document. Exit codes: those of the planning tool (sweep 0/1, sensitivity 0/2, tolerance
-0/1), 0 for status, candidates and bench, 4 refused input, 130 cancelled.
+0/1), 2 for aggregate of a study executed in part, 0 for status, candidates and bench, 4 refused input, 130
+cancelled.
 """
 
 from __future__ import annotations
@@ -61,7 +72,7 @@ import argparse
 from pathlib import Path
 
 from . import workflow_common as wc
-from .study import aggregate as agg, evaluators, execute as ex, options as opts, requests as rq, store
+from .study import aggregate as agg, evaluators, execute as ex, options as opts, progress, requests as rq, store
 
 PROG = "os-optics-kit study"
 CANDIDATE_KIND = "os-optics-kit.candidate-study"
@@ -88,11 +99,20 @@ def _tool(kind):
 
 
 def aggregate_study(study_dir, *, plots=None, report=None):
-    """Aggregate a planned study with its tool's analysis; returns ``(summary, compact)``."""
+    """Aggregate a planned study with its tool's analysis; returns ``(summary, compact)``. A study none of whose
+    samples has a result is refused (``STUDY_NOT_RUN``); for a study executed in part the compact document has status
+    ``INCOMPLETE`` (the tool's own status as ``analysis_status``), the samples without a result and the ``next``
+    command."""
     study = store.read_study(study_dir)
+    state = progress.require_results(study_dir, aggregating=True)
     aggregate, compact = _tool(study.get("kind"))
     summary = aggregate(study_dir, plots=plots, report=report)
-    return summary, compact(summary)
+    brief = compact(summary)
+    if state is not None and state["state"] == progress.PARTIAL:
+        brief = {"status": "INCOMPLETE", "analysis_status": brief["status"],
+                 "without_result": wc.bounded(state["without_result"], TOP_ROWS), "next": state["next"],
+                 **{key: value for key, value in brief.items() if key != "status"}}
+    return summary, brief
 
 
 def compact_generic(summary, limit=TOP_ROWS):
@@ -189,7 +209,9 @@ def status(study_dir, events=8):
     running = owner is not None and store.owner_alive(owner)
     if execution.get("state") == "RUNNING" and not running:
         execution["state"] = "INTERRUPTED"  # its process ended without finishing: resume it with run --resume
+    reached = progress.study_progress(study_dir) or {}
     described = {"status": "DESCRIBED", "kind": study.get("kind"), "samples": len(entries),
+                 "progress": reached.get("state"), "next": None if running else reached.get("next"),
                  "execution": execution, "owner": owner if running else None, "states": states, "outcomes": outcomes,
                  "without_record": wc.bounded(missing, TOP_ROWS),
                  "to_run_on_resume": wc.bounded(missing + rerun, TOP_ROWS),

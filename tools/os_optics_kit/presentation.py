@@ -716,6 +716,18 @@ def source_kind(path):
     return None
 
 
+def require_study_results(path, **details):
+    """Refuse a planned study that has no result to present (``study.progress``: ``STUDY_NOT_RUN``,
+    ``STUDY_INCOMPLETE``, ``STUDY_NOT_AGGREGATED``, ``STUDY_RUNNING``) with its next command as ``recovery``;
+    nothing for another directory."""
+    from .study import progress
+
+    error = progress.reading_error(path)
+    if error is not None:
+        raise PresentationError(error.code, str(error), recovery=error.details.get("next"), **error.details,
+                                **details)
+
+
 def resolve_source(spec_dir, source_id, entry):
     """``Source`` for ``sources.<id>``; refuses a missing or unreadable path with a recovery step."""
     path = Path(entry["path"])
@@ -723,6 +735,7 @@ def resolve_source(spec_dir, source_id, entry):
     path = Path(os.path.normpath(os.path.abspath(path if path.is_absolute() else Path(spec_dir) / path)))
     kind = source_kind(path)
     if kind is None:
+        require_study_results(path, source=source_id)
         raise PresentationError(
             "SOURCE_MISSING", f"source {source_id!r}: {entry['path']} is not a saved run or study directory",
             recovery=f"point sources.{source_id}.path at a run directory (it holds manifest.json) or a study "

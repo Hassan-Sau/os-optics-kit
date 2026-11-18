@@ -145,12 +145,12 @@
       "name": "study",
       "kind": "tool",
       "description": "Run independent Engine evaluations as a resumable study, serially or in worker processes; plan, execute, aggregate and present as separate steps. Use it for sweeps, tolerance samples, candidate Projects and batches handed over by your own search code.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "command": "os-optics-kit study",
       "requires": "os-optics>=0.13,<0.14",
       "path": "skills/study/SKILL.md",
-      "tokens": 897,
-      "sha256": "00477846a7fdb6972673cc816e3f0f3a10a49dfadb33e46d3f7b7fb353ecd7d9"
+      "tokens": 899,
+      "sha256": "e43ad05a59a876fc31bbdba6cb5427cd2aea3202fbe08a46b515ea274298b726"
     },
     {
       "name": "summary",
