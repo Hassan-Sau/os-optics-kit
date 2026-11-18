@@ -90,12 +90,12 @@
       "name": "present",
       "kind": "tool",
       "description": "Prepare slide-ready material from saved runs and studies - system views, plots, comparisons, animations, an offline gallery and a bundle - and restyle it (language, background, sizes) from a saved configuration without simulating.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "command": "os-optics-kit present",
       "requires": "os-optics>=0.13,<0.14; os-optics-kit[plot]; os-optics-kit[render] for views and animations; os-optics-kit[media] for MP4",
       "path": "skills/present/SKILL.md",
-      "tokens": 891,
-      "sha256": "a53f630cf94ca21e1911a904aa96bc197892ba562d5cc065bb5596e41f726b40"
+      "tokens": 900,
+      "sha256": "b26b4ffa48b833bd72db704b585c5faff31bc197f055169d7769cfea4309c6c2"
     },
     {
       "name": "render",

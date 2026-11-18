@@ -1,7 +1,7 @@
 ---
 name: present
 description: Prepare slide-ready material from saved runs and studies - system views, plots, comparisons, animations, an offline gallery and a bundle - and restyle it (language, background, sizes) from a saved configuration without simulating.
-version: 0.2.0
+version: 0.2.1
 command: os-optics-kit present
 requires: os-optics>=0.13,<0.14; os-optics-kit[plot]; os-optics-kit[render] for views and animations; os-optics-kit[media] for MP4
 kind: tool
@@ -21,8 +21,8 @@ kind: tool
 
 - New results or design changes: `edit`, `sweep`, `os-optics project run` first.
 - Numbers for a decision: `summary`, `compare`; a detailed record: `report`.
-- One quick plot: `plot --theme ...`; a system view or case image: `os-optics view RUN --no-browser --snapshot
-  DIR` (no browser, no `render` extra).
+- One quick plot: `plot --theme ...`; a system view or case image without Chrome:
+  `os-optics view RUN --no-browser --snapshot DIR`.
 
 ## Inputs
 
@@ -44,7 +44,7 @@ Put the user's known language, background and size in `theme` from the start.
 `DIR/assets/<id>/`: PNG, SVG/PDF for plots, `data.json`, `caption.<lang>.txt`, `provenance.json`;
 views add an editable text overlay and an annotated PNG. Also `previews/<id>.png`, `assets.json`
 (asset index), `index.html` (offline gallery), `contact-sheet.png` (previews labelled by id).
-Stdout: each asset's id, status and paths. `--set` changes are saved in `presentation.json`;
+Stdout: each asset's id, status, paths. `--set` changes are saved in `presentation.json`;
 unchanged assets are reused. Exit 0 done; 2 `INCOMPLETE`: `missing[]` names each asset not built
 (missing source, target or panel; `FONT_MISSING`, `BROWSER_NOT_FOUND`, `MEDIA_EXTRA_MISSING`) with a
 recovery step, and the rest is built; 4 refused specification or setting (JSON on stderr).
@@ -68,5 +68,6 @@ os-optics-kit present build talk/presentation.json --set theme.language=zh-CN
 
 ## Version
 
+0.2.1 (os-optics-kit 0.4.0): compare page: crowded panels.
 0.2.0 (os-optics-kit 0.4.0): routes plain system views to the engine.
 0.1.0: first version, verified with os-optics 0.13.0.
