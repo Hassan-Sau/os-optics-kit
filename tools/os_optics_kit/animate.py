@@ -126,7 +126,7 @@ TEXT: dict[str, dict[str, str]] = {
     "zh-CN": {
         "title.orbit": "{source}：环绕视图",
         "title.transition": "{source}：从{start}到{end}",
-        "title.playback": "{y} 随 {x}",
+        "title.playback": "{y} 随 {x} 的变化",
         "caption.orbit_up": "相机绕竖直轴旋转 {sweep}°、仰角 {elevation}° 观察{source}；"
                             "{duration} 秒，{fps} 帧/秒。",
         "caption.orbit_axis": "相机绕光轴旋转 {sweep}°、与光轴夹角 {angle}° 观察{source}；"
