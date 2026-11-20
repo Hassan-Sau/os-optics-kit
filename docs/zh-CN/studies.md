@@ -30,7 +30,9 @@ os-optics-kit sweep sweep.json --base project.json --out study --workers 4
 记录的 `timing`、运行它的工作进程以及 `study.json` 中的执行信息不同。`--workers auto` 根据待运行的样本数
 及其运行时间估算总耗时：加 `--resume` 时取本研究已完成样本 `timing.run_s` 的中位数，否则按每个样本 0.2 s
 计。只有当工作进程（每个启动约 4 s）至少节省 10 % 时才并行，最多 4 个；因此 31 个及以下样本的新规划串行
-运行。指定 `--scheduler serial` 时，`--workers auto` 串行运行。试验显示样本更耗时时，请自己指定
+运行。该估算按串行的单样本速度计算每个工作进程，每个工作进程的启动时间（4 s）和内存（150 MiB）也是固定
+估计值，加 `--resume` 时同样如此；下文的实测显示工作进程更慢，因此 `auto` 可能高估较多工作进程的收益。
+指定 `--scheduler serial` 时，`--workers auto` 串行运行。试验显示样本更耗时时，请自己指定
 工作进程数。
 
 每个工作进程只使用一个数值库线程（`OPENBLAS_NUM_THREADS`、`OMP_NUM_THREADS`、`MKL_NUM_THREADS`），使
@@ -64,9 +66,27 @@ os-optics-kit study run study --resume         # 只运行没有完成记录的�
 名称标识；从 Python 传入、没有这种名称的函数（lambda、嵌套函数）没有标识，续跑会重新运行它产生的样本，
 `study status` 会在 `resume_note` 中说明这一点。请求由其 Project、所选目标、
 请求的输出和种子的 SHA-256 标识：用 `--resume` 和修改后的规格重新运行工具时，只运行请求发生变化的样本
-（保留的记录采用新规划的标签）；公差研究在种子不变时增大 `--samples`，已运行的样本保留。用其他引擎构建
+（保留的记录采用新规划的标签）；公差研究在种子不变时增大 `--samples`，已运行的样本保留。随附的工具在规划
+时抽取所有随机值（公差研究：由规格中的 `seed` 抽取，写入每个样本的 Project），因此其请求的 `seed` 为 null；
+自行抽取随机数的评估器可用 `sample_seed(study_seed, sample_id)` 得到请求种子，它与执行顺序无关。用其他引擎构建
 或目录版本规划的研究，`study run` 无论是否加 `--resume` 都会拒绝（`STUDY_IDENTITY_CHANGED` 指出变化的
 字段）：用其规划命令加 `--overwrite` 重新规划。
+
+`study status` 报告 `progress`（`NOT_RUN`：没有样本有结果；`PARTIAL`；`EXECUTED`）和 `next` 命令。读取已保存
+研究的命令（`study aggregate`、`plot sweep`、`report`、`compare`、`present`）遇到没有可读结果的研究时以退出码 4
+拒绝，并把该命令作为 `next` 给出：
+
+| 错误 | 研究的情况 | `next` |
+| --- | --- | --- |
+| `STUDY_NOT_RUN` | 已规划（`--plan-only`）但从未执行，或在第一个样本之前被取消 | `study run DIR`（已有样本记录时加 `--resume`） |
+| `STUDY_INCOMPLETE` | 只执行了一部分（被中断、取消，或之后重新规划过），且此后未汇总 | `study run DIR --resume`；或用 `study aggregate DIR` 汇总已运行的部分 |
+| `STUDY_NOT_AGGREGATED` | 每个样本都有结果，但没有 `summary.json` | `study aggregate DIR` |
+| `STUDY_RUNNING` | 正在执行 | 等待其结束，或停止它 |
+
+对只执行了一部分的研究，`study aggregate` 写出的表格中其余样本为 `NOT_RUN` 行，并以退出码 2 结束：状态为
+`INCOMPLETE`，规划工具自身的状态记为 `analysis_status`，并给出没有结果的样本 `without_result` 和 `--resume`
+命令；在规划改变或新的执行开始之前，其他读取命令接受这份表格。`present build` 在使用该研究的素材上报告这些
+代码。失败、被拒绝、受时间或内存限制停止以及被 `stop_on` 停止的样本都算作有结果。
 
 ## 候选设计与外部搜索代码
 

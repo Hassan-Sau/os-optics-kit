@@ -161,9 +161,13 @@ def build_report(paths, *, out_dir=None, project=None, plots=None, changes=None,
     ``sections``: extra report sections ``{"title": str, "lines": [Markdown lines]}`` placed after Diagnostics
     (links in the lines are relative to the report directory). ``artifacts``: extra files ``(path, role)`` listed,
     with sha256, among the report's artifacts."""
+    from .study import progress
+
     paths = [Path(p) for p in paths]
     if not paths:
         raise wc.WorkflowError("BAD_ARGUMENT", "give a study directory or run directories")
+    for path in paths:  # a planned study not executed (or in part) names the command to run
+        progress.require_results(path)
     study = len(paths) == 1 and _is_study(paths[0])
     if not study and any(_is_study(p) for p in paths):
         raise wc.WorkflowError("BAD_ARGUMENT", "give one study directory, or run directories only")

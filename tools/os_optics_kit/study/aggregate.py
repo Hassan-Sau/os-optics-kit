@@ -175,14 +175,15 @@ def write_summary(study_dir, summary):
 
 
 def finish_study(study_dir, rows):
-    """Record the run catalog provenance and the aggregation time in ``study.json``; returns the study. It holds
-    the study's ownership while it does, so it is refused (``STUDY_RUNNING``) while an execution runs: an
-    aggregation calls it before it writes any other file."""
+    """Record the run catalog provenance and the aggregation time in ``study.json`` and the journal event
+    ``aggregated``; returns the study. It holds the study's ownership while it does, so it is refused
+    (``STUDY_RUNNING``) while an execution runs: an aggregation calls it before it writes any other file."""
     with store.owned(study_dir):
         study = wc.read_json(Path(study_dir) / store.STUDY_FILE)
         study["catalog"] = wc.run_catalog_identity(rows)
         study["finished"] = wc.utc_now()
         store.write_study(study_dir, study)
+        store.append_journal(study_dir, store.AGGREGATED_EVENT, rows=len(rows))
     return study
 
 

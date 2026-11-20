@@ -32,7 +32,9 @@ directory. gallery rewrites index.html and contact-sheet.png. bundle copies sele
 data, provenance and redraw settings with an offline gallery into a directory or .zip (relative links only).
 
 Needs matplotlib (os-optics-kit[plot]); views and animations need Chrome/Chromium and os-optics-kit[render];
-MP4 needs os-optics-kit[media]. Stdout: one compact JSON document; progress lines on stderr.
+MP4 needs os-optics-kit[media]. A plain system view or case image needs no browser:
+os-optics view RUN --no-browser --snapshot DIR --views iso.
+Stdout: one compact JSON document; progress lines on stderr.
 Exit codes: 0 done; 2 INCOMPLETE: some assets were not built (a missing source, target or panel, or a missing
 font, browser or media extra), each named in missing[] with a recovery step; 4 refused specification, setting or
 output directory.
@@ -810,6 +812,7 @@ def init(paths, out_dir, *, labels=None, title=None, theme=None, settings=(), an
     for index, path in enumerate(paths):
         kind = pres.source_kind(path)
         if kind is None:
+            pres.require_study_results(path)  # a planned study not executed (or in part) names the command to run
             raise pres.PresentationError("SOURCE_MISSING", f"{Path(path).name} is not a saved run or study directory",
                                          recovery="pass run directories (manifest.json) or sweep study directories "
                                                   "(summary.json)")

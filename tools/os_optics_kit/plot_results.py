@@ -233,7 +233,10 @@ def finish(fig, out_dir, name, style, provenance_text, caption_text=None):
 
 
 def _study(study_dir):
+    from .study import progress
+
     study_dir = Path(study_dir)
+    progress.require_results(study_dir)  # a planned study not executed (or in part) names the command to run
     summary_path = study_dir / "summary.json"
     if not summary_path.is_file():
         raise wc.WorkflowError("STUDY_NOT_READABLE", f"{study_dir} has no summary.json", path=study_dir.as_posix())
