@@ -41,6 +41,34 @@ Requires `os-optics>=0.13,<0.14`; verified with os-optics 0.13.0 and catalog rel
 - Skill `study`; guide "Studies: plan, execute, aggregate, present" (`docs/en/studies.md`, `docs/zh-CN/studies.md`).
 - Cases `achromatic-imaging`, `aspheric-lens`, `bounded-aberration-correction`, `cylindrical-light-sheet`,
   `focus-requirement`, `midwave-infrared-imager`, `phase-only-flat-top`, `sonnar-telephoto-lens` (18 in total).
+- `os-optics-kit sfr IMAGE --roi X,Y,W,H --out DIR`: slanted-edge SFR (ISO 12233 e-SFR) of one image region, with
+  the edge angle, fit residuals, `sfr50`, SFR at Nyquist and diagnostics; `--design` puts a saved
+  `os-optics results imaging` MTF on the same axes and states the input differences. No Engine run is needed;
+  PNG and TIFF input and the plots need `os-optics-kit[plot]`, and without numpy the command refuses with
+  `NUMPY_MISSING`. Skill `sfr` (17 skills) and the guide "Measure slanted-edge SFR" (`docs/en/sfr.md`,
+  `docs/zh-CN/sfr.md`).
+- Case taxonomy: every case states a `class` (`lens`, `free-space`, `integrated-path`), one to three `domain`
+  values, `provenance`, `publication`, an optional `source` and tags from a closed vocabulary; the scale band is
+  derived from `project.json`. `cases list` filters by `--class`, `--domain`, `--provenance`, `--publication`,
+  `--scale`, `--tag` and `--catalog`; `cases vocabulary` prints the values. Guide "Case library"
+  (`docs/en/case-library.md`, `docs/zh-CN/case-library.md`).
+- Case images: `images.json` records every image of a case with its SHA-256, the Engine options of each system
+  view and the run it was drawn from. `cases images NAME` renders the system views with the Engine's browser-free
+  snapshot (`os-optics view RUN --no-browser --snapshot`) and records them; `cases images NAME --figure
+  images/X.png --script SCRIPT.py` records a figure drawn by a case script. A case has at most five images: one to
+  three system views (a 3D view first, the section of a lens) and at most three figures, PNG of at most 400 KiB.
+- `cases verify` compares the run identity recorded in `images.json` (`project_hash`, `engine_input_hash`) with
+  the fresh run, so a case's images come from the design that verifies; `--jobs N` verifies up to N cases at once.
+- `contrib case` takes `--class`, `--domain`, `--tags`, `--provenance`, `--publication` and `--source`, renders
+  the system views, writes `images.json`, `README.md` and `README.zh-CN.md`, and adds `cases.json` and the README
+  case tables to the patch. `python scripts/case_tables.py --write | --check` generates the case tables of both
+  READMEs from `cases.json`.
+- A planned study with nothing to read is refused by `study aggregate`, `plot sweep`, `report`, `compare` and
+  `present` with the command to run next: `STUDY_NOT_RUN` (no sample has a result), `STUDY_INCOMPLETE` (executed in
+  part and not aggregated since), `STUDY_NOT_AGGREGATED` (every sample has a result, no `summary.json`).
+  `study aggregate` of a study executed in part tabulates what ran and exits 2 with status `INCOMPLETE`, the
+  samples without a result and the `next` command. `study status` reports `progress` (`NOT_RUN`, `PARTIAL`,
+  `EXECUTED`) and the `next` command.
 
 ### Changed
 
@@ -70,6 +98,23 @@ Requires `os-optics>=0.13,<0.14`; verified with os-optics 0.13.0 and catalog rel
   records the execution outcome and every target assessment in place of the aggregate status; a schema 1 file is
   refused with `EXPECTED_SCHEMA` (`cases verify NAME --update-expected` writes the new one). `contrib case`
   packages a `PARTIAL` run with the warning `RUN_EXECUTION_PARTIAL`.
+- `cases.json` is index schema 2: each entry adds `class`, `domain`, `provenance`, `publication`, `source`,
+  `scale` and `images`. Every case has `README.md` and `README.zh-CN.md`, which show exactly the images recorded in
+  `images.json` and link each other; `cases index --check` checks the record, the files and both READMEs. The
+  lens model of `focus-requirement` is named after its 50 mm focal length (`ideal-f50`); its targets and outcome
+  are unchanged.
+
+### Fixed
+
+- Chinese figures on macOS and Windows: `present` finds the Chinese fonts these systems ship (PingFang SC,
+  Hiragino Sans GB, Heiti SC, Songti SC, Microsoft YaHei, SimHei, DengXian, SimSun and others), uses a family's
+  light face when it has no regular one, reads the indexed face of a `.ttc` collection, and otherwise uses
+  installed fonts that draw Chinese; `FONT_MISSING` remains for a system without one. The contact sheet keeps
+  families installed only in a light face.
+- A targets plot in a short panel keeps its value axis in proportion to the values; panels whose labels still do
+  not fit are listed in `details.labels_cramped`. Shared-axis captions print display units (`µm`, not `um`).
+- The gallery shows animation controls below the video instead of over its last line.
+- The Chinese playback title of a parameter animation is a complete phrase.
 
 Studies saved by 0.3.0 are still read by `plot`, `report`, `compare` and `present`; they hold no plan, so run them
 again to use `--resume`.
