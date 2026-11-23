@@ -37,6 +37,7 @@ walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 | Command | Exit 0 | 1 | 2 | 3 | 4 |
 | --- | --- | --- | --- | --- | --- |
 | `summary` | `PASS`, `NOT_APPLICABLE` | `FAIL` | `UNKNOWN` | `OUT_OF_MODEL`; a `PARTIAL` run | error, including a `FAILED` or `CANCELLED` run |
+| `view` | `READY` (clean stop) or `--once` snapshot | | | | refused input, non-loopback host (`HOST_NOT_LOOPBACK`), missing engine |
 | `edit` | `EDITED`, `ALREADY_APPLIED`, `DESCRIBED`; with `--run` outcome `PASS` or `NOT_APPLICABLE` | outcome `FAIL` | outcome `UNKNOWN` | outcome `OUT_OF_MODEL`; a `PARTIAL` run | refused, `RUN_REFUSED` |
 | `sweep` | `COMPLETED`, `PLANNED` | `NO_FEASIBLE` (constraints given, none met) | | | refused |
 | `sensitivity` | `COMPLETED`, `PLANNED` | | `INCOMPLETE` (a derivative unavailable) | | refused |
@@ -620,6 +621,7 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `BUDGET_EXCEEDED` | more evaluations than a stated `max_evaluations` | fewer values, a larger cap, or no cap |
 | `SPEC_INVALID`, `TARGET_UNKNOWN`, `COLUMN_UNKNOWN`, `NOMINAL_MISMATCH`, `NOMINAL_AMBIGUOUS`, `STEP_REQUIRED` | spec structure, unknown target, objective / constraint / derived column the spec cannot produce, a stated `nominal` that is not the base value, `set_*` fields with different base values, relative step at nominal 0 | fix the spec as the message states; `known` lists the valid ids or columns |
 | `INPUT_INVALID` | a workflow input cannot build the nominal design (a study value that cannot be built is one `ERROR` sample with `error_stage` `build`; the other values run) | change the named input |
+| `HOST_NOT_LOOPBACK` | `view --host` was given a non-loopback address | use `127.0.0.1`, `localhost` or `::1` |
 | `CATALOG_NOT_AVAILABLE` | no catalog release installed | `os-optics catalog sync` (or `catalog import FILE`) |
 | `STUDY_STARTED` | `study run` on a study that already has sample results | `--resume`, or plan it again with its planning command and `--overwrite` |
 | `STUDY_IDENTITY_CHANGED` | Engine build, catalog release or plan differ from the planned study (`changed` names them); `study run` refuses it with or without `--resume` | plan it again with its planning command (`sweep`, `sensitivity`, `tolerance`, `study candidates`) and `--overwrite` |

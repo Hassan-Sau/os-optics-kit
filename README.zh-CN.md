@@ -19,7 +19,7 @@ os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎�
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | 产品文档与问题反馈 |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | 本仓库：工具、案例、技能与贡献 |
 
-**[Agent 指南（英文）](AGENT_GUIDE.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
+**[Agent 指南（英文）](AGENT_GUIDE.md) · [本地查看器](docs/zh-CN/viewer.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
 
 ## 安装
 
@@ -51,6 +51,21 @@ os-optics-kit summary run
 `skills list` 以紧凑 JSON 输出技能索引；`skills install` 把技能说明复制到 Agent 宿主的技能目录
 （`SKILLS_DIR`）。案例随软件包一起安装，因此 `cases copy` 和 `cases verify` 无需克隆仓库；`verify`
 重新运行案例，并将运行状态和每个目标判定与记录结果比较。`os-optics-kit <命令> --help` 说明每个命令。
+
+## 本地实时查看器
+
+`os-optics-kit view` 会在默认浏览器中打开一个绑定本机回环地址的只读页面，实时跟随原生 Project JSON 或已保存运行目录的变化，
+并列呈现 3D 光路与追迹光线、完整功率账本、执行状态、观测面物理量、指标判定与新鲜度；无需安装 `[render]`/`[plot]` 扩展，
+也无需云端账号。
+
+```bash
+os-optics-kit view run                     # 实时查看已保存的运行目录
+os-optics-kit view project.json --run run  # 同时跟踪 Project 与运行结果的新鲜度
+os-optics-kit view project.json            # 仅预览标称几何（明确标注未计算）
+os-optics-kit view project.json --evaluate # 在临时目录执行一次显式本地计算
+```
+
+快照一致性、过期结果防护与中英文切换说明见[本地查看器指南](docs/zh-CN/viewer.md)。
 
 ## 演示材料
 
@@ -113,6 +128,7 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 | 技能 | 命令 | 用途 |
 | --- | --- | --- |
 | `summary` | `os-optics-kit summary` | 把已保存的运行读成一个紧凑 JSON 文档，并按结果给出退出码 |
+| `view` | `os-optics-kit view` | 在本机浏览器中打开只读实时查看器，跟随 Project 或运行目录更新（无需额外扩展） |
 | `edit` | `os-optics-kit edit` | 列出 Project 中的对象，按标识修改，由引擎检查并原子写入 |
 | `sweep` | `os-optics-kit sweep` | 运行参数网格扫描，保存并统计每个样本 |
 | `compare` | `os-optics-kit compare` | 按目标和平面标识比较已保存的运行或扫描样本，并给出时效 |

@@ -23,7 +23,7 @@ which any coding agent can load.
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | Product documentation and feedback |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | This repository: tools, cases, skills and contributions |
 
-**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
+**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Local viewer](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/viewer.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
 
 ## Install
 
@@ -57,6 +57,22 @@ os-optics-kit summary run
 directory of your agent host (`SKILLS_DIR`). The cases ship inside the package, so `cases copy` and `cases verify`
 work without a clone; `verify` reruns the case and compares the run status and every target assessment with the
 recorded outcome. `os-optics-kit <command> --help` describes every command.
+
+## Local live viewer
+
+`os-optics-kit view` opens a small read-only page on loopback in your default browser and follows edits to a native
+Project JSON or saved run directory in real time. It shows the 3D optical path and traced rays, the full power ledger,
+execution status, observation quantities, target assessments and freshness with no `[render]`/`[plot]` extras or account.
+
+```bash
+os-optics-kit view run                     # watch a saved run directory
+os-optics-kit view project.json --run run  # watch a Project and track run freshness
+os-optics-kit view project.json            # geometry preview only (uncomputed)
+os-optics-kit view project.json --evaluate # one-shot local run in a temp dir
+```
+
+See the [local viewer guide](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/viewer.md) for snapshot
+consistency, stale-run protection and bilingual UI details.
 
 ## Presentation material
 
@@ -122,6 +138,7 @@ Each case holds `project.json` (the Project with its targets), `CASE.md` (for ag
 | Skill | Command | Use it to |
 | --- | --- | --- |
 | `summary` | `os-optics-kit summary` | Read a saved run into one compact JSON document with an exit code per outcome |
+| `view` | `os-optics-kit view` | Open a read-only local browser viewer for a Project or saved run and follow live updates (no extras) |
 | `edit` | `os-optics-kit edit` | List a Project's objects and apply edits by ID, checked by the engine and written atomically |
 | `sweep` | `os-optics-kit sweep` | Run a parameter grid sweep, every sample saved and counted |
 | `compare` | `os-optics-kit compare` | Compare saved runs or sweep samples by target and plane ID, with freshness |

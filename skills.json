@@ -195,6 +195,17 @@
       "path": "skills/tolerance/SKILL.md",
       "tokens": 787,
       "sha256": "63c552cfd9b16a11633a94ab1b13721d033b4292b8d68fc666aa3e6689dc6f02"
+    },
+    {
+      "name": "view",
+      "kind": "tool",
+      "description": "Open a read-only local browser viewer for a native Project JSON or saved run directory and follow live updates.",
+      "version": "0.1.0",
+      "command": "os-optics-kit view",
+      "requires": "os-optics>=0.13,<0.14",
+      "path": "skills/view/SKILL.md",
+      "tokens": 608,
+      "sha256": "d171310b5170fa78f4d3952075ba90cce247a5bf94c8954e86e12a04735ae2d1"
     }
   ]
 }

@@ -13,8 +13,8 @@ os-optics-kit skills show NAME [PAGE]
 os-optics-kit skills install --dest DIR
 ```
 
-Read a skill before its command; `skills show NAME PAGE` prints a page it names. `skills install` copies
-them into your agent host's skills directory (`--force` overwrites a different file).
+Read a skill before its command; `skills show NAME PAGE` prints subpages. `skills install` copies skills to your
+host dir (`--force` overwrites).
 
 ## Route by task
 
@@ -23,6 +23,7 @@ them into your agent host's skills directory (`--force` overwrites a different f
 | Start from a worked design | `run-case`: `cases list --class lens --tag mtf` (values: `cases vocabulary`), `cases copy NAME --dest .`, `cases verify NAME` |
 | Case images / system view (no browser) | `os-optics view RUN --no-browser --snapshot DIR --views iso`; lens section `--section ALL`; kit checkout: `cases images NAME` |
 | Read a run's outcome | `summary RUN` |
+| Live read-only viewer (no extras) | `view PATH` (`--run DIR`, `--evaluate`); follows edits on loopback |
 | Discover IDs, units, axes; edit by ID | `edit P.json --describe --ids ID`; `edit P.json --edits OPS.json --out NEW.json --run RUN` |
 | Explore a parameter grid | `sweep SPEC.json --base P.json --out STUDY` |
 | Explain what an edit changed | `compare RUN_A RUN_B --project CURRENT.json --out CMP` |
@@ -41,9 +42,8 @@ them into your agent host's skills directory (`--force` overwrites a different f
 
 Unprefixed commands are `os-optics-kit <command>`; `--help` specifies each.
 `render` and `present` need `os-optics-kit[render]` and Chrome or Chromium; case images do not.
-[Workflow recipes](docs/workflow-recipes.md) give spec keys, outputs and error codes.
-Cases `expansion-focus`, `polarization-control` and `mirror-alignment` ship a parameterized `workflow.py`
-(`--list-parameters`).
+[Workflow recipes](docs/workflow-recipes.md) list specs, outputs and errors. Cases `expansion-focus`,
+`polarization-control` and `mirror-alignment` ship `workflow.py --list-parameters`.
 
 ## What the outputs state
 
@@ -75,11 +75,9 @@ poses and the user's actual target bounds. Coordinates are right-handed; quatern
 `[w, x, y, z]`. Read `local_axes` before moving along a local axis.
 
 Inputs are never modified; an existing output is refused (`OUTPUT_EXISTS`) unless `--overwrite`.
-Invalid edits are refused atomically. Repeating an identical `edit` returns `already_applied`;
-`--expect-base-hash` refuses a changed base. Optional `max_evaluations` caps a study's runs, the
-Project's compute budget the work in each run. Size workers from a timed pilot
-(`skills show study recipe.md`): `--workers N` (`auto` assumes 0.2 s per sample),
-`--time-limit-s` / `--max-memory-mib` per evaluation, workers x threads within the CPUs.
+Invalid edits fail atomically; identical `edit` returns `already_applied`; `--expect-base-hash` guards the base.
+`max_evaluations` caps runs; Project budget caps each run. Size `--workers N` from a pilot (`skills show study recipe.md`),
+with `--time-limit-s` / `--max-memory-mib` and workers x threads <= CPUs.
 
 ## Contribute a case
 
