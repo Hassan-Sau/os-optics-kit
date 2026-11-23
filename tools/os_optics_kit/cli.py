@@ -33,6 +33,10 @@ COMMANDS: dict[str, tuple[str, str]] = {
         "present",
         "presentation material from saved results: themed figures, comparisons, animations, gallery, bundle",
     ),
+    "view": (
+        "viewer_tool",
+        "local read-only live viewer for a native Project JSON or saved run directory",
+    ),
     "cases": ("cases", "list, show, copy and verify the engine-reproducible cases"),
     "skills": ("skills", "list, show and install the vendor-neutral agent skills"),
     "contrib": ("contrib", "prepare a case or tool contribution as a PR-ready patch or bundle"),
