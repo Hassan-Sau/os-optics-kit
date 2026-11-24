@@ -80,7 +80,12 @@ class WorkflowGateTests(unittest.TestCase):
     def test_engine_jobs_depend_on_the_gate(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("run: python scripts/engine_gate.py", text)
-        self.assertIn("if: needs.engine-gate.outputs.engine_candidate == 'present'", text)
+        engine = text[text.index("\n  engine:\n"):]
+        # the required check keeps its exact name and is never skipped at job level
+        self.assertIn("    name: Engine checks (published os-optics)\n", engine)
+        self.assertNotRegex(engine.split("\n    steps:")[0], r"\n    if:")
+        self.assertIn("::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::", engine)
+        self.assertIn("echo \"run=false\" >> \"$GITHUB_OUTPUT\"", engine)
         self.assertIn('name: "Engine checks skipped: ENGINE_CANDIDATE_NOT_PUBLISHED"', text)
         self.assertNotIn("pull_request_target", text)
         self.assertNotIn("self-hosted", text)

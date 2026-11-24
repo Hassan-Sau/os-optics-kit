@@ -236,9 +236,9 @@ jobs:
         run: python3 scripts/check_dco.py "$BASE" "$HEAD"
 
   engine:
-    name: Engine checks (os-optics candidate)
+    # Required check: keep this name. The job always runs; the gate decides its steps.
+    name: Engine checks (published os-optics)
     needs: [setup, engine-gate]
-    if: needs.engine-gate.outputs.engine_candidate == 'present'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -253,9 +253,25 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ needs.setup.outputs.newest }}
-      - name: Engine candidate is installable (decided by the gate job)
+      - name: Engine candidate gate result
         id: gate
-        run: echo "run=true" >> "$GITHUB_OUTPUT"
+        env:
+          CANDIDATE: ${{ needs.engine-gate.outputs.engine_candidate }}
+          VERSION: ${{ needs.engine-gate.outputs.version }}
+        run: |
+          if [[ "$CANDIDATE" == "present" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Engine candidate os-optics $VERSION is installable; running every engine check."
+            exit 0
+          fi
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "ENGINE_CANDIDATE_NOT_PUBLISHED"
+          echo "::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::the engine requirement of baseline.json is not installable from the configured index; engine tests, case verification, browser tests and the presentation demo did not run"
+          {
+            echo "### ENGINE_CANDIDATE_NOT_PUBLISHED"
+            echo "Not run: engine tests and tools, case verification, render/viewer/presentation browser tests, presentation demo."
+            echo "They run with no change once the engine is installable."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Chinese fonts for the figure tests
         if: steps.gate.outputs.run == 'true'
         run: |

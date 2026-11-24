@@ -409,7 +409,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_ci_verifies_cases_on_one_path_once_per_tree(self):
         engine = self.job("ci.yml", "engine")
-        self.assertIn("name: Engine checks (os-optics candidate)", engine)
+        self.assertIn("name: Engine checks (published os-optics)", engine)
         self.assertIn("python scripts/check_alignment.py --out run-alignment --skip cases-verify", engine)
         self.assertEqual(engine.count("check_alignment.py"), 1)
         self.assertIn("    permissions:\n      contents: read\n", engine)
@@ -447,7 +447,7 @@ class WorkflowTests(unittest.TestCase):
         for name in ("Read baseline", "Lint (ruff)", "Types (mypy)", "Unit tests (Python ${{ matrix.python }}, no engine)",
                      "Repository, skills and cases", "Build and install the package", "DCO sign-off",
                      "Engine candidate gate",
-                     "Engine checks (os-optics candidate)"):
+                     "Engine checks (published os-optics)"):
             with self.subTest(name=name):
                 self.assertIn(f"    name: {name}\n", text)
         repository = self.job("ci.yml", "repository")
