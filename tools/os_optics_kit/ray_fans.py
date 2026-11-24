@@ -122,6 +122,7 @@ def path_fans(rays: list[dict], wavefront: dict | None = None, zones: int | None
         for name, rho, other, transverse, slope in (("tangential", pt, ps, dt, st), ("sagittal", ps, pt, ds, ss)):
             if abs(other) <= AXIS_TOLERANCE and abs(rho) > 0:
                 fans[name].append({"ray_index": ray["ray_index"], "zone": ray["ring_index"], "rho": rho,
+                                   "launch_mm": rho * radius,
                                    "transverse_um": transverse * 1000.0,
                                    "longitudinal_mm": _longitudinal_mm(transverse, slope),
                                    "opd_waves": opd.get(ray["ray_index"])})
@@ -138,7 +139,7 @@ def path_fans(rays: list[dict], wavefront: dict | None = None, zones: int | None
         opd_rms = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
     return {"path_id": chief["path_id"], "source_id": chief.get("source_id"), "wavelength_nm": chief["wavelength_nm"],
             "chief_uv_mm": [chief["u_mm"], chief["v_mm"]], "pupil_rays": len(pupil), "zones": sorted(kept),
-            "fans": fans, "spot_rms_um": spot_rms_um, "opd_rms_waves": opd_rms,
+            "fans": fans, "pupil_radius_mm": radius, "spot_rms_um": spot_rms_um, "opd_rms_waves": opd_rms,
             "engine": {"opd_rms_waves": (wavefront or {}).get("rms_waves"),
                        "opd_pv_waves": (wavefront or {}).get("pv_waves"),
                        "wavefront_status": (wavefront or {}).get("status"),
