@@ -47,6 +47,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "candidates": ("catalog_candidates", "rank catalog products for a requirement"),
     "measurements": ("analyze_measurements", "clean, fit and reference-normalize detector CSV data"),
     "fans": ("ray_fans", "ray fans: transverse/longitudinal aberration and OPD per field and wavelength"),
+    "field": ("field_aberrations", "field curvature and distortion per field and wavelength"),
     "sfr": ("sfr", "slanted-edge SFR (ISO 12233 e-SFR) of an image, optionally beside a design MTF"),
     "study": ("study_tool", "run, resume, inspect and aggregate planned studies, in parallel worker processes"),
     "render": (
