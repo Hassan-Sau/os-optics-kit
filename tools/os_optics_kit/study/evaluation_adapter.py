@@ -18,10 +18,25 @@ Engine's scope in every result: ``requested``, ``executed``, ``not_computed[]`` 
 ``ValidationResult.evaluation``, with each quantity's ``state`` (``QuantityState``, ``NOT_COMPUTED`` included) and its
 ``value_basis``.
 
+MTF is refused as an objective in both forms: an ``{"mtf": ...}`` source, and a ``{"target": ID}`` whose declared
+metric is of the MTF family (a metric name containing ``mtf``).
+
 :meth:`Adapter.evaluate` never raises for a candidate and never drops one: it returns a :class:`CandidateResult` whose
-``residuals`` always has ``len(objectives) + len(constraints)`` entries (objective errors, then constraint
-violations ``max(0, -margin)``). An invalid candidate carries ``reason`` = ``{"code", "stage", "message", ...}`` and
-residuals filled with ``invalid_residual`` (finite, so a least-squares solver can still step away from it). Codes:
+``residuals`` always has ``len(objectives) + len(constraints)`` entries: ``sqrt(weight) * (value - goal) / scale`` per
+objective, then the violation ``max(0, -margin)`` per constraint. Relation to the objective, exactly:
+``objective`` is the aggregation of the objective errors only (constraint violations do not count in it);
+``residual_objective = sum(r ** 2 for r in residuals)``, which counts the constraint violations as quadratic
+penalties. For ``sum_squares`` ``residual_objective == objective + sum(violation ** 2)`` (equal to ``objective`` when
+every constraint holds), and ``dls_compatible`` is true. For ``sum_abs`` and ``max_abs`` the residuals are the same
+vector but ``sum(r ** 2)`` is not their objective: ``dls_compatible`` is false and a least-squares solver must not use
+them as that objective's residuals.
+
+An invalid candidate carries ``reason`` = ``{"code", "stage", "message", ...}`` and residuals filled with
+``invalid_residual`` (finite, so a least-squares solver can still step away from it); for ``OUT_OF_BOUNDS`` each
+entry is ``invalid_residual * (1 + d)`` with ``d`` the largest bound violation in variable scales, so a farther
+candidate is worse. Its ``evaluation`` is the empty scope (nothing ran). ``DEFAULT_IMAGING`` (``launch_grid`` 24)
+is the sampling of MTF readings unless ``Problem.imaging`` sets it: the grid changes MTF values, and so the margins;
+an MTF reading with no engine ``value_basis`` carries ``basis_note`` naming the curve it was read from. Codes:
 ``OUT_OF_BOUNDS``, ``EDIT_REFUSED``, ``PROJECT_REFUSED``, ``PLAN_REFUSED``, ``RUN_STOPPED``, ``ANALYSIS_REFUSED``,
 ``QUANTITY_UNAVAILABLE`` (a quantity was not computed or has no usable value), ``ENGINE_ERROR``.
 """
@@ -39,6 +54,14 @@ REASON_CODES = ("OUT_OF_BOUNDS", "EDIT_REFUSED", "PROJECT_REFUSED", "PLAN_REFUSE
 USABLE_STATES = ("KNOWN", "KNOWN_ZERO")
 DEFAULT_INVALID_RESIDUAL = 1.0e3
 DEFAULT_IMAGING = {"launch_grid": 24, "include_psf_map": False}
+
+
+EMPTY_SCOPE = {"complete": False, "requested": [], "executed": [], "not_computed": [], "targets_not_evaluated": []}
+
+
+def is_mtf_metric(metric: str) -> bool:
+    """Whether a target metric is of the MTF family (``mtf``, ``mtf_*``, ``*_mtf_*``)."""
+    return "mtf" in metric.lower()
 
 
 class ProblemError(ValueError):
@@ -123,7 +146,13 @@ class Problem:
                 raise ProblemError(f"constraint {c.name!r}: give minimum and/or maximum")
             if not c.scale > 0:
                 raise ProblemError(f"constraint {c.name!r}: scale must be positive")
-        declared = {t.get("target_id") for t in self.project.get("targets") or []}
+        metrics = {t.get("target_id"): str(t.get("metric") or "") for t in self.project.get("targets") or []}
+        for o in self.objectives:
+            tid = o.source.get("target")
+            if tid is not None and is_mtf_metric(metrics.get(tid, "")):
+                raise ProblemError(f"objective {o.name!r}: target {tid!r} is an MTF metric ({metrics[tid]}); MTF is a "
+                                   "constraint, not an objective; declare it under constraints")
+        declared = set(metrics)
         for item in self.sourced():
             if "target" in item.source and item.source["target"] not in declared:
                 raise ProblemError(f"{item.name!r}: target {item.source['target']!r} is not declared in the Project")
@@ -167,6 +196,8 @@ class CandidateResult:
     residuals: list[float]
     residual_names: list[str]
     objective: float | None = None
+    residual_objective: float | None = None
+    dls_compatible: bool = False
     objectives: list[dict[str, Any]] = field(default_factory=list)
     constraints: list[dict[str, Any]] = field(default_factory=list)
     feasible: bool | None = None
@@ -176,6 +207,7 @@ class CandidateResult:
 
     def as_dict(self) -> dict[str, Any]:
         return {"x": dict(self.x), "valid": self.valid, "feasible": self.feasible, "objective": self.objective,
+                "residual_objective": self.residual_objective, "dls_compatible": self.dls_compatible,
                 "residuals": list(self.residuals), "residual_names": list(self.residual_names),
                 "objectives": self.objectives, "constraints": self.constraints, "reason": self.reason,
                 "evaluation": self.evaluation, "identity": self.identity}
@@ -266,8 +298,9 @@ class Adapter:
                                variable=v.name)
             low, high = v.bounds
             if not low <= value <= high:
+                distance = (low - value if value < low else value - high) / v.scale
                 raise _Refused("OUT_OF_BOUNDS", "parameters", f"{v.name}={value:g} lies outside [{low:g}, {high:g}]",
-                               variable=v.name, value=float(value), bounds=[low, high])
+                               variable=v.name, value=float(value), bounds=[low, high], violation=float(distance))
             ops.extend(_substitute(copy.deepcopy(list(v.ops)), float(value), v.unit))
         if not ops:
             return copy.deepcopy(self.problem.project)
@@ -294,13 +327,18 @@ class Adapter:
         except _Refused as refused:
             result.reason = refused.reason
             result.valid = False
-            result.residuals = [problem.invalid_residual] * self.size
+            grow = 1.0 + float(refused.reason.get("violation") or 0.0)
+            result.residuals = [problem.invalid_residual * grow] * self.size
+            if result.evaluation is None:
+                result.evaluation = copy.deepcopy(EMPTY_SCOPE)
             result.objective = None
             result.feasible = None
         except Exception as exc:  # anything else the Engine raises is still a reason, never an escape
             result.reason = {"code": "ENGINE_ERROR", "stage": "evaluation", "message": str(exc),
                              "error_code": getattr(exc, "code", type(exc).__name__)}
             result.valid = False
+            if result.evaluation is None:
+                result.evaluation = copy.deepcopy(EMPTY_SCOPE)
             result.residuals = [problem.invalid_residual] * self.size
             result.objective = None
             result.feasible = None
@@ -374,6 +412,9 @@ class Adapter:
                                        "wavelength_nm": q.scope.wavelength_nm, "reason": q.reason, "message": q.message,
                                        "converged": None if q.convergence is None else q.convergence.converged,
                                        "value": None}
+            if q.value_basis is None:
+                reading["basis_note"] = (f"read from the imaging curve {q.values_ref} at the frequency axis "
+                                         f"{prefix}.frequencies_cyc_per_mm (state {q.state.value}, no engine value_basis)")
             curve = analysis.arrays.get(q.values_ref) if q.values_ref else None
             axis = analysis.arrays.get(f"{prefix}.frequencies_cyc_per_mm")
             if isinstance(curve, list) and isinstance(axis, list):
@@ -416,6 +457,8 @@ class Adapter:
                                        "value_basis": reading.get("value_basis")})
         result.objective = aggregate(errors, weights, problem.aggregation)
         result.residuals = residuals
+        result.residual_objective = float(sum(r * r for r in residuals))
+        result.dls_compatible = problem.aggregation == "sum_squares"
         result.feasible = feasible
         result.valid = True
 

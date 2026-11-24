@@ -94,6 +94,55 @@ def test_problem_declaration_errors():
         _problem(aggregation="median")
 
 
+@pytest.mark.parametrize("how", ea.AGGREGATIONS)
+def test_objective_residual_relation_with_a_violated_constraint(how):
+    # spot error (1-0)/0.5 = 2, weight 2 -> residual 2*sqrt(2); waist 2 outside [-1, 1] -> violation 1
+    p = _problem(aggregation=how, objectives=[ea.Objective("spot", {"target": "spot"}, scale=0.5, weight=2.0)])
+    r = ea.Adapter(p, session=FakeSession(), edit=lambda d, ops: d).evaluate({"shift": 0.0})
+    assert r.valid and r.feasible is False
+    assert r.residuals == pytest.approx([2.0 * 2 ** 0.5, 1.0])
+    assert r.residual_objective == pytest.approx(sum(x * x for x in r.residuals))
+    expected = {"sum_squares": 8.0, "sum_abs": 4.0, "max_abs": 4.0}[how]
+    assert r.objective == pytest.approx(expected)  # constraint violations do not count in the objective
+    assert r.dls_compatible is (how == "sum_squares")
+    if how == "sum_squares":
+        assert r.residual_objective == pytest.approx(r.objective + 1.0 ** 2)
+
+
+def test_mtf_target_metric_is_refused_as_objective_and_accepted_as_constraint():
+    project = {"targets": [{"target_id": "mtf20", "metric": "mtf_tangential"}, {"target_id": "spot", "metric": "m"}]}
+    with pytest.raises(ea.ProblemError, match="MTF is a constraint"):
+        ea.Problem(project=project, variables=[VAR], objectives=[ea.Objective("m", {"target": "mtf20"})])
+    p = ea.Problem(project=project, variables=[VAR], objectives=[ea.Objective("s", {"target": "spot"})],
+                   constraints=[ea.Constraint("m", {"target": "mtf20"}, minimum=0.5)])
+    assert p.residual_names == ["objective:s", "constraint:m"]
+
+
+class NotEvaluatedSession(FakeSession):
+    def evaluate(self, document, outputs=(), targets=None):
+        ev = super().evaluate(document, outputs, targets)
+        ev.result.targets = [t for t in ev.result.targets if t.target_id != "waist"]
+        doc = ev.result.evaluation.model_dump()
+        doc["targets_not_evaluated"] = [{"target_id": "waist", "metric": "m", "reason": "NOT_REQUESTED"}]
+        ev.result.evaluation = SimpleNamespace(model_dump=lambda mode=None: doc)
+        return ev
+
+
+def test_target_not_evaluated_is_not_computed_and_quantity_unavailable():
+    r = ea.Adapter(_problem(), session=NotEvaluatedSession(), edit=lambda d, ops: d).evaluate({"shift": 0.0})
+    assert not r.valid and len(r.residuals) == 2
+    assert r.reason["code"] == "QUANTITY_UNAVAILABLE"
+    assert r.reason["reading"]["state"] == "NOT_COMPUTED" and r.reason["reading"]["not_evaluated"] is True
+    assert r.evaluation["targets_not_evaluated"][0]["target_id"] == "waist"
+
+
+def test_out_of_bounds_residual_grows_with_distance_and_has_empty_scope():
+    adapter = ea.Adapter(_problem(), session=FakeSession(), edit=lambda d, ops: d)
+    near, far = adapter.evaluate({"shift": 1.1}), adapter.evaluate({"shift": 3.0})
+    assert near.residuals[0] == pytest.approx(1e3 * (1 + 1.0)) and far.residuals[0] > near.residuals[0]
+    assert near.evaluation == ea.EMPTY_SCOPE and len(far.residuals) == 2
+
+
 def test_aggregations():
     assert ea.aggregate([1.0, -2.0], [1.0, 1.0], "sum_abs") == 3.0
     assert ea.aggregate([1.0, -2.0], [1.0, 1.0], "max_abs") == 2.0
@@ -136,6 +185,9 @@ def test_engine_imaging_and_non_imaging_problems_share_one_interface():
         assert "targets_not_evaluated" in scope
     mtf = ea.Adapter(image, session=session).evaluate({"image_shift": 0.0}).constraints[0]
     assert 0.5 < mtf["value"] < 1.0 and mtf["margin"] > 0 and mtf["state"] == "KNOWN"
+    reading = ea.Adapter(image, session=session)._readings(
+        session.evaluate(_case("achromatic-imaging"), outputs=image.outputs(), targets=image.target_ids()))["mtf:mtf20"]
+    assert reading["value_basis"] is not None or "imaging curve" in reading["basis_note"]
 
 
 @engine
