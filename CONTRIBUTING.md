@@ -7,6 +7,17 @@ repository. You open them from your own fork with your own GitHub account, by ha
 Engine problems (the `os-optics` commands, simulation results, the optical catalog) go to the
 [os-optics issue tracker](https://github.com/JunLin615/os-optics/issues).
 
+## Issues and pull requests
+
+Write issues and pull requests in English. An issue states:
+
+- **Remaining work**: what is still to be done, in a few sentences. An optional **Background** section can
+  explain why.
+- **Where the work lives**: the tool, case, skill or presentation path the change touches, for example
+  `tools/os_optics_kit/<module>.py`, `cases/<name>/` or `skills/<name>/SKILL.md`.
+- **Acceptance**, as the last section: checks anyone can run to see the work is done, such as a given input and
+  its expected output, a command and its result, or a test that fails before the change and passes after it.
+
 ## What you can contribute
 
 | Contribution | Lives in | Starts from |

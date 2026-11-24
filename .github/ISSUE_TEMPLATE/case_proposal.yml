@@ -28,6 +28,20 @@ body:
     attributes:
       label: Catalog products and tools
       description: Catalog products the design uses (or "catalog-free"), and the os-optics-kit tools it needs.
+  - type: input
+    id: where
+    attributes:
+      label: Where the work lives
+      description: The case directory, for example `cases/<name>/`, and any tool or skill path it changes.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: >-
+        How to check the case is done, for example `os-optics-kit cases verify <name>` reproduces the expected
+        target outcomes listed above.
+    validations:
+      required: true
   - type: dropdown
     id: contribution
     attributes:
