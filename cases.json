@@ -428,6 +428,7 @@
         "CASE.md",
         "README.md",
         "README.zh-CN.md",
+        "adapter_example.py",
         "expected.json",
         "images.json",
         "images/iso.png",
