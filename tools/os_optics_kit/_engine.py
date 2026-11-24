@@ -9,7 +9,7 @@ from __future__ import annotations
 import operator
 
 ENGINE_DISTRIBUTION = "os-optics"
-ENGINE_REQUIREMENT = ">=0.13,<0.14"
+ENGINE_REQUIREMENT = ">=0.14,<0.15"
 PLOT_EXTRA = "os-optics-kit[plot]"
 
 _OPERATORS = (("==", operator.eq), ("!=", operator.ne), (">=", operator.ge), ("<=", operator.le),
@@ -52,7 +52,7 @@ def _clauses(requirement):
 
 
 def satisfies(version, requirement=ENGINE_REQUIREMENT):
-    """Whether ``version`` meets every clause of ``requirement`` (release numbers only, e.g. '>=0.13,<0.14')."""
+    """Whether ``version`` meets every clause of ``requirement`` (release numbers only, e.g. '>=0.14,<0.15')."""
     if version is None:
         return False
     installed = version_tuple(version)

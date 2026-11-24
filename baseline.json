@@ -4,8 +4,8 @@
   "kit_version": "0.4.0",
   "engine": {
     "distribution": "os-optics",
-    "requirement": ">=0.13,<0.14",
-    "verified_version": "0.13.0"
+    "requirement": ">=0.14,<0.15",
+    "verified_version": "0.14.0"
   },
   "catalog": {
     "version": "2026-10-28.1",

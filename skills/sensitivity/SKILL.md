@@ -3,7 +3,7 @@ name: sensitivity
 description: Finite-difference sensitivity of selected targets to explicit design parameters, with two step sizes checked against each other and every sample saved; ranks parameters per target. Use it to find which positions, angles or values a target depends on most.
 version: 0.3.0
 command: os-optics-kit sensitivity
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

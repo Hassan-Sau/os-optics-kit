@@ -3,7 +3,7 @@ name: edit
 description: List a Project's objects with editable values, units and frames, then apply edit operations by object ID with explicit units, checked by the engine and written atomically to a new file (optionally run). Use it to change a design reproducibly.
 version: 0.2.0
 command: os-optics-kit edit
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

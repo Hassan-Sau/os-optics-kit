@@ -3,7 +3,7 @@ name: study
 description: Run independent Engine evaluations as a resumable study, serially or in worker processes; plan, execute, aggregate and present as separate steps. Use it for sweeps, tolerance samples, candidate Projects and batches handed over by your own search code.
 version: 0.2.0
 command: os-optics-kit study
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

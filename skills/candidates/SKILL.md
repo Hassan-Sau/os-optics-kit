@@ -3,7 +3,7 @@ name: candidates
 description: Bounded table of public catalog products that pass explicit filters (category, form, wavelength, readiness, numeric ranges with units), sorted by closeness to a value or by a field. Use it to pick catalog parts for a requirement.
 version: 0.2.0
 command: os-optics-kit candidates
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

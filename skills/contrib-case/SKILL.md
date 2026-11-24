@@ -3,7 +3,7 @@ name: contrib-case
 description: Turn a finished os-optics design into a PR-ready kit case: verified project.json, classified CASE.md, English and Chinese READMEs with engine system views, expected outcome and a git patch. Use to share a design as a case.
 version: 0.3.0
 command: os-optics-kit contrib case
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: contribution
 ---
 

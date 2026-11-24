@@ -5,7 +5,7 @@
 `os-optics-kit view` opens a lightweight, read-only local web page in your default browser so you can watch an optical
 design change in real time while you or a coding agent edit a native Project JSON or write new saved runs.
 
-It runs strictly on loopback (`127.0.0.1`), needs only the core `os-optics-kit` install (`os-optics>=0.13,<0.14`), and
+It runs strictly on loopback (`127.0.0.1`), needs only the core `os-optics-kit` install (`os-optics>=0.14,<0.15`), and
 requires **no** `[render]` or `[plot]` extras, **no** Playwright/Chromium download, and **no** cloud account.
 
 ## Quick start

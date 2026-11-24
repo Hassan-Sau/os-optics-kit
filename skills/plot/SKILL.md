@@ -3,7 +3,7 @@ name: plot
 description: Draw standard PNG and SVG plots from saved results without simulating - sweep curves or two-parameter heatmaps with target bounds, the power distribution of a run, signed bar charts and histograms. Use it to show study or run results.
 version: 0.4.0
 command: os-optics-kit plot
-requires: os-optics>=0.13,<0.14; os-optics-kit[plot]
+requires: os-optics>=0.14,<0.15; os-optics-kit[plot]
 kind: tool
 ---
 

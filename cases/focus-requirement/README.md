@@ -36,7 +36,7 @@ the unchanged detector, checking every computed radius.
 ## Run the complete workflow
 
 ```bash
-python -m pip install "os-optics[protected]==0.13.0" "os-optics-kit[plot]"
+python -m pip install "os-optics[protected]==0.14.0" "os-optics-kit[plot]"
 os-optics-kit cases copy focus-requirement --dest .
 cd focus-requirement
 os-optics-kit cases verify focus-requirement

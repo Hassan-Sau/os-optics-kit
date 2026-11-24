@@ -3,7 +3,7 @@ name: summary
 description: Read a saved os-optics run directory into one compact JSON document (targets, assessments, power budget, issues, identity) with an exit code per requirement outcome. It returns the execution, every target's assessment and the integrity record of the run.
 version: 0.2.0
 command: os-optics-kit summary
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

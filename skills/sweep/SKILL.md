@@ -3,7 +3,7 @@ name: sweep
 description: Run a bounded one- or two-parameter sweep of a Project from a JSON spec; every sample's Project and run are saved, counted by outcome, and ranked by an optional objective under constraints. Use it to explore a design parameter.
 version: 0.3.0
 command: os-optics-kit sweep
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

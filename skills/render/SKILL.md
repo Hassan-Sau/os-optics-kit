@@ -3,7 +3,7 @@ name: render
 description: Render presentation-grade 3D figures with camera angles, roll, element framing and a manifest. Needs Chrome or Chromium; case images and plain system views come from the engine without a browser.
 version: 0.2.0
 command: os-optics-kit render
-requires: os-optics>=0.13,<0.14; os-optics-kit[render]
+requires: os-optics>=0.14,<0.15; os-optics-kit[render]
 kind: tool
 ---
 

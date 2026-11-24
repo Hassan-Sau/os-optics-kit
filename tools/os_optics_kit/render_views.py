@@ -366,13 +366,13 @@ SCRIPT = """
     var viewer = window.__opensciViewer;
     if (!viewer) {
       if (Date.now() < deadline) { setTimeout(waitForViewer, 25); }
-      else { fail("PAGE_UNEXPECTED", "the engine viewer hook is unavailable; use os-optics 0.13.x"); }
+      else { fail("PAGE_UNEXPECTED", "the engine viewer hook is unavailable; use os-optics 0.14.x"); }
       return;
     }
     if (!["frame", "resize", "renderNow", "applyVisibility"].every(function (key) {
       return typeof viewer[key] === "function";
     })) {
-      fail("PAGE_UNEXPECTED", "the engine viewer hook is incomplete; use os-optics 0.13.x");
+      fail("PAGE_UNEXPECTED", "the engine viewer hook is incomplete; use os-optics 0.14.x");
       return;
     }
     try { apply(viewer, SHOT); } catch (error) { fail("CAMERA_APPLY_FAILED", error.message); }
