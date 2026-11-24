@@ -65,6 +65,17 @@
       "sha256": "2ffcbef281eae5bbb116cabd6f9f96b9b9d368ca857576958eaeab2571a6fe56"
     },
     {
+      "name": "fans",
+      "kind": "tool",
+      "description": "Ray fans of a saved os-optics run: transverse and longitudinal aberration and per-ray OPD across the pupil, per field point and wavelength, from the engine's published ray data, with the engine's spot and OPD numbers beside them.",
+      "version": "0.1.0",
+      "command": "os-optics-kit fans",
+      "requires": "os-optics>=0.14,<0.15",
+      "path": "skills/fans/SKILL.md",
+      "tokens": 751,
+      "sha256": "beae23ab52ffcee8b83fc5a852ab12b9a6fb6e6e1a406d54af30ae126d2323db"
+    },
+    {
       "name": "measurements",
       "kind": "tool",
       "description": "Subtract backgrounds from detector CSV data, optionally normalize by a reference channel, and fit a straight line with residuals, a plot and a provenance record; the input file is never modified. Use it to analyze a measured response curve.",
