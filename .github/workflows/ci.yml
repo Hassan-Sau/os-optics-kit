@@ -40,6 +40,50 @@ jobs:
               output.write("newest=" + versions[-1] + "\n")
           PY
 
+  engine-gate:
+    name: Engine candidate gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      engine_candidate: ${{ steps.gate.outputs.engine_candidate }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            baseline.json
+            scripts/engine_gate.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Is the engine range of baseline.json installable from the configured index?
+        id: gate
+        # Dry-run resolution only; the index is pip's configuration. Missing -> ENGINE_CANDIDATE_NOT_PUBLISHED.
+        run: python scripts/engine_gate.py
+
+  engine-skipped:
+    name: "Engine checks skipped: ENGINE_CANDIDATE_NOT_PUBLISHED"
+    needs: engine-gate
+    if: needs.engine-gate.outputs.engine_candidate == 'missing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the engine checks that did not run
+        run: |
+          echo "ENGINE_CANDIDATE_NOT_PUBLISHED"
+          {
+            echo "### ENGINE_CANDIDATE_NOT_PUBLISHED"
+            echo "The engine range of baseline.json is not installable from the configured index. Not run:"
+            echo "- engine tests and tools against the engine and the pinned catalog"
+            echo "- case verification"
+            echo "- render, viewer and presentation browser tests"
+            echo "- presentation demo"
+            echo "They run with no change once the engine is published."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::engine checks skipped: the engine is not on the configured index"
+
   ruff:
     name: Lint (ruff)
     needs: setup
@@ -192,8 +236,9 @@ jobs:
         run: python3 scripts/check_dco.py "$BASE" "$HEAD"
 
   engine:
+    # Required check: keep this name. The job always runs; the gate decides its steps.
     name: Engine checks (published os-optics)
-    needs: setup
+    needs: [setup, engine-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -208,9 +253,25 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ needs.setup.outputs.newest }}
-      - name: Is the verified engine on PyPI?
+      - name: Engine candidate gate result
         id: gate
-        run: python scripts/engine_release.py
+        env:
+          CANDIDATE: ${{ needs.engine-gate.outputs.engine_candidate }}
+          VERSION: ${{ needs.engine-gate.outputs.version }}
+        run: |
+          if [[ "$CANDIDATE" == "present" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Engine candidate os-optics $VERSION is installable; running every engine check."
+            exit 0
+          fi
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "ENGINE_CANDIDATE_NOT_PUBLISHED"
+          echo "::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::the engine requirement of baseline.json is not installable from the configured index; engine tests, case verification, browser tests and the presentation demo did not run"
+          {
+            echo "### ENGINE_CANDIDATE_NOT_PUBLISHED"
+            echo "Not run: engine tests and tools, case verification, render/viewer/presentation browser tests, presentation demo."
+            echo "They run with no change once the engine is installable."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Chinese fonts for the figure tests
         if: steps.gate.outputs.run == 'true'
         run: |
