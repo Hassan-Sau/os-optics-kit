@@ -61,7 +61,16 @@ def load_rays(run_dir: Path, monitor: str, runner=subprocess.run) -> list[dict]:
 
 
 def load_wavefront(run_dir: Path, monitor: str, path_id: str, runner=subprocess.run) -> dict:
-    return _engine_json(["results", "wavefront", str(run_dir), "--monitor", monitor, "--path", path_id], runner)
+    """The engine's wavefront of one path; a refusal (e.g. an idealized element) is returned as status/message only."""
+    try:
+        return _engine_json(["results", "wavefront", str(run_dir), "--monitor", monitor, "--path", path_id], runner)
+    except FanError as exc:
+        try:
+            document = json.loads(str(exc)[str(exc).find("{"):])
+        except ValueError:
+            document = {}
+        return {"status": document.get("status") or "UNAVAILABLE",
+                "message": document.get("message") or str(exc)[-300:], "rays": []}
 
 
 def _pupil(rays: list[dict]) -> tuple[dict, float]:
@@ -131,7 +140,10 @@ def path_fans(rays: list[dict], wavefront: dict | None = None, zones: int | None
             "chief_uv_mm": [chief["u_mm"], chief["v_mm"]], "pupil_rays": len(pupil), "zones": sorted(kept),
             "fans": fans, "spot_rms_um": spot_rms_um, "opd_rms_waves": opd_rms,
             "engine": {"opd_rms_waves": (wavefront or {}).get("rms_waves"),
-                       "opd_pv_waves": (wavefront or {}).get("pv_waves")}}
+                       "opd_pv_waves": (wavefront or {}).get("pv_waves"),
+                       "wavefront_status": (wavefront or {}).get("status"),
+                       "wavefront_message": None if (wavefront or {}).get("status") == "OK"
+                       else (wavefront or {}).get("message")}}
 
 
 def engine_spot_rms(imaging: dict) -> dict[str, float]:
