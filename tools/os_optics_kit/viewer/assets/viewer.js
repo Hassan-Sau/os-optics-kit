@@ -1,9 +1,11 @@
 (function () {
   "use strict";
 
-  var committedSnapshotId = null;
-  var stagingSnapshotId = null;
-  var committedEnvelope = null;
+  var displayedSnapshot = null;
+  var displayedSnapshotId = null;
+  var stagingSnapshot = null;
+  var queuedSnapshot = null;
+  var latestStatusEnvelope = null;
   var latestSeenStateSeq = -1;
   var liveState = "connecting";
   var activeFrameSlot = "a";
@@ -101,6 +103,7 @@
       noBranchesPreview: "No ray tracing has been run for this view.",
       powerUnavailableNoRun: "No saved run is attached to this Project. Showing nominal geometry only — this is not a computed optical result.",
       powerUnavailableStale: "The attached run belongs to an earlier Project revision. Old power figures and rays are withheld so outdated evidence is never mixed with the updated geometry.",
+      powerUnavailableConfigNotInRun: "The selected configuration is declared in the Project but was not recorded in the attached run. Showing this configuration's geometry preview only.",
       powerUnavailableOther: "Power ledger is unavailable for this snapshot.",
       tryEvaluateHint: "To run a one-shot local calculation without editing your Project file:",
       waitingTag: "Waiting",
@@ -124,6 +127,7 @@
       detailRayDataMode: "Ray data",
       detailGeometrySources: "Geometry sources",
       detailSchematicParts: "Schematic parts",
+      detailPlaceholderParts: "View placeholders",
       detailVersions: "Versions",
       detailEvalMode: "Evaluation mode",
       evalModeNone: "Direct read-only input",
@@ -190,7 +194,8 @@
         EXPLICIT_LOCAL_EVALUATION: "Evaluated once into a temporary directory via --evaluate. Your input Project file was not modified.",
         EVALUATE_NOT_AUTORERUN: "The Project file changed after the initial --evaluate run. The viewer does not auto-rerun simulations on file edits.",
         RAY_DATA_SUMMARY_ONLY: "Summary ray data (--ray-data summary): drawable branches and power ledger are shown; the optional per-ray plane-crossing table is absent.",
-        SCHEMATIC_GEOMETRY_USED: "Schematic placeholder geometry is used for parts without resolved catalog or nominal dimensions ({parts})."
+        SCHEMATIC_GEOMETRY_USED: "Schematic placeholder geometry is used for parts without resolved catalog or nominal dimensions ({parts}).",
+        CONFIGURATION_NOT_IN_RUN: "Selected configuration is not recorded in the attached run; showing its uncomputed Project geometry preview only."
       }
     },
     zh: {
@@ -268,6 +273,7 @@
       noBranchesPreview: "当前为几何预览模式，尚未执行光线追迹。",
       powerUnavailableNoRun: "当前工程未关联已保存的计算结果。界面仅展示标称几何布局，不代表任何光学计算结果。",
       powerUnavailableStale: "关联的运行结果对应较早版本的工程。为防止把旧数据错误归因到新设计，旧功率账本与光线已隐藏，仅展示最新工程几何。",
+      powerUnavailableConfigNotInRun: "所选构型在工程中已声明，但未被关联的运行目录记录；当前仅展示该构型的标称几何预览（未计算）。",
       powerUnavailableOther: "当前快照无可用功率账本。",
       tryEvaluateHint: "如需在不修改原工程文件的前提下执行一次本地计算：",
       waitingTag: "等待写入",
@@ -291,6 +297,7 @@
       detailRayDataMode: "光线数据模式",
       detailGeometrySources: "几何来源",
       detailSchematicParts: "示意占位元件",
+      detailPlaceholderParts: "视图标记件",
       detailVersions: "版本信息",
       detailEvalMode: "计算模式",
       evalModeNone: "直接只读本地输入",
@@ -357,7 +364,8 @@
         EXPLICIT_LOCAL_EVALUATION: "已通过显式 --evaluate 在临时目录完成一次本地计算，原始工程文件未被修改。",
         EVALUATE_NOT_AUTORERUN: "工程文件在初始 --evaluate 后已修改；为避免频繁重算，查看器不会在文件保存时自动重新运行仿真。",
         RAY_DATA_SUMMARY_ONLY: "当前运行保存为摘要光线模式（--ray-data summary）：3D 光线分支与功率账本完整可用，可选的逐光线平面交叉明细表未记录。",
-        SCHEMATIC_GEOMETRY_USED: "部分未计算元件缺少目录或标称尺寸（{parts}），已按示意占位几何绘制并明确标注。"
+        SCHEMATIC_GEOMETRY_USED: "部分未计算元件缺少目录或标称尺寸（{parts}），已按示意占位几何绘制并明确标注。",
+        CONFIGURATION_NOT_IN_RUN: "所选构型未包含在关联的运行目录中，当前仅展示该构型的未计算工程几何预览。"
       }
     }
   };
@@ -646,6 +654,13 @@
   function renderBannerError(envelope) {
     var box = el("banner-error");
     clear(box);
+    var appEl = el("app");
+    if (envelope && typeof envelope === "object") {
+      appEl.setAttribute("data-status", String(envelope.status || ""));
+      if (typeof envelope.state_seq === "number") {
+        appEl.setAttribute("data-state-seq", String(envelope.state_seq));
+      }
+    }
     if (!envelope || envelope.status === "ok" || !envelope.error) {
       box.className = "banner hidden";
       return;
@@ -655,9 +670,10 @@
     var main = h("div", "banner-main");
     main.appendChild(h("span", "banner-tag", isErr ? t("errorTag") : t("waitingTag")));
     var msgText = envelope.error.message || envelope.error.code || "";
-    if (envelope.last_valid_snapshot) {
+    var heldSnap = displayedSnapshot || envelope.last_valid_snapshot;
+    if (heldSnap) {
       var holdKey = envelope.error.code === "RUN_INTEGRITY_FAILED" ? "waitingIntegrityHolding" : "waitingHolding";
-      msgText = t(holdKey, { rev: envelope.last_valid_snapshot.revision });
+      msgText = t(holdKey, { rev: heldSnap.revision });
     }
     main.appendChild(h("span", "", msgText));
     box.appendChild(main);
@@ -798,7 +814,9 @@
       var box = h("div", "empty-state" + (isStale ? " warn" : ""));
       var msg = power.reason === "NO_RUN"
         ? t("powerUnavailableNoRun")
-        : (isStale ? t("powerUnavailableStale") : t("powerUnavailableOther"));
+        : (power.reason === "CONFIGURATION_NOT_IN_RUN"
+          ? t("powerUnavailableConfigNotInRun")
+          : (isStale ? t("powerUnavailableStale") : t("powerUnavailableOther")));
       box.appendChild(h("div", "", msg));
       if (power.reason === "NO_RUN" && snap.source && snap.source.input_path) {
         var fileName = snap.source.input_path.split("/").pop() || "project.json";
@@ -1170,6 +1188,9 @@
     if (scene.schematic_part_ids && scene.schematic_part_ids.length) {
       pairs.push([t("detailSchematicParts"), scene.schematic_part_ids.join(", ")]);
     }
+    if (scene.view_placeholder_part_ids && scene.view_placeholder_part_ids.length) {
+      pairs.push([t("detailPlaceholderParts"), scene.view_placeholder_part_ids.join(", ")]);
+    }
     pairs.push([t("detailProjectHash"), id.project_hash || "—"]);
     if (id.root_project_hash && id.root_project_hash !== id.project_hash) {
       pairs.push([t("detailRootProjectHash"), id.root_project_hash]);
@@ -1245,18 +1266,20 @@
     return parts.join(" · ");
   }
 
-  function commitPanelAndHeaders(envelope, snap) {
-    committedEnvelope = envelope;
-    var appEl = el("app");
-    appEl.setAttribute("data-revision", String(snap ? snap.revision : (envelope.revision || 0)));
-    appEl.setAttribute("data-snapshot-id", snap ? (snap.snapshot_id || "") : "");
+  function commitSnapshotPanel(snap) {
+    displayedSnapshot = snap;
+    displayedSnapshotId = snap ? (snap.snapshot_id || null) : null;
 
-    renderBannerError(envelope);
-    setPill("badge-rev", "Rev #" + (snap ? snap.revision : (envelope.revision || 0)), "pill-mono");
+    var appEl = el("app");
+    appEl.setAttribute("data-revision", String(snap ? snap.revision : (latestStatusEnvelope ? (latestStatusEnvelope.revision || 0) : 0)));
+    appEl.setAttribute("data-snapshot-id", displayedSnapshotId || "");
+
+    setPill("badge-rev", "Rev #" + (snap ? snap.revision : (latestStatusEnvelope ? (latestStatusEnvelope.revision || 0) : 0)), "pill-mono");
 
     if (!snap) {
       setPill("badge-mode", t("modeNone"), "warn");
       setPill("badge-freshness", "", "");
+      renderBannerError(latestStatusEnvelope);
       return;
     }
 
@@ -1295,7 +1318,9 @@
     renderTargets(snap);
     renderQuantities(snap);
     renderBranches(snap);
-    renderDetails(snap, envelope);
+    renderDetails(snap, latestStatusEnvelope);
+    // Always apply status banner from latestStatusEnvelope (never from a historical staged envelope!).
+    renderBannerError(latestStatusEnvelope);
   }
 
   function stopPendingPoll() {
@@ -1312,32 +1337,41 @@
     retryFetchTimer = window.setTimeout(function () {
       retryFetchTimer = null;
       fetchSnapshot();
-    }, 250);
+    }, 200);
   }
 
-  function stageAndAtomicSwap(envelope, snap) {
+  function pumpQueuedSnapshot() {
+    if (stagingSnapshot !== null || queuedSnapshot === null) {
+      return;
+    }
+    var next = queuedSnapshot;
+    queuedSnapshot = null;
+    if (next.snapshot_id === displayedSnapshotId) {
+      el("frame-updating").classList.add("hidden");
+      commitSnapshotPanel(next);
+      return;
+    }
+    startStaging(next);
+  }
+
+  function startStaging(snap) {
     stopPendingPoll();
     var myToken = ++transitionToken;
     var expectedSnapshotId = snap.snapshot_id;
-    stagingSnapshotId = expectedSnapshotId;
+    stagingSnapshot = snap;
     var expectedSceneHash = (snap.scene && snap.scene.scene_content_hash) || (snap.identity && snap.identity.scene_content_hash) || null;
     var url = snap.scene && snap.scene.engine_view_url;
 
     if (!url) {
-      stagingSnapshotId = null;
-      committedSnapshotId = expectedSnapshotId;
-      commitPanelAndHeaders(envelope, snap);
+      stagingSnapshot = null;
+      commitSnapshotPanel(snap);
+      pumpQueuedSnapshot();
       return;
     }
 
     var updating = el("frame-updating");
     updating.textContent = t("updatingRev", { rev: snap.revision });
     updating.classList.remove("hidden");
-
-    // Keep waiting/error banners immediately visible if status is non-ok while staging
-    if (envelope.status !== "ok") {
-      renderBannerError(envelope);
-    }
 
     var staging = getStagingFrame();
     var oldActive = getActiveFrame();
@@ -1348,10 +1382,10 @@
         return;
       }
       stopPendingPoll();
-      updating.classList.add("hidden");
       syncIframeLang(staging, true);
 
-      // Atomic synchronous swap: visible 3D scene AND right-hand panel flip together in one JS tick!
+      // Atomic synchronous swap: visible 3D scene AND right-hand panel flip together in one JS tick,
+      // while #banner-error stays bound to latestStatusEnvelope (never cleared by a delayed valid scene!).
       staging.setAttribute("data-snapshot-id", expectedSnapshotId);
       staging.setAttribute("data-revision", String(snap.revision));
       staging.classList.remove("staging");
@@ -1363,19 +1397,30 @@
       oldActive.setAttribute("aria-hidden", "true");
       activeFrameSlot = activeFrameSlot === "a" ? "b" : "a";
 
-      stagingSnapshotId = null;
-      committedSnapshotId = expectedSnapshotId;
-      commitPanelAndHeaders(envelope, snap);
+      stagingSnapshot = null;
+      commitSnapshotPanel(snap);
+
+      if (queuedSnapshot !== null && queuedSnapshot.snapshot_id !== displayedSnapshotId) {
+        pumpQueuedSnapshot();
+      } else {
+        queuedSnapshot = null;
+        updating.classList.add("hidden");
+      }
     }
 
     function handleSuperseded() {
       if (myToken !== transitionToken) {
         return;
       }
-      stagingSnapshotId = null;
       stopPendingPoll();
-      // Never swap to a superseded/409 iframe; fetch a fresh coherent snapshot instead.
-      scheduleFreshRetry();
+      stagingSnapshot = null;
+      // Never swap to a 409/superseded iframe; immediately advance to coalesced newer snapshot or refetch.
+      if (queuedSnapshot !== null && queuedSnapshot.snapshot_id !== expectedSnapshotId) {
+        pumpQueuedSnapshot();
+      } else {
+        queuedSnapshot = null;
+        scheduleFreshRetry();
+      }
     }
 
     function inspectStaging() {
@@ -1427,18 +1472,15 @@
         return;
       }
       inspectStaging();
-      if (myToken === transitionToken && committedSnapshotId !== expectedSnapshotId) {
-        var startedAt = Date.now();
+      // Never abort a slow-but-valid scene load on an arbitrary timer; wait until __opensciViewer mounts or errors.
+      if (myToken === transitionToken && stagingSnapshot !== null) {
         pendingPollTimer = window.setInterval(function () {
           if (myToken !== transitionToken) {
             stopPendingPoll();
             return;
           }
           inspectStaging();
-          if (Date.now() - startedAt > 15000) {
-            handleSuperseded();
-          }
-        }, 25);
+        }, 35);
       }
     };
 
@@ -1459,39 +1501,49 @@
       return;
     }
     latestSeenStateSeq = seq;
+    latestStatusEnvelope = envelope;
+    // Always reflect the newest input status immediately, independent of displayed/staging snapshot!
+    renderBannerError(latestStatusEnvelope);
 
     var snap = envelope.snapshot || envelope.last_valid_snapshot;
     if (!snap) {
       stopPendingPoll();
       transitionToken++;
+      stagingSnapshot = null;
+      queuedSnapshot = null;
       el("frame-updating").classList.add("hidden");
-      committedSnapshotId = null;
-      commitPanelAndHeaders(envelope, null);
+      commitSnapshotPanel(null);
       return;
     }
 
-    // Same snapshot already visible (e.g. waiting banner appeared/cleared while holding last_valid_snapshot):
-    // update banners/status immediately without reloading the 3D scene!
-    if (snap.snapshot_id === committedSnapshotId) {
-      stagingSnapshotId = null;
-      stopPendingPoll();
-      transitionToken++;
-      el("frame-updating").classList.add("hidden");
-      commitPanelAndHeaders(envelope, snap);
-      return;
-    }
-
-    // Already staging this exact snapshot_id (e.g. initial fetch + immediate SSE state event):
-    // do not abort and restart the in-flight iframe load.
-    if (snap.snapshot_id === stagingSnapshotId) {
-      if (envelope.status !== "ok") {
-        renderBannerError(envelope);
+    // Same snapshot already displayed: if nothing is staging, refresh metadata/banner immediately;
+    // if an older snapshot is still staging, clear any stale queue and keep displayed coherent.
+    if (snap.snapshot_id === displayedSnapshotId) {
+      queuedSnapshot = null;
+      if (stagingSnapshot === null) {
+        el("frame-updating").classList.add("hidden");
+        commitSnapshotPanel(snap);
       }
       return;
     }
 
-    // New snapshot_id: stage its bound 3D iframe offscreen and atomically swap panel + scene together!
-    stageAndAtomicSwap(envelope, snap);
+    // Coalescing single-flight stager: never cancel a valid in-flight scene load!
+    if (stagingSnapshot !== null) {
+      if (snap.snapshot_id === stagingSnapshot.snapshot_id) {
+        // Keep the newest copy of the snapshot metadata while staging continues.
+        stagingSnapshot = snap;
+        return;
+      }
+      // Coalesce newer snapshots into the single queue slot; it will start immediately when staging finishes.
+      queuedSnapshot = snap;
+      var updating = el("frame-updating");
+      updating.textContent = t("updatingRev", { rev: snap.revision });
+      updating.classList.remove("hidden");
+      return;
+    }
+
+    // Idle: start staging this snapshot immediately.
+    startStaging(snap);
   }
 
   function fetchSnapshot() {
@@ -1557,9 +1609,10 @@
     }
     applyStaticLabels();
     syncIframeLang(getActiveFrame(), true);
-    if (committedEnvelope) {
-      var snap = committedEnvelope.snapshot || committedEnvelope.last_valid_snapshot;
-      commitPanelAndHeaders(committedEnvelope, snap);
+    if (displayedSnapshot) {
+      commitSnapshotPanel(displayedSnapshot);
+    } else if (latestStatusEnvelope) {
+      renderBannerError(latestStatusEnvelope);
     }
   }
 

@@ -1,27 +1,34 @@
 """Real-browser live-viewer regressions (Playwright + Chromium).
 
-Verifies that in an actual browser:
-1. Reordering or delaying normal HTTP reads (both ``/api/snapshot`` and ``/engine-view/<id>/view.json``)
-   while a separate process replaces fixture A (1 mW, completed, 2 branches) with fixture B
-   (3 mW, partial, 1 branch) NEVER produces a visible mismatch between the panel numbers and
-   the active WebGL 3D scene.
-2. On-disk integrity corruption (B with A's ``ray_data.json``) and truncated writes show a
-   visible waiting banner while holding the last verified snapshot, and recover automatically
-   to valid B without reopening or reloading the page.
+Verifies under the shipped strict Content-Security-Policy (no ``unsafe-eval``):
+1. A delayed valid scene B arriving after a newer on-disk integrity failure commits coherent B
+   WITHOUT clearing the newer ``RUN_INTEGRITY_FAILED`` waiting warning, and clears the warning
+   only once valid input returns.
+2. A slow-but-valid scene load (16.5 s) is NOT restarted on an arbitrary timer and finishes
+   cleanly in one request.
+3. Under continuous rapid writes (every 0.45 s) with a 1.1 s scene load, a newly opened page
+   still renders a coherent first frame *during* the burst and converges to the final revision.
+4. Navigating to ``/engine-view/?rev=1`` redirects to the canonical snapshot-bound URL and
+   renders rev-1's actual 2-beam WebGL document even after rev-2 (1 beam) is published.
 
-Missing optional dependencies (``os_optics``, ``playwright``, or Chrome/Chromium) skip these
-checks cleanly; ordinary users of ``os-optics-kit view`` never need Playwright.
+Missing optional dependencies skip these checks locally unless
+``OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER=1`` is set (as in CI); ordinary users of
+``os-optics-kit view`` never need Playwright.
 """
 
 from __future__ import annotations
 
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import threading
 import time
+from typing import Callable
 
 import pytest
 
@@ -30,6 +37,100 @@ from os_optics_kit.viewer import LocalViewerServer, ViewerSession, resolve_targe
 
 ROOT = Path(__file__).resolve().parents[1]
 DETECTOR_CASE_PROJECT = ROOT / "cases" / "detector-measurements" / "project.json"
+REQUIRE_BROWSER = os.environ.get("OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER") == "1"
+
+
+class _DelayingProxy:
+    """Thread-per-request loopback HTTP/SSE proxy that injects delays without blocking Playwright."""
+
+    def __init__(self, upstream_host: str, upstream_port: int, on_request: Callable[[str], None] | None = None) -> None:
+        self.upstream_host = upstream_host
+        self.upstream_port = upstream_port
+        self.on_request = on_request
+        self._stop = threading.Event()
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self.url = ""
+
+    def __enter__(self) -> _DelayingProxy:
+        proxy = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format: str, *args) -> None:  # noqa: A002
+                return
+
+            def do_GET(self) -> None:  # noqa: N802
+                self._forward("GET")
+
+            def do_HEAD(self) -> None:  # noqa: N802
+                self._forward("HEAD")
+
+            def _forward(self, method: str) -> None:
+                if proxy.on_request is not None:
+                    proxy.on_request(self.path)
+                conn = http.client.HTTPConnection(proxy.upstream_host, proxy.upstream_port, timeout=30)
+                try:
+                    fwd_headers = {
+                        k: v
+                        for k, v in self.headers.items()
+                        if k.lower() not in ("host", "connection", "accept-encoding")
+                    }
+                    fwd_headers["Host"] = f"{proxy.upstream_host}:{proxy.upstream_port}"
+                    fwd_headers["Connection"] = "close"
+                    conn.request(method, self.path, headers=fwd_headers)
+                    resp = conn.getresponse()
+                    ctype = resp.getheader("Content-Type", "")
+                    is_sse = ctype.lower().startswith("text/event-stream")
+
+                    self.send_response(resp.status, resp.reason)
+                    for k, v in resp.getheaders():
+                        if k.lower() in ("transfer-encoding", "connection"):
+                            continue
+                        self.send_header(k, v)
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+
+                    if method == "HEAD":
+                        return
+                    if is_sse:
+                        while not proxy._stop.is_set():
+                            line = resp.fp.readline()
+                            if not line:
+                                break
+                            self.wfile.write(line)
+                            self.wfile.flush()
+                    else:
+                        body = resp.read()
+                        self.wfile.write(body)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    return
+                finally:
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+
+        class _Server(ThreadingHTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        self._httpd = _Server(("127.0.0.1", 0), Handler)
+        port = self._httpd.server_address[1]
+        self.url = f"http://127.0.0.1:{port}/"
+        self._thread = threading.Thread(target=self._httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self._stop.set()
+        if self._httpd is not None:
+            self._httpd.shutdown()
+            self._httpd.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
 
 
 def _fixture_a() -> dict:
@@ -86,15 +187,11 @@ def _copy_file_from_subprocess(src: Path, dst: Path) -> None:
         raise RuntimeError(f"subprocess copy failed: {done.stderr}")
 
 
-def _write_text_from_subprocess(dst: Path, text: str) -> None:
-    code = "from pathlib import Path; import sys; Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')"
-    done = subprocess.run([sys.executable, "-c", code, str(dst), text], capture_output=True, text=True, timeout=30)
-    if done.returncode != 0:
-        raise RuntimeError(f"subprocess write failed: {done.stderr}")
-
-
 def _observe_visible_state(page) -> dict:
-    """Inspect BOTH the visible host panel AND the active visible WebGL 3D iframe together."""
+    """Inspect BOTH the visible host panel AND the active visible WebGL 3D iframe together.
+
+    Uses Playwright's CDP function invocation (no ``eval`` / ``new Function``), safe under strict CSP.
+    """
     return page.evaluate(
         """() => {
             const app = document.getElementById('app');
@@ -103,8 +200,6 @@ def _observe_visible_state(page) -> dict:
             const powerText = (document.getElementById('power-body')?.textContent || '').trim();
             const sceneMeta = (document.getElementById('scene-meta')?.textContent || '').trim();
             const revText = (document.getElementById('badge-rev')?.textContent || '').trim();
-            const modeText = (document.getElementById('badge-mode')?.textContent || '').trim();
-            const execText = (document.getElementById('execution-kpis')?.textContent || '').trim();
             let sceneInfo = null;
             try {
                 const win = activeFrame && activeFrame.contentWindow;
@@ -126,11 +221,11 @@ def _observe_visible_state(page) -> dict:
             return {
                 app_revision: app?.getAttribute('data-revision') || '',
                 app_snapshot_id: app?.getAttribute('data-snapshot-id') || '',
+                app_status: app?.getAttribute('data-status') || '',
+                app_state_seq: app?.getAttribute('data-state-seq') || '',
                 rev_text: revText,
-                mode_text: modeText,
                 power_text: powerText,
                 scene_meta: sceneMeta,
-                exec_text: execText,
                 banner_visible: !!(errBanner && !errBanner.classList.contains('hidden')),
                 banner_text: (errBanner?.textContent || '').trim(),
                 scene: sceneInfo,
@@ -140,7 +235,7 @@ def _observe_visible_state(page) -> dict:
 
 
 def _assert_coherent_a_or_b(obs: dict, *, hash_a: str, hash_b: str) -> None:
-    """Assert that the visible panel and active 3D scene ALWAYS agree on either A or B (never mixed)."""
+    """Assert that the visible panel and active 3D WebGL scene ALWAYS agree on either A or B."""
     scene = obs["scene"]
     assert scene is not None and "error" not in scene, f"active 3D scene unavailable: {obs}"
     assert obs["app_snapshot_id"] == scene["frame_snapshot_id"], f"panel/iframe snapshot mismatch: {obs}"
@@ -161,10 +256,17 @@ def _assert_coherent_a_or_b(obs: dict, *, hash_a: str, hash_b: str) -> None:
 
 @pytest.fixture(scope="module")
 def browser_env(tmp_path_factory):
-    pytest.importorskip("os_optics")
-    pytest.importorskip("playwright.sync_api")
+    if REQUIRE_BROWSER:
+        import os_optics  # noqa: F401
+        import playwright.sync_api  # noqa: F401
+    else:
+        pytest.importorskip("os_optics")
+        pytest.importorskip("playwright.sync_api")
+
     browser_path = render.find_browser(None)
     if not browser_path:
+        if REQUIRE_BROWSER:
+            pytest.fail("Chrome/Chromium is required when OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER=1")
         pytest.skip("Chrome/Chromium is not installed")
 
     from os_optics.local import run_optical_project
@@ -181,93 +283,232 @@ def browser_env(tmp_path_factory):
     return browser_path, run_a, run_b, hash_a, hash_b
 
 
-def test_real_browser_delayed_reads_and_integrity_recovery_never_mix_runs(browser_env, tmp_path):
-    from playwright.sync_api import sync_playwright
+def test_delayed_valid_scene_preserves_newer_waiting_warning_and_recovers(browser_env, tmp_path):
+    """Counterexample 1.1: delayed valid scene B must not clear a newer RUN_INTEGRITY_FAILED warning."""
+    from playwright.sync_api import expect, sync_playwright
 
     browser_path, run_a, run_b, hash_a, hash_b = browser_env
     watched = tmp_path / "watched_run"
+    shutil.copytree(run_a, watched)
+
+    b_scene_started = threading.Event()
+    release_b_scene = threading.Event()
+
+    def on_request(path: str) -> None:
+        if "/engine-view/rev-2-" in path and path.endswith("/view.json"):
+            b_scene_started.set()
+            release_b_scene.wait(timeout=20.0)
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.08) as session:
+        session.load_initial()
+        session.start()
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        console_errors: list[str] = []
+                        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+                        expect(page.locator("#app")).to_have_attribute("data-status", "ok", timeout=10000)
+                        obs_a = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_a, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_a["scene"]["project_hash"] == hash_a
+
+                        # 1) Replace A with valid B; pause B's scene response while staging.
+                        _replace_dir_from_subprocess(run_b, watched)
+                        assert b_scene_started.wait(timeout=15.0), "rev-2 view.json was never requested"
+
+                        # While B is still staging, visible UI MUST remain coherent on A (never mixed).
+                        obs_mid = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_mid, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_mid["scene"]["project_hash"] == hash_a
+
+                        # 2) Before B finishes staging, corrupt B by replacing ray_data.json with A's.
+                        _copy_file_from_subprocess(run_a / "ray_data.json", watched / "ray_data.json")
+                        expect(page.locator("#app")).to_have_attribute("data-status", "waiting", timeout=15000)
+                        expect(page.locator("#banner-error")).to_be_visible(timeout=15000)
+                        expect(page.locator("#banner-error")).to_contain_text("RUN_INTEGRITY_FAILED", timeout=15000)
+
+                        # 3) Release valid B's delayed scene response -> B commits atomically,
+                        #    AND the newer RUN_INTEGRITY_FAILED waiting warning MUST SURVIVE the swap!
+                        release_b_scene.set()
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "2", timeout=20000)
+                        obs_b_warn = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_b_warn, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_b_warn["scene"]["project_hash"] == hash_b
+                        assert obs_b_warn["app_status"] == "waiting", f"delayed B cleared waiting status: {obs_b_warn}"
+                        assert obs_b_warn["banner_visible"], f"delayed B cleared waiting banner: {obs_b_warn}"
+                        assert "RUN_INTEGRITY_FAILED" in obs_b_warn["banner_text"]
+
+                        # 4) Restore clean A -> waiting warning clears ONLY after valid input returns.
+                        _replace_dir_from_subprocess(run_a, watched)
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "3", timeout=20000)
+                        expect(page.locator("#app")).to_have_attribute("data-status", "ok", timeout=15000)
+                        expect(page.locator("#banner-error")).to_be_hidden(timeout=15000)
+
+                        obs_rec = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_rec, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_rec["scene"]["project_hash"] == hash_a
+                        assert console_errors == [], f"unexpected browser console errors: {console_errors}"
+                    finally:
+                        release_b_scene.set()
+                        browser.close()
+
+
+def test_slow_valid_scene_does_not_restart_and_completes(browser_env, tmp_path):
+    """Counterexample 1.2a: a stable valid scene delayed 16.5 s must finish without restarting."""
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / "watched_slow"
+    shutil.copytree(run_a, watched)
+
+    rev2_requests: list[str] = []
+    lock = threading.Lock()
+
+    def on_request(path: str) -> None:
+        if "/engine-view/rev-2-" in path and path.endswith("/view.json"):
+            with lock:
+                rev2_requests.append(path)
+            time.sleep(16.5)
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.1) as session:
+        session.load_initial()
+        session.start()
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        console_errors: list[str] = []
+                        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+
+                        _replace_dir_from_subprocess(run_b, watched)
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "2", timeout=35000)
+                        obs_b = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_b, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_b["scene"]["project_hash"] == hash_b
+                        with lock:
+                            assert len(rev2_requests) == 1, f"slow valid scene was restarted: {rev2_requests}"
+                        assert console_errors == [], f"unexpected browser console errors: {console_errors}"
+                    finally:
+                        browser.close()
+
+
+def test_continuous_burst_shows_first_frame_during_burst_and_converges(browser_env, tmp_path):
+    """Counterexample 1.2b: rapid writes (0.45 s) with slower scene loads (1.1 s) must not starve first frame."""
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / "watched_burst"
+    shutil.copytree(run_a, watched)
+
+    def on_request(path: str) -> None:
+        if path.startswith("/engine-view/") and path.endswith("/view.json"):
+            time.sleep(1.1)
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.08) as session:
+        session.load_initial()
+        session.start()
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        console_errors: list[str] = []
+                        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+
+                        writer_done = threading.Event()
+                        writer_errors: list[Exception] = []
+
+                        def burst_writer():
+                            try:
+                                # 7 alternating replacements every 0.5 s (~3.5 s total), ending on Fixture B.
+                                for idx in range(7):
+                                    time.sleep(0.5)
+                                    src = run_b if (idx % 2 == 0) else run_a
+                                    _replace_dir_from_subprocess(src, watched)
+                            except Exception as exc:  # noqa: BLE001
+                                writer_errors.append(exc)
+                            finally:
+                                writer_done.set()
+
+                        writer_thread = threading.Thread(target=burst_writer, daemon=True)
+                        writer_thread.start()
+
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+
+                        # Verify a coherent first frame appears *during* the active burst (before writer_done!).
+                        saw_frame_during_burst = False
+                        deadline = time.monotonic() + 15.0
+                        while time.monotonic() < deadline and not writer_done.is_set():
+                            rev_attr = page.locator("#app").get_attribute("data-revision") or "0"
+                            if int(rev_attr) >= 1:
+                                obs = _observe_visible_state(page)
+                                _assert_coherent_a_or_b(obs, hash_a=hash_a, hash_b=hash_b)
+                                saw_frame_during_burst = True
+                                break
+                            time.sleep(0.1)
+
+                        writer_thread.join(timeout=20.0)
+                        assert not writer_errors, f"burst writer failed: {writer_errors}"
+                        assert saw_frame_during_burst, "newly opened page starved and displayed no first frame during burst"
+
+                        # Wait for server to settle on final revision and verify browser converges to exact latest rev (B).
+                        time.sleep(0.35)
+                        final_rev = session.state.envelope()["revision"]
+                        expect(page.locator("#app")).to_have_attribute("data-revision", str(final_rev), timeout=20000)
+                        obs_final = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_final, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_final["scene"]["project_hash"] == hash_b
+                        assert console_errors == [], f"unexpected browser console errors: {console_errors}"
+                    finally:
+                        browser.close()
+
+
+def test_canonical_engine_view_redirect_renders_exact_requested_revision(browser_env, tmp_path):
+    """Counterexample 1.3: /engine-view/?rev=1 redirects to canonical snapshot URL and draws rev 1 after rev 2 exists."""
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / "watched_redirect"
     shutil.copytree(run_a, watched)
 
     with ViewerSession(resolve_target(watched), poll_interval=0.08) as session:
         session.load_initial()
         session.start()
         with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            snap_a_id = session.state.envelope()["snapshot"]["snapshot_id"]
+            # Advance disk to B (rev 2) BEFORE opening /engine-view/?rev=1!
+            _replace_dir_from_subprocess(run_b, watched)
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and session.state.envelope()["revision"] < 2:
+                time.sleep(0.05)
+            assert session.state.envelope()["revision"] >= 2
+
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
                 try:
-                    page = browser.new_page(viewport={"width": 1280, "height": 840})
-                    console_errors: list[str] = []
-                    page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
-
-                    # Delay view.json for rev-2 so B's scene arrives slower than /api/snapshot,
-                    # AND test that the visible panel + active 3D scene stay strictly atomic throughout!
-                    delay_events: list[str] = []
-                    delay_lock = threading.Lock()
-
-                    def route_view_json(route):
-                        url = route.request.url
-                        if "rev-2-" in url:
-                            with delay_lock:
-                                delay_events.append(url)
-                            time.sleep(0.45)
-                        route.continue_()
-
-                    page.route("**/engine-view/*/view.json", route_view_json)
-
-                    page.goto(f"{server.url}?lang=en", wait_until="domcontentloaded")
-                    page.wait_for_function(
-                        "document.getElementById('app')?.getAttribute('data-revision') === '1'",
-                        timeout=20000,
+                    page = browser.new_page(viewport={"width": 960, "height": 640})
+                    page.goto(f"{server.url}engine-view/?rev=1", wait_until="domcontentloaded")
+                    assert page.url.endswith(f"/engine-view/{snap_a_id}/"), f"expected canonical redirect, got {page.url}"
+                    expect(page.locator("#footer")).to_contain_text(hash_a[:12], timeout=15000)
+                    doc_info = page.evaluate(
+                        """() => ({
+                            project_hash: window.__opensciViewer?.doc?.identity?.project_hash || null,
+                            beam_count: window.__opensciViewer?.doc?.beams?.length || 0,
+                        })"""
                     )
-                    obs_a = _observe_visible_state(page)
-                    _assert_coherent_a_or_b(obs_a, hash_a=hash_a, hash_b=hash_b)
-                    assert obs_a["scene"]["project_hash"] == hash_a
-
-                    # 1) Separate process replaces A -> B while rev-2 view.json is delayed in flight.
-                    _replace_dir_from_subprocess(run_b, watched)
-                    deadline = time.monotonic() + 20.0
-                    reached_b = False
-                    while time.monotonic() < deadline:
-                        obs = _observe_visible_state(page)
-                        _assert_coherent_a_or_b(obs, hash_a=hash_a, hash_b=hash_b)
-                        if obs["scene"]["project_hash"] == hash_b:
-                            reached_b = True
-                            break
-                        time.sleep(0.05)
-                    assert reached_b, "page never updated to coherent Run B"
-                    assert delay_events, "delayed rev-2 view.json route did not trigger"
-
-                    # 2) On-disk integrity mixing: keep B in place but copy A's ray_data.json into watched.
-                    _copy_file_from_subprocess(run_a / "ray_data.json", watched / "ray_data.json")
-                    page.wait_for_function(
-                        "() => { const b = document.getElementById('banner-error'); return b && !b.classList.contains('hidden') && b.textContent.includes('RUN_INTEGRITY_FAILED'); }",
-                        timeout=15000,
-                    )
-                    obs_corrupt = _observe_visible_state(page)
-                    assert obs_corrupt["banner_visible"]
-                    assert "RUN_INTEGRITY_FAILED" in obs_corrupt["banner_text"]
-                    # Last genuinely verified snapshot (B) stays intact and coherent!
-                    _assert_coherent_a_or_b(obs_corrupt, hash_a=hash_a, hash_b=hash_b)
-                    assert obs_corrupt["scene"]["project_hash"] == hash_b
-
-                    # 3) Truncated write -> stays in waiting state holding B.
-                    _write_text_from_subprocess(watched / "simulation_result.json", '{"truncated": ')
-                    time.sleep(0.25)
-                    obs_trunc = _observe_visible_state(page)
-                    assert obs_trunc["banner_visible"]
-                    _assert_coherent_a_or_b(obs_trunc, hash_a=hash_a, hash_b=hash_b)
-                    assert obs_trunc["scene"]["project_hash"] == hash_b
-
-                    # 4) Separate process restores clean A -> automatic recovery without reopening page!
-                    _replace_dir_from_subprocess(run_a, watched)
-                    page.wait_for_function(
-                        "() => { const b = document.getElementById('banner-error'); return document.getElementById('app')?.getAttribute('data-revision') !== '2' && b && b.classList.contains('hidden'); }",
-                        timeout=20000,
-                    )
-                    obs_rec = _observe_visible_state(page)
-                    assert not obs_rec["banner_visible"]
-                    _assert_coherent_a_or_b(obs_rec, hash_a=hash_a, hash_b=hash_b)
-                    assert obs_rec["scene"]["project_hash"] == hash_a
-                    assert console_errors == [], f"unexpected browser console errors: {console_errors}"
+                    assert doc_info["project_hash"] == hash_a
+                    assert doc_info["beam_count"] == 2
                 finally:
                     browser.close()

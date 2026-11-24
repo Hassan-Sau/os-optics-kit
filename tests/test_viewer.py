@@ -18,8 +18,15 @@ import urllib.error
 import urllib.request
 
 from os_optics_kit import cli
-from os_optics_kit.viewer import LocalViewerServer, SnapshotTransientError, ViewerSession, build_snapshot, resolve_target
-from tests.workflow_fixtures import KIT, ROOT, TempDir, quiet_environment, requires_engine
+from os_optics_kit.viewer import (
+    LocalViewerServer,
+    SnapshotError,
+    SnapshotTransientError,
+    ViewerSession,
+    build_snapshot,
+    resolve_target,
+)
+from tests.workflow_fixtures import KIT, ROOT, TempDir, catalog_available, quiet_environment, requires_engine
 
 DETECTOR_CASE_PROJECT = ROOT / "cases" / "detector-measurements" / "project.json"
 BEAM_EXPANDER_PROJECT = ROOT / "cases" / "beam-expander" / "project.json"
@@ -84,28 +91,82 @@ def _run_project(doc: dict, out_dir: Path, *, ray_data: str = "full") -> Path:
     return out_dir
 
 
-def _run_configured_project(doc: dict, out_dir: Path) -> Path:
+def _run_configured_project(doc: dict, out_dir: Path, *, configuration_ids: list[str] | None = None) -> Path:
     from os_optics.local.configurations import run_configured_project
 
-    run_configured_project(doc, output_dir=out_dir)
+    run_configured_project(doc, output_dir=out_dir, configuration_ids=configuration_ids)
     return out_dir
 
 
-def _multiconfig_project(*, high_power_w: float = 0.003) -> dict:
+def _multiconfig_project(
+    *,
+    low_power_w: float = 0.001,
+    high_power_w: float = 0.003,
+    low_signal_x_mm: float = 100.0,
+    high_signal_x_mm: float = 120.0,
+    include_high: bool = True,
+) -> dict:
+    """Two-configuration Project (``low`` and optional ``high``) with distinct power, signal plane position,
+    and per-configuration applicable targets (``signal_power`` -> low only, ``reference_power`` -> high only).
+    """
     base = _detector_base()
-    src = next(c for c in base["components"] if c["instance_id"] == "SRC")
+    doc = json.loads(json.dumps(base))
+    src = next(c for c in doc["components"] if c["instance_id"] == "SRC")
+    low_source = json.loads(json.dumps(src["source_model"]))
+    low_source["power_w"] = low_power_w
     hi_source = json.loads(json.dumps(src["source_model"]))
     hi_source["power_w"] = high_power_w
-    doc = json.loads(json.dumps(base))
-    doc["configurations"] = [
-        {"configuration_id": "low", "label": "Low power"},
+
+    sig_obs = next(o for o in doc["observations"] if o["observation_id"] == "signal")
+    low_sig_pose = json.loads(json.dumps(sig_obs["pose"]))
+    low_sig_pose["position_mm"][0] = low_signal_x_mm
+    hi_sig_pose = json.loads(json.dumps(sig_obs["pose"]))
+    hi_sig_pose["position_mm"][0] = high_signal_x_mm
+
+    targets = []
+    for target in doc["targets"]:
+        tid = target["target_id"]
+        if tid == "signal_power":
+            target["configuration_ids"] = ["low"]
+            targets.append(target)
+        elif tid == "reference_power":
+            if include_high:
+                target["configuration_ids"] = ["high"]
+                targets.append(target)
+        else:
+            targets.append(target)
+    doc["targets"] = targets
+
+    configs = [
         {
+            "configuration_id": "low",
+            "label": "Low power",
+            "source_models": [{"instance_id": "SRC", "source_model": low_source}],
+            "observation_poses": [{"observation_id": "signal", "pose": low_sig_pose}],
+        }
+    ]
+    if include_high:
+        configs.append({
             "configuration_id": "high",
             "label": "High power",
             "source_models": [{"instance_id": "SRC", "source_model": hi_source}],
-        },
-    ]
+            "observation_poses": [{"observation_id": "signal", "pose": hi_sig_pose}],
+        })
+    doc["configurations"] = configs
     return doc
+
+
+def _http_raw_get(host: str, port: int, path: str) -> tuple[int, bytes, dict[str, str]]:
+    """Perform a single non-redirecting HTTP GET via stdlib ``http.client``."""
+    conn = http.client.HTTPConnection(host, port, timeout=10)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = resp.read()
+        headers = {k.lower(): v for k, v in resp.getheaders()}
+        return resp.status, body, headers
+    finally:
+        conn.close()
 
 
 def _http_get_status_json(url: str) -> tuple[int, dict, dict[str, str]]:
@@ -820,6 +881,47 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
                     self.assertEqual(hdr_a_html["x-viewer-snapshot-id"], snap_a_id)
                     self.assertIn(b"viewer.js", html_a)
 
+                    # Canonical /engine-view/?rev=1 MUST 307-redirect to /engine-view/<rev1_snapshot_id>/
+                    # so relative view.json loads rev-1's exact bytes even after rev-2 is published!
+                    for redir_path in ("/engine-view/?rev=1", "/engine-view?rev=1", f"/engine-view/?snapshot_id={snap_a_id}"):
+                        st_r, _body_r, hdr_r = _http_raw_get(server.host, server.port, redir_path)
+                        self.assertEqual(st_r, 307, redir_path)
+                        self.assertEqual(hdr_r["location"], f"/engine-view/{snap_a_id}/", redir_path)
+                        self.assertEqual(hdr_r["cache-control"], "no-store", redir_path)
+                        self.assertEqual(hdr_r["x-viewer-revision"], "1", redir_path)
+                        self.assertEqual(hdr_r["x-viewer-snapshot-id"], snap_a_id, redir_path)
+
+                    # Follow the redirect location and verify relative view.json returns rev-1 (A), not rev-2 (B).
+                    st_r_html, r_html, r_html_hdr = _http_raw_get(server.host, server.port, f"/engine-view/{snap_a_id}/")
+                    self.assertEqual(st_r_html, 200)
+                    self.assertEqual(r_html_hdr["x-viewer-snapshot-id"], snap_a_id)
+                    self.assertIn(b"viewer.js", r_html)
+                    st_r_view, r_view, r_view_hdr = _http_get_status_json(f"{server.url}engine-view/{snap_a_id}/view.json")
+                    self.assertEqual(st_r_view, 200)
+                    self.assertEqual(r_view_hdr["x-viewer-revision"], "1")
+                    self.assertEqual(r_view["identity"]["project_hash"], hash_a)
+                    self.assertEqual(r_view["identity"]["scene_content_hash"], scene_hash_a)
+
+                    # Unqualified /engine-view and /engine-view/ 307-redirect to the current active snapshot (B).
+                    for active_path in ("/engine-view", "/engine-view/"):
+                        st_cur, _body_cur, hdr_cur = _http_raw_get(server.host, server.port, active_path)
+                        self.assertEqual(st_cur, 307, active_path)
+                        self.assertEqual(hdr_cur["location"], f"/engine-view/{snap_b_id}/", active_path)
+                        self.assertEqual(hdr_cur["cache-control"], "no-store", active_path)
+                        self.assertEqual(hdr_cur["x-viewer-revision"], "2", active_path)
+                        self.assertEqual(hdr_cur["x-viewer-snapshot-id"], snap_b_id, active_path)
+
+                    # Unversioned /engine-view/view.json and unversioned assets are NEVER served.
+                    for unversioned in (
+                        f"{server.url}engine-view/view.json",
+                        f"{server.url}engine-view/index.html",
+                        f"{server.url}engine-view/viewer.js",
+                    ):
+                        with self.subTest(unversioned=unversioned):
+                            st_u, body_u, _ = _http_get_status_json(unversioned)
+                            self.assertEqual(st_u, 404)
+                            self.assertEqual(body_u["error"]["code"], "NOT_FOUND")
+
                     # B's pinned URL returns B's exact bytes.
                     st_b, view_b, hdr_b = _http_get_status_json(f"{server.url}engine-view/{snap_b_id}/view.json")
                     self.assertEqual(st_b, 200)
@@ -837,6 +939,9 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
                     for url in (
                         f"{server.url}engine-view/{snap_a_id}/view.json",
                         f"{server.url}engine-view/{snap_a_id}/",
+                        f"{server.url}engine-view/{snap_a_id}/viewer.js",
+                        f"{server.url}engine-view/?rev=1",
+                        f"{server.url}engine-view/?snapshot_id={snap_a_id}",
                         f"{server.url}api/scene-document?snapshot_id={snap_a_id}",
                         f"{server.url}api/scene-document?rev=1",
                         f"{server.url}engine-view/rev-999-unknown/view.json",
@@ -895,76 +1000,258 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
             self.assertEqual(snap["scene"]["crossing_row_count"], 0)
 
     def test_multi_configuration_project_and_root_run_freshness(self):
+        """Verify consistent declaration-order selection, per-configuration freshness, configuration-applied
+        previews (3D scene + quantities + applicable targets), subset runs, removed/renamed configurations,
+        and manifest-only discovery ignoring leftover user files in old configuration directories.
+        """
         with TempDir() as tmp:
-            doc = _multiconfig_project(high_power_w=0.003)
+            doc = _multiconfig_project(
+                low_power_w=0.001,
+                high_power_w=0.003,
+                low_signal_x_mm=100.0,
+                high_signal_x_mm=120.0,
+            )
             project_path = _write_json(tmp / "project.json", doc)
             root_run = _run_configured_project(doc, tmp / "cfg_run")
 
-            # 1) view PROJECT --run ROOT_RUN (both default and explicit configuration) -> CURRENT / computed_run.
+            # 0) Project-only geometry previews apply the selected configuration consistently to 3D scene,
+            #    quantities, and applicable targets (default = first declared = 'low').
+            snap_proj_only_default = build_snapshot(resolve_target(project_path), revision=1).snapshot
+            self.assertEqual(snap_proj_only_default["result_mode"], "geometry_preview")
+            self.assertEqual(snap_proj_only_default["source"]["configuration_id"], "low")
+            self.assertEqual(snap_proj_only_default["source"]["available_configurations"], ["low", "high"])
+            low_scene_sig = next(p for p in snap_proj_only_default["scene"]["parts"] if p["id"] == "signal")
+            low_qty_sig = next(q for q in snap_proj_only_default["quantities"] if q["observation_id"] == "signal")
+            self.assertAlmostEqual(low_scene_sig["position_mm"][0], 100.0, places=4)
+            self.assertAlmostEqual(low_qty_sig["plane"]["origin_mm"][0], 100.0, places=4)
+            low_target_ids = {t["target_id"] for t in snap_proj_only_default["targets"]}
+            self.assertIn("signal_power", low_target_ids)
+            self.assertNotIn("reference_power", low_target_ids)
+
+            snap_proj_only_high = build_snapshot(resolve_target(project_path, configuration="high"), revision=1).snapshot
+            self.assertEqual(snap_proj_only_high["result_mode"], "geometry_preview")
+            self.assertEqual(snap_proj_only_high["source"]["configuration_id"], "high")
+            hi_scene_sig = next(p for p in snap_proj_only_high["scene"]["parts"] if p["id"] == "signal")
+            hi_qty_sig = next(q for q in snap_proj_only_high["quantities"] if q["observation_id"] == "signal")
+            self.assertAlmostEqual(hi_scene_sig["position_mm"][0], 120.0, places=4)
+            self.assertAlmostEqual(hi_qty_sig["plane"]["origin_mm"][0], 120.0, places=4)
+            hi_target_ids = {t["target_id"] for t in snap_proj_only_high["targets"]}
+            self.assertIn("reference_power", hi_target_ids)
+            self.assertNotIn("signal_power", hi_target_ids)
+
+            # 1) view PROJECT --run ROOT_RUN (default selects first declared 'low'; declaration order ['low', 'high']).
             snap_proj_default = build_snapshot(resolve_target(project_path, run=root_run), revision=1).snapshot
             self.assertEqual(snap_proj_default["result_mode"], "computed_run")
             self.assertTrue(snap_proj_default["is_computed_result"])
             self.assertEqual(snap_proj_default["freshness"]["state"], "CURRENT")
-            self.assertEqual(snap_proj_default["source"]["available_configurations"], ["high", "low"])
-            self.assertEqual(snap_proj_default["source"]["configuration_id"], "high")
-            self.assertAlmostEqual(snap_proj_default["power_ledger"]["total_input_W"], 0.003, places=12)
+            self.assertEqual(snap_proj_default["source"]["available_configurations"], ["low", "high"])
+            self.assertEqual(snap_proj_default["source"]["configuration_id"], "low")
+            self.assertAlmostEqual(snap_proj_default["power_ledger"]["total_input_W"], 0.001, places=12)
 
-            snap_proj_low = build_snapshot(
-                resolve_target(project_path, run=root_run, configuration="low"), revision=2
-            ).snapshot
-            self.assertEqual(snap_proj_low["result_mode"], "computed_run")
-            self.assertEqual(snap_proj_low["freshness"]["state"], "CURRENT")
-            self.assertEqual(snap_proj_low["source"]["configuration_id"], "low")
-            self.assertAlmostEqual(snap_proj_low["power_ledger"]["total_input_W"], 0.001, places=12)
-
-            # 2) view ROOT_RUN --project PROJECT -> CURRENT / computed_run.
+            # 2) view ROOT_RUN --project PROJECT for 'high' -> CURRENT / computed_run (3 mW).
             snap_run_pair = build_snapshot(
-                resolve_target(root_run, project=project_path, configuration="high"), revision=3
+                resolve_target(root_run, project=project_path, configuration="high"), revision=2
             ).snapshot
             self.assertEqual(snap_run_pair["result_mode"], "computed_run")
             self.assertEqual(snap_run_pair["freshness"]["state"], "CURRENT")
             self.assertEqual(snap_run_pair["source"]["configuration_id"], "high")
             self.assertAlmostEqual(snap_run_pair["power_ledger"]["total_input_W"], 0.003, places=12)
 
-            # 3) Edit the multi-configuration Project -> flips to HISTORICAL / stale_run and withholds stale power!
-            _write_json(project_path, _multiconfig_project(high_power_w=0.004))
-            for spec in (
-                resolve_target(project_path, run=root_run, configuration="high"),
-                resolve_target(root_run, project=project_path, configuration="high"),
+            # 3) Edit ONLY 'high' (3 mW -> 4 mW):
+            #    - 'low' MUST stay CURRENT / computed_run (1 mW ledger & rays)!
+            #    - 'high' MUST become HISTORICAL / stale_run with high-applied geometry, plane x=120, high-only targets!
+            _write_json(
+                project_path,
+                _multiconfig_project(low_power_w=0.001, high_power_w=0.004, low_signal_x_mm=100.0, high_signal_x_mm=120.0),
+            )
+            for label, low_spec, high_spec in (
+                (
+                    "project+run",
+                    resolve_target(project_path, run=root_run, configuration="low"),
+                    resolve_target(project_path, run=root_run, configuration="high"),
+                ),
+                (
+                    "run+project",
+                    resolve_target(root_run, project=project_path, configuration="low"),
+                    resolve_target(root_run, project=project_path, configuration="high"),
+                ),
             ):
-                snap_stale = build_snapshot(spec, revision=4).snapshot
-                self.assertEqual(snap_stale["result_mode"], "stale_run")
-                self.assertFalse(snap_stale["is_computed_result"])
-                self.assertEqual(snap_stale["freshness"]["state"], "HISTORICAL")
-                self.assertFalse(snap_stale["power_ledger"]["available"])
-                self.assertEqual(snap_stale["power_ledger"]["reason"], "STALE_RUN")
-                self.assertEqual(snap_stale["scene"]["beam_count"], 0)
+                with self.subTest(pairing=label):
+                    snap_low = build_snapshot(low_spec, revision=3).snapshot
+                    self.assertEqual(snap_low["result_mode"], "computed_run")
+                    self.assertTrue(snap_low["is_computed_result"])
+                    self.assertEqual(snap_low["freshness"]["state"], "CURRENT")
+                    self.assertEqual(snap_low["freshness"]["scope"], "configuration")
+                    self.assertEqual(snap_low["freshness"]["root_freshness"]["state"], "HISTORICAL")
+                    self.assertTrue(snap_low["power_ledger"]["available"])
+                    self.assertAlmostEqual(snap_low["power_ledger"]["total_input_W"], 0.001, places=12)
+                    self.assertGreater(snap_low["scene"]["beam_count"], 0)
 
-    def test_beam_expander_catalog_geometry_and_schematic_fallback(self):
-        # 1) Real unevaluated catalog Project (cases/beam-expander/project.json): true 12.7 mm x 2.6 / 2.2 mm lenses.
-        built = build_snapshot(resolve_target(BEAM_EXPANDER_PROJECT), revision=1)
+                    snap_stale = build_snapshot(high_spec, revision=4).snapshot
+                    self.assertEqual(snap_stale["result_mode"], "stale_run")
+                    self.assertFalse(snap_stale["is_computed_result"])
+                    self.assertEqual(snap_stale["freshness"]["state"], "HISTORICAL")
+                    self.assertIn("PHYSICS_CHANGED", snap_stale["freshness"]["reasons"])
+                    self.assertFalse(snap_stale["power_ledger"]["available"])
+                    self.assertEqual(snap_stale["power_ledger"]["reason"], "STALE_RUN")
+                    self.assertEqual(snap_stale["scene"]["beam_count"], 0)
+                    stale_sig_part = next(p for p in snap_stale["scene"]["parts"] if p["id"] == "signal")
+                    stale_sig_qty = next(q for q in snap_stale["quantities"] if q["observation_id"] == "signal")
+                    self.assertAlmostEqual(stale_sig_part["position_mm"][0], 120.0, places=4)
+                    self.assertAlmostEqual(stale_sig_qty["plane"]["origin_mm"][0], 120.0, places=4)
+                    stale_targets = {t["target_id"] for t in snap_stale["targets"]}
+                    self.assertIn("reference_power", stale_targets)
+                    self.assertNotIn("signal_power", stale_targets)
+
+            # 4) Subset run (Project declares 'low' and 'high', run recorded only 'low'):
+            _write_json(project_path, doc)
+            subset_run = _run_configured_project(doc, tmp / "subset_run", configuration_ids=["low"])
+            for label, low_spec, high_spec in (
+                (
+                    "subset-project+run",
+                    resolve_target(project_path, run=subset_run),
+                    resolve_target(project_path, run=subset_run, configuration="high"),
+                ),
+                (
+                    "subset-run+project",
+                    resolve_target(subset_run, project=project_path, configuration="low"),
+                    resolve_target(subset_run, project=project_path, configuration="high"),
+                ),
+            ):
+                with self.subTest(pairing=label):
+                    snap_sub_low = build_snapshot(low_spec, revision=5).snapshot
+                    self.assertEqual(snap_sub_low["result_mode"], "computed_run")
+                    self.assertTrue(snap_sub_low["is_computed_result"])
+                    self.assertEqual(snap_sub_low["freshness"]["state"], "CURRENT")
+                    self.assertEqual(snap_sub_low["source"]["configuration_id"], "low")
+                    self.assertEqual(snap_sub_low["source"]["recorded_configurations"], ["low"])
+                    self.assertAlmostEqual(snap_sub_low["power_ledger"]["total_input_W"], 0.001, places=12)
+
+                    snap_sub_high = build_snapshot(high_spec, revision=6).snapshot
+                    self.assertEqual(snap_sub_high["result_mode"], "geometry_preview")
+                    self.assertFalse(snap_sub_high["is_computed_result"])
+                    self.assertFalse(snap_sub_high["power_ledger"]["available"])
+                    self.assertEqual(snap_sub_high["power_ledger"]["reason"], "CONFIGURATION_NOT_IN_RUN")
+                    self.assertEqual(snap_sub_high["source"]["configuration_id"], "high")
+                    self.assertEqual(snap_sub_high["source"]["recorded_configurations"], ["low"])
+                    self.assertIn("CONFIGURATION_NOT_IN_RUN", {n["code"] for n in snap_sub_high["notices"]})
+                    sub_hi_part = next(p for p in snap_sub_high["scene"]["parts"] if p["id"] == "signal")
+                    sub_hi_qty = next(q for q in snap_sub_high["quantities"] if q["observation_id"] == "signal")
+                    self.assertAlmostEqual(sub_hi_part["position_mm"][0], 120.0, places=4)
+                    self.assertAlmostEqual(sub_hi_qty["plane"]["origin_mm"][0], 120.0, places=4)
+                    sub_hi_targets = {t["target_id"] for t in snap_sub_high["targets"]}
+                    self.assertIn("reference_power", sub_hi_targets)
+                    self.assertNotIn("signal_power", sub_hi_targets)
+
+            # 5) Renamed/removed watched configuration: NEVER silently renders first config under old name!
+            with self.assertRaises(SnapshotError) as ctx_missing:
+                build_snapshot(resolve_target(project_path, run=root_run, configuration="nonexistent"), revision=1)
+            self.assertEqual(ctx_missing.exception.code, "CONFIGURATION_NOT_FOUND")
+
+            once_missing = subprocess.run(
+                [sys.executable, *KIT, "view", str(project_path), "--configuration", "nonexistent", "--once"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(once_missing.returncode, 4)
+            self.assertEqual(json.loads(once_missing.stderr)["error"]["code"], "CONFIGURATION_NOT_FOUND")
+
+            # Live session watching --configuration high when 'high' is removed from Project transitions to error!
+            with ViewerSession(resolve_target(project_path, run=root_run, configuration="high"), poll_interval=0.08) as sess:
+                snap_init = sess.load_initial().snapshot
+                self.assertEqual(snap_init["source"]["configuration_id"], "high")
+                self.assertEqual(snap_init["result_mode"], "computed_run")
+
+                low_only_doc = _multiconfig_project(include_high=False)
+                _write_json(project_path, low_only_doc)
+                self.assertTrue(sess.poll_once())
+                env_err = sess.state.envelope()
+                self.assertEqual(env_err["status"], "error")
+                self.assertIsNone(env_err["snapshot"])
+                self.assertEqual(env_err["error"]["code"], "CONFIGURATION_NOT_FOUND")
+                self.assertEqual(env_err["last_valid_snapshot"]["source"]["configuration_id"], "high")
+
+                # Restoring 'high' recovers cleanly!
+                _write_json(project_path, doc)
+                self.assertTrue(sess.poll_once())
+                env_ok = sess.state.envelope()
+                self.assertEqual(env_ok["status"], "ok")
+                self.assertEqual(env_ok["snapshot"]["source"]["configuration_id"], "high")
+
+            # 6) Leftover user note in old configurations/high/note.txt after removing 'high' and writing
+            #    a valid low-only run: manifest-only discovery opens/follows 'low', ignores 'high',
+            #    and leaves note.txt completely untouched!
+            note_path = root_run / "configurations" / "high" / "note.txt"
+            note_bytes = b"user scratch note -- must stay untouched\n"
+            note_path.write_bytes(note_bytes)
+            note_hash_before = _sha256_bytes(note_path)
+
+            low_only_doc = _multiconfig_project(include_high=False)
+            _write_json(project_path, low_only_doc)
+            _run_configured_project(low_only_doc, root_run)
+
+            # Confirm leftover directory still exists on disk alongside the valid low-only run.
+            self.assertTrue(note_path.is_file())
+            self.assertEqual(_sha256_bytes(note_path), note_hash_before)
+
+            for spec in (
+                resolve_target(root_run),
+                resolve_target(project_path, run=root_run),
+                resolve_target(root_run, project=project_path),
+            ):
+                snap_low_only = build_snapshot(spec, revision=1).snapshot
+                self.assertEqual(snap_low_only["result_mode"], "computed_run")
+                self.assertTrue(snap_low_only["is_computed_result"])
+                self.assertEqual(snap_low_only["source"]["configuration_id"], "low")
+                self.assertEqual(snap_low_only["source"]["available_configurations"], ["low"])
+                self.assertAlmostEqual(snap_low_only["power_ledger"]["total_input_W"], 0.001, places=12)
+                if spec.project_path is not None:
+                    self.assertEqual(snap_low_only["freshness"]["state"], "CURRENT")
+
+            self.assertEqual(_sha256_bytes(note_path), note_hash_before)
+
+    def test_beam_expander_offline_schematic_fallback_and_placeholder_classification(self):
+        """Offline (empty catalog) beam-expander preview falls back honestly with L1/L2 schematic,
+        SRC preserved as VIEW_PLACEHOLDER, beams empty, and input untouched.
+        """
+        before_sha = _sha256_bytes(BEAM_EXPANDER_PROJECT)
+        with TempDir() as empty_catalog:
+            old_dir = os.environ.get("OPENSCI_CATALOG_DIR")
+            old_interval = os.environ.get("OPENSCI_CATALOG_CHECK_INTERVAL")
+            os.environ["OPENSCI_CATALOG_DIR"] = str(empty_catalog)
+            os.environ["OPENSCI_CATALOG_CHECK_INTERVAL"] = "0"
+            try:
+                built = build_snapshot(resolve_target(BEAM_EXPANDER_PROJECT), revision=1)
+            finally:
+                if old_dir is None:
+                    os.environ.pop("OPENSCI_CATALOG_DIR", None)
+                else:
+                    os.environ["OPENSCI_CATALOG_DIR"] = old_dir
+                if old_interval is None:
+                    os.environ.pop("OPENSCI_CATALOG_CHECK_INTERVAL", None)
+                else:
+                    os.environ["OPENSCI_CATALOG_CHECK_INTERVAL"] = old_interval
+
+        self.assertEqual(_sha256_bytes(BEAM_EXPANDER_PROJECT), before_sha)
         snap = built.snapshot
         self.assertEqual(snap["result_mode"], "geometry_preview")
         self.assertFalse(snap["is_computed_result"])
         self.assertTrue(snap["scene"]["geometry_only"])
         self.assertEqual(snap["scene"]["beam_count"], 0)
         self.assertEqual(built.scene_document["beams"], [])
-        self.assertFalse(snap["scene"]["has_schematic_geometry"])
-        self.assertNotIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap["notices"]})
-        self.assertEqual(snap["identity"]["scene_content_hash"], built.scene_document["identity"]["scene_content_hash"])
+        self.assertTrue(snap["scene"]["has_schematic_geometry"])
+        self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap["notices"]})
 
         parts = {p["id"]: p for p in snap["scene"]["parts"]}
-        for lens_id, expected_thk in (("L1", 2.6), ("L2", 2.2)):
-            lens_part = parts[lens_id]
-            self.assertEqual(lens_part["geometry_source"], "catalog")
-            self.assertFalse(lens_part["schematic"])
-            self.assertAlmostEqual(lens_part["diameter_mm"], 12.7, places=3)
-            self.assertAlmostEqual(lens_part["thickness_mm"], expected_thk, places=3)
-            lo = lens_part["bounds"]["min_mm"]
-            hi = lens_part["bounds"]["max_mm"]
-            self.assertAlmostEqual(hi[0] - lo[0], expected_thk, places=2)
-            self.assertAlmostEqual(hi[1] - lo[1], 12.7, places=2)
-            self.assertAlmostEqual(hi[2] - lo[2], 12.7, places=2)
+        for lens_id in ("L1", "L2"):
+            self.assertTrue(parts[lens_id]["schematic"], lens_id)
+            self.assertEqual(parts[lens_id]["geometry_source"], "schematic", lens_id)
+            self.assertIn(lens_id, snap["scene"]["schematic_part_ids"])
+        self.assertEqual(parts["SRC"]["geometry_source"], "view_placeholder")
+        self.assertTrue(parts["SRC"]["view_placeholder"])
+        self.assertEqual(parts["SRC"]["geometry_basis"], "VIEW_PLACEHOLDER")
+        self.assertFalse(parts["SRC"]["schematic"])
 
         # 2) Valid Project with an unspecified custom detector (ELEMENT_MARKER placeholder) -> marked schematic!
         with TempDir() as tmp:
@@ -989,9 +1276,14 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
             snap_custom = build_snapshot(resolve_target(p_custom), revision=1).snapshot
             c_parts = {p["id"]: p for p in snap_custom["scene"]["parts"]}
             self.assertTrue(c_parts["CUSTOM_DET"]["schematic"])
+            self.assertTrue(c_parts["CUSTOM_DET"]["view_placeholder"])
             self.assertEqual(c_parts["CUSTOM_DET"]["geometry_source"], "schematic")
+            self.assertEqual(c_parts["SRC"]["geometry_source"], "view_placeholder")
+            self.assertTrue(c_parts["SRC"]["view_placeholder"])
+            self.assertFalse(c_parts["SRC"]["schematic"])
             self.assertTrue(snap_custom["scene"]["has_schematic_geometry"])
             self.assertIn("CUSTOM_DET", snap_custom["scene"]["schematic_part_ids"])
+            self.assertNotIn("SRC", snap_custom["scene"]["schematic_part_ids"])
             self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap_custom["notices"]})
 
             # 3) Unlowerable Project (bare custom lens with no dimensions) -> fallback marks schematic explicitly!
@@ -1011,9 +1303,60 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
             self.assertEqual(b_parts["BARE_LENS"]["geometry_source"], "schematic")
             self.assertFalse(b_parts["BS"]["schematic"])
             self.assertEqual(b_parts["BS"]["geometry_source"], "project_design_geometry")
+            self.assertEqual(b_parts["SRC"]["geometry_source"], "view_placeholder")
+            self.assertTrue(b_parts["SRC"]["view_placeholder"])
             self.assertTrue(snap_bare["scene"]["has_schematic_geometry"])
             self.assertIn("BARE_LENS", snap_bare["scene"]["schematic_part_ids"])
             self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap_bare["notices"]})
+
+
+@unittest.skipUnless(catalog_available(), "no catalog release is installed")
+@requires_engine
+class ViewerCatalogGeometryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        quiet_environment()
+
+    def test_beam_expander_pinned_catalog_geometry_and_source_view_placeholder(self):
+        before_sha = _sha256_bytes(BEAM_EXPANDER_PROJECT)
+        built = build_snapshot(resolve_target(BEAM_EXPANDER_PROJECT), revision=1)
+        self.assertEqual(_sha256_bytes(BEAM_EXPANDER_PROJECT), before_sha)
+
+        snap = built.snapshot
+        self.assertEqual(snap["result_mode"], "geometry_preview")
+        self.assertFalse(snap["is_computed_result"])
+        self.assertTrue(snap["scene"]["geometry_only"])
+        self.assertEqual(snap["scene"]["beam_count"], 0)
+        self.assertEqual(built.scene_document["beams"], [])
+        self.assertFalse(snap["scene"]["has_schematic_geometry"])
+        self.assertNotIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap["notices"]})
+        self.assertEqual(snap["identity"]["scene_content_hash"], built.scene_document["identity"]["scene_content_hash"])
+
+        parts = {p["id"]: p for p in snap["scene"]["parts"]}
+        for lens_id, expected_thk in (("L1", 2.6), ("L2", 2.2)):
+            lens_part = parts[lens_id]
+            self.assertEqual(lens_part["geometry_source"], "catalog", lens_id)
+            self.assertFalse(lens_part["schematic"], lens_id)
+            self.assertFalse(lens_part["view_placeholder"], lens_id)
+            self.assertAlmostEqual(lens_part["diameter_mm"], 12.7, places=3)
+            self.assertAlmostEqual(lens_part["thickness_mm"], expected_thk, places=3)
+            lo = lens_part["bounds"]["min_mm"]
+            hi = lens_part["bounds"]["max_mm"]
+            self.assertAlmostEqual(hi[0] - lo[0], expected_thk, places=2)
+            self.assertAlmostEqual(hi[1] - lo[1], 12.7, places=2)
+            self.assertAlmostEqual(hi[2] - lo[2], 12.7, places=2)
+
+        # SRC is an engine VIEW_PLACEHOLDER emitter marker (10 mm), NOT exact physical laser housing.
+        src_part = parts["SRC"]
+        self.assertEqual(src_part["geometry_source"], "view_placeholder")
+        self.assertTrue(src_part["view_placeholder"])
+        self.assertEqual(src_part["geometry_basis"], "VIEW_PLACEHOLDER")
+        self.assertEqual(src_part["geometry_status"], "PLACEHOLDER")
+        self.assertEqual(src_part["geometry_kind"], "SOURCE_EMITTER")
+        self.assertFalse(src_part["schematic"])
+        self.assertIn("SRC", snap["scene"]["view_placeholder_part_ids"])
+        self.assertIn("catalog", snap["scene"]["geometry_sources"])
+        self.assertIn("view_placeholder", snap["scene"]["geometry_sources"])
 
 
 if __name__ == "__main__":

@@ -148,24 +148,110 @@ def resolve_target(
                         path=target.as_posix())
 
 
-def _resolve_configuration_dir(run_dir: Path, configuration_id: str | None) -> tuple[Path, str | None, list[str]]:
-    """Resolve an ordinary run directory or one configuration inside a configured run directory."""
-    configs_root = run_dir / "configurations"
-    if not configs_root.is_dir():
-        if configuration_id is not None:
-            raise SnapshotError("CONFIGURATION_NOT_FOUND",
-                                f"run directory has no configurations/: {run_dir.as_posix()}",
-                                configuration_id=configuration_id)
-        return run_dir, None, []
-    available = sorted(child.name for child in configs_root.iterdir() if child.is_dir())
-    if not available:
-        raise SnapshotTransientError("RUN_INCOMPLETE", f"configurations/ has no completed runs yet: {run_dir.as_posix()}")
-    selected = configuration_id if configuration_id is not None else available[0]
-    if selected not in available:
-        raise SnapshotError("CONFIGURATION_NOT_FOUND",
-                            f"unknown configuration {selected!r}; available: {', '.join(available)}",
-                            configuration_id=selected, available_configurations=available)
-    return configs_root / selected, selected, available
+@dataclass(frozen=True)
+class _RunManifestInfo:
+    """Manifest-only summary of a run directory (never scans arbitrary subdirectories on disk)."""
+
+    is_multi_cfg: bool
+    manifest: dict[str, Any]
+    recorded_ids: tuple[str, ...]
+    run_dirs_by_cfg: dict[str, Path]
+    entries_by_cfg: dict[str, dict[str, Any]]
+    root_project_hash: str | None
+
+
+def _inspect_run_manifest(run_dir: Path) -> _RunManifestInfo:
+    """Read root ``manifest.json`` to classify a run directory without scanning disk subdirectories."""
+    from os_optics.local.configurations import configuration_directory, is_configurations_manifest
+
+    manifest_path = run_dir / "manifest.json"
+    try:
+        raw = manifest_path.read_bytes()
+    except FileNotFoundError:
+        raise SnapshotTransientError(
+            "RUN_INCOMPLETE",
+            f"run manifest.json is not present yet (write in progress?): {run_dir.as_posix()}",
+            run_dir=run_dir.as_posix(),
+        ) from None
+    except OSError as exc:
+        raise SnapshotTransientError(
+            "RUN_UNREADABLE",
+            f"could not read manifest.json: {exc}",
+            run_dir=run_dir.as_posix(),
+        ) from None
+    if not raw.strip():
+        raise SnapshotTransientError(
+            "RUN_INCOMPLETE",
+            f"run manifest.json is empty (write in progress?): {run_dir.as_posix()}",
+            run_dir=run_dir.as_posix(),
+        )
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SnapshotTransientError(
+            "RUN_UNREADABLE",
+            f"run manifest.json is not valid JSON (write in progress?): {exc}",
+            run_dir=run_dir.as_posix(),
+        ) from None
+    if not isinstance(manifest, dict):
+        raise SnapshotTransientError(
+            "RUN_UNREADABLE",
+            f"run manifest.json root must be an object: {run_dir.as_posix()}",
+            run_dir=run_dir.as_posix(),
+        )
+
+    if not is_configurations_manifest(manifest):
+        return _RunManifestInfo(
+            is_multi_cfg=False,
+            manifest=manifest,
+            recorded_ids=(),
+            run_dirs_by_cfg={},
+            entries_by_cfg={},
+            root_project_hash=None,
+        )
+
+    entries = manifest.get("configurations")
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        raise SnapshotTransientError(
+            "RUN_INTEGRITY_FAILED",
+            f"multi-configuration manifest has invalid configurations list: {run_dir.as_posix()}",
+            run_dir=run_dir.as_posix(),
+        )
+
+    recorded_ids: list[str] = []
+    run_dirs_by_cfg: dict[str, Path] = {}
+    entries_by_cfg: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        cid = entry.get("configuration_id")
+        if not isinstance(cid, str) or not cid:
+            continue
+        recorded_ids.append(cid)
+        entries_by_cfg[cid] = entry
+        expected_rel = configuration_directory(cid)
+        if entry.get("manifest_sha256") is not None and entry.get("directory") == expected_rel:
+            run_dirs_by_cfg[cid] = run_dir / expected_rel
+
+    root_project_hash = ((manifest.get("project") or {}).get("project_hash") or {}).get("digest")
+    return _RunManifestInfo(
+        is_multi_cfg=True,
+        manifest=manifest,
+        recorded_ids=tuple(recorded_ids),
+        run_dirs_by_cfg=run_dirs_by_cfg,
+        entries_by_cfg=entries_by_cfg,
+        root_project_hash=str(root_project_hash) if root_project_hash else None,
+    )
+
+
+def _peek_project_declared_configurations(project_path: Path) -> list[str]:
+    """Best-effort read of declared configuration IDs from ``project_path`` for fingerprinting."""
+    try:
+        raw = project_path.read_bytes()
+        doc = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []
+    if not isinstance(doc, dict):
+        return []
+    return _declared_configurations(doc)
 
 
 def _hash_file_entry(hasher: Any, label: str, path: Path) -> None:
@@ -181,30 +267,41 @@ def _hash_file_entry(hasher: Any, label: str, path: Path) -> None:
 
 
 def compute_fingerprint(spec: TargetSpec) -> str:
-    """Compute a deterministic content fingerprint across all watched input files."""
+    """Compute a deterministic content fingerprint across watched input files (manifest-only, no directory scan)."""
     hasher = hashlib.sha256()
     hasher.update(f"KIND:{spec.kind}:{spec.configuration_id or ''}\0".encode("utf-8"))
+    declared_cfgs: list[str] = []
     if spec.project_path is not None:
         if not spec.project_path.exists():
             raise SnapshotTransientError("PROJECT_MISSING", f"waiting for project file: {spec.project_path.as_posix()}",
                                          path=spec.project_path.as_posix())
         _hash_file_entry(hasher, "project", spec.project_path)
+        declared_cfgs = _peek_project_declared_configurations(spec.project_path)
     if spec.run_dir is not None:
         if not spec.run_dir.exists():
             raise SnapshotTransientError("RUN_MISSING", f"waiting for run directory: {spec.run_dir.as_posix()}",
                                          path=spec.run_dir.as_posix())
-        effective_run, selected_cfg, available = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
-        hasher.update(f"CFG:{selected_cfg or ''}:{','.join(available)}\0".encode("utf-8"))
-        if selected_cfg is not None:
+        run_info = _inspect_run_manifest(spec.run_dir)
+        if run_info.is_multi_cfg:
+            if spec.configuration_id is not None:
+                target_cfg: str | None = spec.configuration_id
+            elif declared_cfgs:
+                target_cfg = declared_cfgs[0]
+            elif run_info.recorded_ids:
+                target_cfg = run_info.recorded_ids[0]
+            else:
+                target_cfg = None
+            hasher.update(f"CFG:{target_cfg or ''}:{','.join(run_info.recorded_ids)}\0".encode("utf-8"))
             for root_file in WATCHED_ROOT_CONFIG_FILES:
                 _hash_file_entry(hasher, f"root/{root_file}", spec.run_dir / root_file)
-            for cfg_id in available:
-                cfg_dir = spec.run_dir / "configurations" / cfg_id
+            if target_cfg is not None and target_cfg in run_info.run_dirs_by_cfg:
+                cfg_dir = run_info.run_dirs_by_cfg[target_cfg]
                 for filename in WATCHED_RUN_FILES:
-                    _hash_file_entry(hasher, f"cfg/{cfg_id}/{filename}", cfg_dir / filename)
+                    _hash_file_entry(hasher, f"cfg/{target_cfg}/{filename}", cfg_dir / filename)
         else:
+            hasher.update(b"CFG::\0")
             for filename in WATCHED_RUN_FILES:
-                _hash_file_entry(hasher, f"run/{filename}", effective_run / filename)
+                _hash_file_entry(hasher, f"run/{filename}", spec.run_dir / filename)
     return hasher.hexdigest()
 
 
@@ -481,29 +578,93 @@ def _glb_surface_facts(gltf: dict[str, Any], node: dict[str, Any]) -> tuple[dict
     return tuple(out)
 
 
-def _geometry_provenance_from_engine(geom: dict[str, Any] | Any) -> tuple[str, bool]:
-    """Classify an engine geometry descriptor into ``(geometry_source, schematic)``."""
+@dataclass(frozen=True)
+class _GeometryProvenance:
+    """Honest per-part geometry classification preserving engine ``VIEW_PLACEHOLDER`` metadata."""
+
+    geometry_source: str
+    schematic: bool
+    view_placeholder: bool
+    geometry_basis: str | None = None
+    geometry_status: str | None = None
+    geometry_kind: str | None = None
+
+    def as_facts(self) -> dict[str, Any]:
+        facts: dict[str, Any] = {
+            "geometry_source": self.geometry_source,
+            "schematic": self.schematic,
+            "view_placeholder": self.view_placeholder,
+        }
+        if self.geometry_basis is not None:
+            facts["geometry_basis"] = self.geometry_basis
+        if self.geometry_status is not None:
+            facts["geometry_status"] = self.geometry_status
+        if self.geometry_kind is not None:
+            facts["geometry_kind"] = self.geometry_kind
+        return facts
+
+
+def _geometry_provenance_from_engine(geom: dict[str, Any] | Any) -> _GeometryProvenance:
+    """Classify an engine geometry descriptor without erasing ``VIEW_PLACEHOLDER`` markers."""
     if isinstance(geom, dict):
-        basis = geom.get("basis")
-        status = geom.get("status")
-        kind = geom.get("kind")
+        raw_basis = geom.get("basis")
+        raw_status = geom.get("status")
+        raw_kind = geom.get("kind")
     else:
         raw_basis = getattr(geom, "basis", None)
-        basis = getattr(raw_basis, "value", raw_basis)
         raw_status = getattr(geom, "status", None)
-        status = getattr(raw_status, "value", raw_status)
         raw_kind = getattr(geom, "kind", None)
-        kind = getattr(raw_kind, "value", raw_kind)
+
+    basis = str(getattr(raw_basis, "value", raw_basis)) if raw_basis is not None else None
+    status = str(getattr(raw_status, "value", raw_status)) if raw_status is not None else None
+    kind = str(getattr(raw_kind, "value", raw_kind)) if raw_kind is not None else None
 
     if basis == "PUBLIC_CATALOG_DESIGN_GEOMETRY" and status == "NOMINAL":
-        return "catalog", False
+        return _GeometryProvenance(
+            geometry_source="catalog",
+            schematic=False,
+            view_placeholder=False,
+            geometry_basis=basis,
+            geometry_status=status,
+            geometry_kind=kind,
+        )
     if basis == "PROJECT_DECLARED_MODEL" and status == "NOMINAL":
-        return "engine_nominal", False
-    if kind == "SOURCE_EMITTER":
-        return "engine_nominal", False
+        return _GeometryProvenance(
+            geometry_source="engine_nominal",
+            schematic=False,
+            view_placeholder=False,
+            geometry_basis=basis,
+            geometry_status=status,
+            geometry_kind=kind,
+        )
+    if kind == "SOURCE_EMITTER" and (status == "PLACEHOLDER" or basis == "VIEW_PLACEHOLDER"):
+        # The engine renders a 10 mm source emitter marker (VIEW_PLACEHOLDER), not physical laser housing.
+        # Preserve its placeholder provenance honestly without triggering missing-dimension warnings.
+        return _GeometryProvenance(
+            geometry_source="view_placeholder",
+            schematic=False,
+            view_placeholder=True,
+            geometry_basis=basis or "VIEW_PLACEHOLDER",
+            geometry_status=status or "PLACEHOLDER",
+            geometry_kind=kind,
+        )
     if status == "PLACEHOLDER" or basis == "VIEW_PLACEHOLDER":
-        return "schematic", True
-    return "engine_nominal", False
+        return _GeometryProvenance(
+            geometry_source="schematic",
+            schematic=True,
+            view_placeholder=True,
+            geometry_basis=basis,
+            geometry_status=status,
+            geometry_kind=kind,
+        )
+    return _GeometryProvenance(
+        geometry_source="engine_nominal",
+        schematic=False,
+        view_placeholder=False,
+        geometry_basis=basis,
+        geometry_status=status,
+        geometry_kind=kind,
+    )
 
 
 def _declared_configurations(document: dict[str, Any]) -> list[str]:
@@ -514,15 +675,116 @@ def _declared_configurations(document: dict[str, Any]) -> list[str]:
     ]
 
 
-def _layout_document_for_configuration(document: dict[str, Any], selected_cfg: str | None) -> dict[str, Any]:
-    """Return a single-configuration Project payload for ``json_api.project_layout``."""
+def _select_project_configuration(
+    document: dict[str, Any],
+    requested_cfg: str | None,
+    *,
+    project_path: Path,
+) -> tuple[str | None, list[str]]:
+    """Resolve ``(selected_cfg, declared_cfgs)`` from a Project document; never silently substitute."""
     declared = _declared_configurations(document)
-    if not declared:
-        return document
-    cfg_id = selected_cfg if selected_cfg in declared else declared[0]
+    if declared:
+        selected = requested_cfg if requested_cfg is not None else declared[0]
+        if selected not in declared:
+            raise SnapshotError(
+                "CONFIGURATION_NOT_FOUND",
+                f"unknown configuration {selected!r}; available: {', '.join(declared)}",
+                configuration_id=selected,
+                available_configurations=declared,
+            )
+        return selected, declared
+    if requested_cfg is not None:
+        raise SnapshotError(
+            "CONFIGURATION_NOT_FOUND",
+            f"project declares no configurations: {project_path.as_posix()}",
+            configuration_id=requested_cfg,
+            available_configurations=[],
+        )
+    return None, []
+
+
+def _apply_configuration_dict(document: dict[str, Any], selected_cfg: str) -> dict[str, Any]:
+    """Dict-level fallback mirroring ``ProjectDocumentV2.configured(selected_cfg)`` for invalid Projects."""
+    cfg_entry = next(
+        (
+            c
+            for c in (document.get("configurations") or [])
+            if isinstance(c, dict) and c.get("configuration_id") == selected_cfg
+        ),
+        None,
+    )
+    if cfg_entry is None:
+        declared = _declared_configurations(document)
+        raise SnapshotError(
+            "CONFIGURATION_NOT_FOUND",
+            f"unknown configuration {selected_cfg!r}; available: {', '.join(declared)}",
+            configuration_id=selected_cfg,
+            available_configurations=declared,
+        )
+    payload: dict[str, Any] = json.loads(json.dumps(document))
+    payload.pop("configurations", None)
+    poses = {
+        o["instance_id"]: o["nominal_pose"]
+        for o in (cfg_entry.get("component_poses") or [])
+        if isinstance(o, dict) and o.get("instance_id") and isinstance(o.get("nominal_pose"), dict)
+    }
+    models = {
+        o["instance_id"]: o["source_model"]
+        for o in (cfg_entry.get("source_models") or [])
+        if isinstance(o, dict) and o.get("instance_id") and isinstance(o.get("source_model"), dict)
+    }
+    for comp in payload.get("components") or []:
+        if not isinstance(comp, dict):
+            continue
+        inst_id = comp.get("instance_id")
+        if inst_id in poses:
+            comp["nominal_pose"] = poses[inst_id]
+        if inst_id in models:
+            comp["source_model"] = models[inst_id]
+    obs_poses = {
+        o["observation_id"]: o["pose"]
+        for o in (cfg_entry.get("observation_poses") or [])
+        if isinstance(o, dict) and o.get("observation_id") and isinstance(o.get("pose"), dict)
+    }
+    for obs in payload.get("observations") or []:
+        if isinstance(obs, dict) and obs.get("observation_id") in obs_poses:
+            obs["pose"] = obs_poses[obs["observation_id"]]
+    targets: list[dict[str, Any]] = []
+    for target in payload.get("targets") or []:
+        if not isinstance(target, dict):
+            continue
+        applies = target.pop("configuration_ids", None)
+        if applies is None or selected_cfg in applies:
+            targets.append(target)
+    payload["targets"] = targets
+    if isinstance(cfg_entry.get("compute_budget"), dict):
+        payload["compute_budget"] = {**(payload.get("compute_budget") or {}), **cfg_entry["compute_budget"]}
+    return payload
+
+
+def _apply_configuration(document: dict[str, Any], selected_cfg: str) -> dict[str, Any]:
+    """Apply ``selected_cfg`` via ``ProjectDocumentV2.configured`` (or dict fallback when Project is invalid)."""
     from os_optics.project_document import parse_project_document
 
-    return parse_project_document(document).configured(cfg_id).payload()
+    declared = _declared_configurations(document)
+    if selected_cfg not in declared:
+        raise SnapshotError(
+            "CONFIGURATION_NOT_FOUND",
+            f"unknown configuration {selected_cfg!r}; available: {', '.join(declared)}",
+            configuration_id=selected_cfg,
+            available_configurations=declared,
+        )
+    try:
+        return parse_project_document(document).configured(selected_cfg).payload()
+    except KeyError:
+        raise SnapshotError(
+            "CONFIGURATION_NOT_FOUND",
+            f"unknown configuration {selected_cfg!r}; available: {', '.join(declared)}",
+            configuration_id=selected_cfg,
+            available_configurations=declared,
+        ) from None
+    except Exception:  # noqa: BLE001 - fallback so invalid-Project previews still apply selected configuration
+        return _apply_configuration_dict(document, selected_cfg)
 
 
 def _preview_scene_content_hash(project_hash: str | None, title: str, parts: list[Any]) -> str:
@@ -549,9 +811,8 @@ def _preview_scene_content_hash(project_hash: str | None, title: str, parts: lis
 
 
 def _build_layout_parts_from_engine(
-    document: dict[str, Any],
+    applied_document: dict[str, Any],
     *,
-    selected_cfg: str | None,
     palette: dict[str, Any],
 ) -> list[Any] | None:
     """Build exact nominal/catalog ``ViewPart`` meshes via ``os_optics.local.json_api.project_layout`` (zero tracing)."""
@@ -560,8 +821,7 @@ def _build_layout_parts_from_engine(
     from os_optics.viewer.model import ViewPart
 
     try:
-        layout_doc = _layout_document_for_configuration(document, selected_cfg)
-        reply = json_api.project_layout(layout_doc)
+        reply = json_api.project_layout(applied_document)
     except Exception:  # noqa: BLE001 - fall back to schematic/design_geometry builder when layout cannot lower
         return None
     if not reply.get("ok"):
@@ -595,7 +855,7 @@ def _build_layout_parts_from_engine(
         if name.startswith("element:") and extras.get("element_id") in elements_by_id:
             elem = elements_by_id[extras["element_id"]]
             geom = elem.get("geometry") or {}
-            geom_source, is_schematic = _geometry_provenance_from_engine(geom)
+            prov = _geometry_provenance_from_engine(geom)
             part_class = str(extras.get("part_class") or ROLE_TO_PART_CLASS.get(str(elem.get("optical_role") or "").lower(), "OTHER_OPTICAL"))
             if part_class == "OTHER_OPTICAL":
                 mk = geom.get("model_kind")
@@ -614,8 +874,7 @@ def _build_layout_parts_from_engine(
                 "optical_role": elem.get("optical_role"),
                 "position_mm": [round(float(pos_raw[0]), 6), round(float(pos_raw[1]), 6), round(float(pos_raw[2]), 6)],
                 "geometry_preview_only": True,
-                "geometry_source": geom_source,
-                "schematic": is_schematic,
+                **prov.as_facts(),
             }
             if elem.get("optical_model_id") is not None:
                 facts["optical_model_id"] = elem["optical_model_id"]
@@ -659,6 +918,7 @@ def _build_layout_parts_from_engine(
                 "geometry_preview_only": True,
                 "geometry_source": "engine_nominal",
                 "schematic": False,
+                "view_placeholder": False,
             }
             meshes = tuple(_glb_node_meshes(gltf, binary, node))
             if not meshes:
@@ -678,15 +938,14 @@ def _build_layout_parts_from_engine(
 
 
 def _build_project_preview_scene(
-    document: dict[str, Any],
+    applied_document: dict[str, Any],
     *,
     project_hash: str | None,
     title: str,
     note_code: str,
     note_text: str,
-    selected_cfg: str | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    """Build a geometry-only ``ViewerScene`` directly from a Project document (zero ray tracing).
+    """Build a geometry-only ``ViewerScene`` from a configuration-applied Project document (zero ray tracing).
 
     Prefers the engine's nominal/catalog layout via ``os_optics.local.json_api.project_layout``.
     When a Project cannot be lowered (e.g. invalid Project or unavailable catalog), falls back
@@ -698,15 +957,15 @@ def _build_project_preview_scene(
     from os_optics.viewer.palette import class_table
 
     palette = class_table(OPTICAL_VIEW)
-    parts = _build_layout_parts_from_engine(document, selected_cfg=selected_cfg, palette=palette)
+    parts = _build_layout_parts_from_engine(applied_document, palette=palette)
 
     if parts is None:
         parts = []
-        models = {m.get("model_id"): m for m in (document.get("optical_models") or []) if isinstance(m, dict)}
-        target_obs_ids = {t.get("observation_id") for t in (document.get("targets") or []) if isinstance(t, dict)}
+        models = {m.get("model_id"): m for m in (applied_document.get("optical_models") or []) if isinstance(m, dict)}
+        target_obs_ids = {t.get("observation_id") for t in (applied_document.get("targets") or []) if isinstance(t, dict)}
         component_poses: dict[str, tuple[tuple[float, float, float], tuple[float, float, float, float]]] = {}
 
-        for comp in document.get("components") or []:
+        for comp in applied_document.get("components") or []:
             if not isinstance(comp, dict) or not comp.get("instance_id"):
                 continue
             inst_id = str(comp["instance_id"])
@@ -739,7 +998,7 @@ def _build_project_preview_scene(
                 and geom_z1 is not None
             ):
                 mesh = _box_mesh(0.5 * box_wx, 0.5 * box_hy, geom_z0, geom_z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
-                geom_source, is_schematic = "project_design_geometry", False
+                prov = _GeometryProvenance("project_design_geometry", False, False, "PROJECT_DESIGN_GEOMETRY", "NOMINAL", "BOX")
                 extra_dims["size_mm"] = [round(box_wx, 6), round(box_hy, 6)]
                 extra_dims["thickness_mm"] = round(abs(geom_z1 - geom_z0), 6)
             elif (
@@ -749,12 +1008,12 @@ def _build_project_preview_scene(
                 and geom_z1 is not None
             ):
                 mesh = _cylinder_mesh(0.5 * cyl_diam, geom_z0, geom_z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
-                geom_source, is_schematic = "project_design_geometry", False
+                prov = _GeometryProvenance("project_design_geometry", False, False, "PROJECT_DESIGN_GEOMETRY", "NOMINAL", "CYLINDER")
                 extra_dims["diameter_mm"] = round(cyl_diam, 6)
                 extra_dims["thickness_mm"] = round(abs(geom_z1 - geom_z0), 6)
             elif role == "source":
                 mesh = _cylinder_mesh(5.0, -8.0, 0.0, pos, quat, _rgb3(style.rgb), 0.92)
-                geom_source, is_schematic = "schematic", True
+                prov = _GeometryProvenance("view_placeholder", False, True, "VIEW_PLACEHOLDER", "PLACEHOLDER", "SOURCE_EMITTER")
             else:
                 radius = _float_or(
                     model_spec.get("edge_radius_mm")
@@ -763,7 +1022,7 @@ def _build_project_preview_scene(
                     12.7,
                 )
                 mesh = _cylinder_mesh(radius, -1.5, 1.5, pos, quat, _rgb3(style.rgb), float(style.alpha))
-                geom_source, is_schematic = "schematic", True
+                prov = _GeometryProvenance("schematic", True, False, "FALLBACK_SCHEMATIC", "PLACEHOLDER", "ELEMENT_MARKER")
 
             product = comp.get("product") or {}
             sku = product.get("optical_sku") if isinstance(product, dict) else None
@@ -777,15 +1036,14 @@ def _build_project_preview_scene(
                 "optical_role": role,
                 "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
                 "geometry_preview_only": True,
-                "geometry_source": geom_source,
-                "schematic": is_schematic,
+                **prov.as_facts(),
                 **extra_dims,
             }
             if comp.get("optical_model_id"):
                 facts["optical_model_id"] = comp["optical_model_id"]
             parts.append(ViewPart(part_id=inst_id, part_class=part_class, label=str(label), sku=sku, meshes=(mesh,), facts=facts))
 
-        for obs in document.get("observations") or []:
+        for obs in applied_document.get("observations") or []:
             if not isinstance(obs, dict) or not obs.get("observation_id"):
                 continue
             obs_id = str(obs["observation_id"])
@@ -819,7 +1077,11 @@ def _build_project_preview_scene(
                 radius = _float_or(aperture.get("radius_mm"), 12.5)
                 mesh = _cylinder_mesh(radius, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
 
-            target_ids = [t.get("target_id") for t in (document.get("targets") or []) if isinstance(t, dict) and t.get("observation_id") == obs_id]
+            target_ids = [
+                t.get("target_id")
+                for t in (applied_document.get("targets") or [])
+                if isinstance(t, dict) and t.get("observation_id") == obs_id
+            ]
             facts = {
                 "plane_kind": "TARGET" if is_target else "OBSERVATION",
                 "absorbing": bool(obs.get("absorbing", False)),
@@ -829,6 +1091,7 @@ def _build_project_preview_scene(
                 "geometry_preview_only": True,
                 "geometry_source": "project_design_geometry" if has_dims else "schematic",
                 "schematic": not has_dims,
+                "view_placeholder": False,
             }
             parts.append(ViewPart(
                 part_id=obs_id,
@@ -882,16 +1145,16 @@ def _count_drawable_rays(viewer_scene: Any) -> int:
     return sum(max(len(b.runs), len(b.extensions)) for b in getattr(viewer_scene, "beams", ()))
 
 
-def _computed_part_provenance(viewer_scene: Any) -> dict[str, tuple[str, bool]]:
-    """Map element/observation IDs in a computed ``ViewerScene`` to ``(geometry_source, schematic)``."""
-    out: dict[str, tuple[str, bool]] = {}
+def _computed_part_provenance(viewer_scene: Any) -> dict[str, _GeometryProvenance]:
+    """Map element/observation IDs in a computed ``ViewerScene`` to ``_GeometryProvenance``."""
+    out: dict[str, _GeometryProvenance] = {}
     source_scene = getattr(viewer_scene, "source_scene", None)
     if source_scene is None:
         return out
     for elem in getattr(source_scene, "elements", ()) or ():
         out[str(elem.element_id)] = _geometry_provenance_from_engine(elem.geometry)
     for plane in getattr(source_scene, "observation_planes", ()) or ():
-        out[str(plane.observation_id)] = ("engine_nominal", False)
+        out[str(plane.observation_id)] = _GeometryProvenance("engine_nominal", False, False)
     return out
 
 
@@ -982,22 +1245,23 @@ def _compact_scene_payload(
     crossing_row_count: int | None,
     crossing_table_available: bool,
     ray_data_mode: str | None,
-    part_provenance: dict[str, tuple[str, bool]] | None = None,
+    part_provenance: dict[str, _GeometryProvenance] | None = None,
 ) -> dict[str, Any]:
     parts = []
     for part_class, group in (summary.get("parts_by_class") or {}).items():
         for entry in group:
             part_entry = {"class": part_class, **entry}
-            if "geometry_source" not in part_entry or "schematic" not in part_entry:
-                prov = (part_provenance or {}).get(str(part_entry.get("id") or ""))
-                if prov is not None:
-                    part_entry.setdefault("geometry_source", prov[0])
-                    part_entry.setdefault("schematic", prov[1])
-                else:
-                    part_entry.setdefault("geometry_source", "engine_nominal")
-                    part_entry.setdefault("schematic", False)
+            prov = (part_provenance or {}).get(str(part_entry.get("id") or ""))
+            if prov is not None:
+                for key, val in prov.as_facts().items():
+                    part_entry.setdefault(key, val)
+            else:
+                part_entry.setdefault("geometry_source", "engine_nominal")
+                part_entry.setdefault("schematic", False)
+                part_entry.setdefault("view_placeholder", False)
             parts.append(part_entry)
     schematic_part_ids = [str(p["id"]) for p in parts if p.get("schematic")]
+    view_placeholder_part_ids = [str(p["id"]) for p in parts if p.get("view_placeholder")]
     geometry_sources = sorted({str(p["geometry_source"]) for p in parts if p.get("geometry_source")})
     beams = []
     for beam in summary.get("beams") or []:
@@ -1037,6 +1301,7 @@ def _compact_scene_payload(
         "ray_data_mode": ray_data_mode,
         "has_schematic_geometry": bool(schematic_part_ids),
         "schematic_part_ids": schematic_part_ids,
+        "view_placeholder_part_ids": view_placeholder_part_ids,
         "geometry_sources": geometry_sources,
         "classes": summary.get("classes") or [],
         "parts": parts,
@@ -1148,29 +1413,65 @@ def _uncomputed_quantities(document: dict[str, Any], status_label: str) -> list[
     return quantities
 
 
-def _project_check_summary(check_reply: dict[str, Any]) -> dict[str, Any]:
+def _project_check_summary(check_reply: dict[str, Any], *, selected_cfg: str | None = None) -> dict[str, Any]:
+    root_project_hash = check_reply.get("project_hash")
     if check_reply.get("ok"):
-        return {
+        project_hash = root_project_hash
+        engine_input_hash = check_reply.get("engine_input_hash")
+        if selected_cfg is not None:
+            for row in check_reply.get("configurations") or []:
+                if isinstance(row, dict) and row.get("configuration_id") == selected_cfg:
+                    project_hash = row.get("project_hash") or project_hash
+                    engine_input_hash = row.get("engine_input_hash") or engine_input_hash
+                    break
+        out: dict[str, Any] = {
             "checked": True,
             "ok": True,
-            "project_hash": check_reply.get("project_hash"),
-            "engine_input_hash": check_reply.get("engine_input_hash"),
+            "project_hash": project_hash,
+            "engine_input_hash": engine_input_hash,
             "problems": [],
             "advisories": list(check_reply.get("advisories") or []),
         }
+        if selected_cfg is not None and root_project_hash is not None:
+            out["root_project_hash"] = root_project_hash
+        return out
     error = check_reply.get("error") or {}
-    return {
+    out = {
         "checked": True,
         "ok": False,
-        "project_hash": check_reply.get("project_hash"),
+        "project_hash": root_project_hash,
         "engine_input_hash": None,
         "error_code": error.get("code"),
         "problems": list(error.get("problems") or []),
         "advisories": list(check_reply.get("advisories") or []),
     }
+    if selected_cfg is not None and root_project_hash is not None:
+        out["root_project_hash"] = root_project_hash
+    return out
 
 
-def _normalize_freshness(raw: dict[str, Any]) -> dict[str, Any]:
+def _root_freshness_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    run_info = raw.get("run") or {}
+    current_info = raw.get("current") or {}
+    return {
+        "state": raw.get("freshness", "UNDETERMINED"),
+        "reasons": list(raw.get("reasons") or []),
+        "not_run": list(raw.get("not_run") or []),
+        "run_project_hash": run_info.get("project_hash"),
+        "current_project_hash": current_info.get("project_hash"),
+        "configuration_ids": list(current_info.get("configuration_ids") or []),
+        "run_configuration_ids": list(run_info.get("configuration_ids") or []),
+    }
+
+
+def _normalize_freshness(
+    raw: dict[str, Any],
+    *,
+    selected_cfg: str | None = None,
+    root_raw: dict[str, Any] | None = None,
+    declared_cfgs: list[str] | None = None,
+    recorded_cfgs: list[str] | None = None,
+) -> dict[str, Any]:
     run_info = raw.get("run") or {}
     current_info = raw.get("current") or {}
     out: dict[str, Any] = {
@@ -1184,9 +1485,19 @@ def _normalize_freshness(raw: dict[str, Any]) -> dict[str, Any]:
         "current_engine_input_hash": current_info.get("engine_input_hash"),
         "integrity": raw.get("integrity"),
     }
-    if "configurations" in raw:
+    if selected_cfg is not None:
+        out["scope"] = "configuration"
+        out["configuration_id"] = selected_cfg
+    if declared_cfgs is not None:
+        out["configuration_ids"] = list(declared_cfgs)
+    elif "configurations" in raw:
         out["configuration_ids"] = list(current_info.get("configuration_ids") or [])
+    if recorded_cfgs is not None:
+        out["run_configuration_ids"] = list(recorded_cfgs)
+    elif "configurations" in raw:
         out["run_configuration_ids"] = list(run_info.get("configuration_ids") or [])
+    if root_raw is not None:
+        out["root_freshness"] = _root_freshness_summary(root_raw)
     return out
 
 
@@ -1209,6 +1520,7 @@ def _build_computed_run_snapshot(
     root_run_dir: Path | None = None,
     selected_cfg: str | None,
     available_cfgs: list[str],
+    recorded_cfgs: list[str] | None = None,
     revision: int,
     fingerprint: str,
     freshness_info: dict[str, Any],
@@ -1396,6 +1708,8 @@ def _build_computed_run_snapshot(
         },
         "fingerprint": fingerprint,
     }
+    if recorded_cfgs is not None:
+        source_doc["recorded_configurations"] = recorded_cfgs
     if root_run_dir is not None and selected_cfg is not None:
         source_doc["root_run_dir"] = root_run_dir.as_posix()
 
@@ -1428,7 +1742,7 @@ def _build_computed_run_snapshot(
 
 def _build_preview_or_stale_snapshot(
     spec: TargetSpec,
-    document: dict[str, Any],
+    applied_document: dict[str, Any],
     *,
     check_info: dict[str, Any],
     result_mode: str,
@@ -1439,7 +1753,11 @@ def _build_preview_or_stale_snapshot(
     effective_run: Path | None,
     selected_cfg: str | None,
     available_cfgs: list[str],
+    recorded_cfgs: list[str] | None = None,
     root_run_dir: Path | None = None,
+    root_project_hash: str | None = None,
+    power_ledger_reason: str | None = None,
+    extra_notices: list[dict[str, str]] | None = None,
 ) -> BuiltSnapshot:
     assert result_mode in ("geometry_preview", "stale_run")
     status_label = "STALE_RUN" if result_mode == "stale_run" else "NOT_COMPUTED"
@@ -1463,12 +1781,11 @@ def _build_preview_or_stale_snapshot(
 
     snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
     _scene, scene_doc, scene_sum = _build_project_preview_scene(
-        document,
+        applied_document,
         project_hash=project_hash,
         title=title,
         note_code=note_code,
         note_text=note_text,
-        selected_cfg=selected_cfg,
     )
     scene_payload = _compact_scene_payload(
         scene_sum,
@@ -1481,8 +1798,8 @@ def _build_preview_or_stale_snapshot(
         crossing_table_available=False,
         ray_data_mode=None,
     )
-    targets, target_summary = _uncomputed_targets(document, status_label)
-    quantities = _uncomputed_quantities(document, status_label)
+    targets, target_summary = _uncomputed_targets(applied_document, status_label)
+    quantities = _uncomputed_quantities(applied_document, status_label)
 
     notices: list[dict[str, str]] = [
         {
@@ -1491,6 +1808,8 @@ def _build_preview_or_stale_snapshot(
             "message": note_text,
         }
     ]
+    if extra_notices:
+        notices.extend(extra_notices)
     if scene_payload["has_schematic_geometry"]:
         schem_list = ", ".join(scene_payload["schematic_part_ids"])
         notices.append({
@@ -1521,7 +1840,7 @@ def _build_preview_or_stale_snapshot(
             "model_kind": (m.get("model") or {}).get("model_kind"),
             "fidelity": (m.get("model") or {}).get("fidelity"),
         }
-        for m in (document.get("optical_models") or [])
+        for m in (applied_document.get("optical_models") or [])
         if isinstance(m, dict)
     ]
 
@@ -1540,9 +1859,27 @@ def _build_preview_or_stale_snapshot(
         },
         "fingerprint": fingerprint,
     }
+    if recorded_cfgs is not None:
+        source_doc["recorded_configurations"] = recorded_cfgs
     if root_run_dir is not None and selected_cfg is not None:
         source_doc["root_run_dir"] = root_run_dir.as_posix()
 
+    identity_doc: dict[str, Any] = {
+        "engine_version": engine_version(),
+        "engine_build_id": None,
+        "project_hash": project_hash,
+        "engine_input_hash": check_info.get("engine_input_hash"),
+        "result_hash": None,
+        "trace_hash": None,
+        "scene_content_hash": scene_payload["scene_content_hash"],
+        "catalog_version": None,
+        "kit_version": KIT_VERSION,
+    }
+    effective_root_hash = root_project_hash or check_info.get("root_project_hash")
+    if effective_root_hash is not None and selected_cfg is not None:
+        identity_doc["root_project_hash"] = effective_root_hash
+
+    ledger_reason = power_ledger_reason or ("STALE_RUN" if result_mode == "stale_run" else "NO_RUN")
     snapshot = json_safe({
         "schema": SNAPSHOT_SCHEMA,
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -1552,21 +1889,11 @@ def _build_preview_or_stale_snapshot(
         "result_mode": result_mode,
         "is_computed_result": False,
         "source": source_doc,
-        "identity": {
-            "engine_version": engine_version(),
-            "engine_build_id": None,
-            "project_hash": project_hash,
-            "engine_input_hash": check_info.get("engine_input_hash"),
-            "result_hash": None,
-            "trace_hash": None,
-            "scene_content_hash": scene_payload["scene_content_hash"],
-            "catalog_version": None,
-            "kit_version": KIT_VERSION,
-        },
+        "identity": identity_doc,
         "freshness": freshness_info,
         "integrity": freshness_info.get("integrity") or {"checked": False, "consistent": None, "problems": []},
         "execution": None,
-        "power_ledger": _unavailable_power_ledger("STALE_RUN" if result_mode == "stale_run" else "NO_RUN"),
+        "power_ledger": _unavailable_power_ledger(ledger_reason),
         "branches": [],
         "targets": targets,
         "target_summary": target_summary,
@@ -1595,25 +1922,11 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         from os_optics.local import json_api
 
         document = _read_project_json(spec.project_path)
-        declared_cfgs = _declared_configurations(document)
-        selected_cfg: str | None = None
-        if declared_cfgs:
-            selected_cfg = spec.configuration_id if spec.configuration_id is not None else declared_cfgs[0]
-            if selected_cfg not in declared_cfgs:
-                raise SnapshotError(
-                    "CONFIGURATION_NOT_FOUND",
-                    f"unknown configuration {selected_cfg!r}; available: {', '.join(declared_cfgs)}",
-                    configuration_id=selected_cfg,
-                    available_configurations=declared_cfgs,
-                )
-        elif spec.configuration_id is not None:
-            raise SnapshotError(
-                "CONFIGURATION_NOT_FOUND",
-                f"project declares no configurations: {spec.project_path.as_posix()}",
-                configuration_id=spec.configuration_id,
-            )
-
-        check_info = _project_check_summary(json_api.check_project(document))
+        selected_cfg, declared_cfgs = _select_project_configuration(
+            document, spec.configuration_id, project_path=spec.project_path
+        )
+        applied_doc = _apply_configuration(document, selected_cfg) if selected_cfg is not None else document
+        check_info = _project_check_summary(json_api.check_project(document), selected_cfg=selected_cfg)
         freshness_info = {
             "checked": False,
             "state": "NO_RUN",
@@ -1625,9 +1938,13 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
             "current_engine_input_hash": check_info.get("engine_input_hash"),
             "integrity": {"checked": False, "consistent": None, "problems": []},
         }
+        if selected_cfg is not None:
+            freshness_info["scope"] = "configuration"
+            freshness_info["configuration_id"] = selected_cfg
+            freshness_info["configuration_ids"] = list(declared_cfgs)
         built = _build_preview_or_stale_snapshot(
             spec,
-            document,
+            applied_doc,
             check_info=check_info,
             result_mode="geometry_preview",
             revision=revision,
@@ -1637,12 +1954,16 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
             effective_run=None,
             selected_cfg=selected_cfg,
             available_cfgs=declared_cfgs,
+            root_project_hash=check_info.get("root_project_hash"),
         )
     elif spec.run_dir is not None and spec.project_path is None:
-        # Standalone saved run directory.
-        effective_run, selected_cfg, available_cfgs = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
+        # Standalone saved run directory (manifest-only configuration discovery).
+        run_info = _inspect_run_manifest(spec.run_dir)
+        selected_cfg = None
+        available_cfgs: list[str] = []
+        recorded_cfgs: list[str] | None = None
         root_project_hash: str | None = None
-        if selected_cfg is not None:
+        if run_info.is_multi_cfg:
             from os_optics.local.configurations import run_reader, verify_configurations_run
 
             reader = run_reader(spec.run_dir)
@@ -1660,11 +1981,40 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
                     problems=root_problems,
                     run_dir=spec.run_dir.as_posix(),
                 )
-            try:
-                root_manifest = json.loads(reader("manifest.json").decode("utf-8"))
-                root_project_hash = ((root_manifest.get("project") or {}).get("project_hash") or {}).get("digest")
-            except Exception:  # noqa: BLE001
-                root_project_hash = None
+            available_cfgs = list(run_info.recorded_ids)
+            recorded_cfgs = list(run_info.recorded_ids)
+            if not available_cfgs:
+                raise SnapshotTransientError(
+                    "RUN_INCOMPLETE",
+                    f"multi-configuration manifest lists no configurations: {spec.run_dir.as_posix()}",
+                    run_dir=spec.run_dir.as_posix(),
+                )
+            selected_cfg = spec.configuration_id if spec.configuration_id is not None else available_cfgs[0]
+            if selected_cfg not in available_cfgs:
+                raise SnapshotError(
+                    "CONFIGURATION_NOT_FOUND",
+                    f"unknown configuration {selected_cfg!r}; available: {', '.join(available_cfgs)}",
+                    configuration_id=selected_cfg,
+                    available_configurations=available_cfgs,
+                )
+            if selected_cfg not in run_info.run_dirs_by_cfg:
+                raise SnapshotError(
+                    "CONFIGURATION_RUN_FAILED",
+                    f"configuration {selected_cfg!r} has no saved run artifacts (execution failed)",
+                    configuration_id=selected_cfg,
+                    available_configurations=available_cfgs,
+                )
+            effective_run = run_info.run_dirs_by_cfg[selected_cfg]
+            root_project_hash = run_info.root_project_hash
+        else:
+            if spec.configuration_id is not None:
+                raise SnapshotError(
+                    "CONFIGURATION_NOT_FOUND",
+                    f"run directory is not a multi-configuration run: {spec.run_dir.as_posix()}",
+                    configuration_id=spec.configuration_id,
+                    available_configurations=[],
+                )
+            effective_run = spec.run_dir
 
         freshness_info = {
             "checked": False,
@@ -1680,9 +2030,10 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         built = _build_computed_run_snapshot(
             spec,
             effective_run,
-            root_run_dir=spec.run_dir if selected_cfg is not None else None,
+            root_run_dir=spec.run_dir if run_info.is_multi_cfg else None,
             selected_cfg=selected_cfg,
             available_cfgs=available_cfgs,
+            recorded_cfgs=recorded_cfgs,
             revision=revision,
             fingerprint=fp_before,
             freshness_info=freshness_info,
@@ -1697,73 +2048,225 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         from os_optics.local.freshness import RunNotReadable, run_freshness
 
         document = _read_project_json(spec.project_path)
-        check_info = _project_check_summary(json_api.check_project(document))
-        effective_run, selected_cfg, available_cfgs = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
-        is_multi_cfg_run = selected_cfg is not None or (spec.run_dir / "configurations").is_dir()
-        freshness_target = spec.run_dir if is_multi_cfg_run else effective_run
+        selected_cfg, declared_cfgs = _select_project_configuration(
+            document, spec.configuration_id, project_path=spec.project_path
+        )
+        run_info = _inspect_run_manifest(spec.run_dir)
+        check_info = _project_check_summary(json_api.check_project(document), selected_cfg=selected_cfg)
+
         try:
-            raw_freshness = run_freshness(document, freshness_target)
+            raw_freshness = run_freshness(document, spec.run_dir)
         except RunNotReadable as exc:
-            raise SnapshotTransientError("RUN_UNREADABLE", str(exc), run_dir=freshness_target.as_posix()) from None
+            raise SnapshotTransientError("RUN_UNREADABLE", str(exc), run_dir=spec.run_dir.as_posix()) from None
         except Exception as exc:  # noqa: BLE001
             raise SnapshotTransientError("FRESHNESS_UNREADABLE", f"could not evaluate freshness: {exc}") from None
 
         # On-disk integrity failure must NEVER publish stale/corrupted data or overwrite last_valid_snapshot.
-        _raise_if_integrity_failed(raw_freshness.get("integrity"), run_dir=freshness_target)
-        selected_cfg_row: dict[str, Any] | None = None
-        if is_multi_cfg_run and selected_cfg is not None:
+        _raise_if_integrity_failed(raw_freshness.get("integrity"), run_dir=spec.run_dir)
+
+        if selected_cfg is not None:
+            # Multi-configuration Project: evaluate freshness per selected configuration.
+            applied_doc = _apply_configuration(document, selected_cfg)
+            recorded_list = list(run_info.recorded_ids)
+            root_hash = (raw_freshness.get("current") or {}).get("project_hash") or check_info.get("root_project_hash")
+            selected_cfg_row: dict[str, Any] | None = None
             for row in raw_freshness.get("configurations") or []:
                 if isinstance(row, dict) and row.get("configuration_id") == selected_cfg:
                     selected_cfg_row = row
                     break
+            cfg_run_dir = run_info.run_dirs_by_cfg.get(selected_cfg)
             if selected_cfg_row is not None:
-                _raise_if_integrity_failed(selected_cfg_row.get("integrity"), run_dir=effective_run)
+                _raise_if_integrity_failed(selected_cfg_row.get("integrity"), run_dir=cfg_run_dir or spec.run_dir)
 
-        freshness_info = _normalize_freshness(raw_freshness)
-        if freshness_info["state"] == "CURRENT":
-            expected_hash = (
-                (selected_cfg_row.get("current") or {}).get("project_hash")
-                if selected_cfg_row is not None
-                else freshness_info.get("current_project_hash")
-            )
-            built = _build_computed_run_snapshot(
-                spec,
-                effective_run,
-                root_run_dir=spec.run_dir if is_multi_cfg_run else None,
-                selected_cfg=selected_cfg,
-                available_cfgs=available_cfgs,
-                revision=revision,
-                fingerprint=fp_before,
-                freshness_info=freshness_info,
-                project_check=check_info,
-                expected_project_hash=expected_hash,
-                root_project_hash=freshness_info.get("current_project_hash") if is_multi_cfg_run else None,
-            )
+            if selected_cfg_row is not None and cfg_run_dir is not None and selected_cfg_row.get("freshness") == "CURRENT":
+                # Selected configuration is CURRENT even if another configuration changed or was not run!
+                freshness_info = _normalize_freshness(
+                    selected_cfg_row,
+                    selected_cfg=selected_cfg,
+                    root_raw=raw_freshness,
+                    declared_cfgs=declared_cfgs,
+                    recorded_cfgs=recorded_list,
+                )
+                expected_hash = (selected_cfg_row.get("current") or {}).get("project_hash")
+                built = _build_computed_run_snapshot(
+                    spec,
+                    cfg_run_dir,
+                    root_run_dir=spec.run_dir,
+                    selected_cfg=selected_cfg,
+                    available_cfgs=declared_cfgs,
+                    recorded_cfgs=recorded_list,
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    project_check=check_info,
+                    expected_project_hash=expected_hash,
+                    root_project_hash=root_hash,
+                )
+            elif selected_cfg_row is not None:
+                # Selected configuration was recorded in the run but is HISTORICAL / UNDETERMINED.
+                freshness_info = _normalize_freshness(
+                    selected_cfg_row,
+                    selected_cfg=selected_cfg,
+                    root_raw=raw_freshness,
+                    declared_cfgs=declared_cfgs,
+                    recorded_cfgs=recorded_list,
+                )
+                run_meta = selected_cfg_row.get("run") or {}
+                historical_run = {
+                    "run_dir": (cfg_run_dir or spec.run_dir).as_posix(),
+                    "root_run_dir": spec.run_dir.as_posix(),
+                    "configuration_id": selected_cfg,
+                    "project_hash": run_meta.get("project_hash"),
+                    "engine_input_hash": run_meta.get("engine_input_hash"),
+                    "engine_build_id": run_meta.get("engine_build_id"),
+                    "validation_status": run_meta.get("validation_status"),
+                    "freshness_state": freshness_info["state"],
+                    "freshness_reasons": freshness_info["reasons"],
+                }
+                built = _build_preview_or_stale_snapshot(
+                    spec,
+                    applied_doc,
+                    check_info=check_info,
+                    result_mode="stale_run",
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    historical_run=historical_run,
+                    effective_run=cfg_run_dir,
+                    root_run_dir=spec.run_dir,
+                    selected_cfg=selected_cfg,
+                    available_cfgs=declared_cfgs,
+                    recorded_cfgs=recorded_list,
+                    root_project_hash=root_hash,
+                )
+            elif run_info.is_multi_cfg:
+                # Subset run (or failed execution entry): selected_cfg exists in Project, absent from run artifacts.
+                recorded_desc = ", ".join(recorded_list) if recorded_list else "none"
+                freshness_info = {
+                    "checked": True,
+                    "state": "NO_RUN",
+                    "reasons": ["CONFIGURATION_NOT_IN_RUN"],
+                    "scope": "configuration",
+                    "configuration_id": selected_cfg,
+                    "configuration_ids": list(declared_cfgs),
+                    "run_configuration_ids": recorded_list,
+                    "engine_build_matches": raw_freshness.get("engine_build_matches"),
+                    "run_project_hash": None,
+                    "current_project_hash": check_info.get("project_hash"),
+                    "run_engine_input_hash": None,
+                    "current_engine_input_hash": check_info.get("engine_input_hash"),
+                    "integrity": raw_freshness.get("integrity"),
+                    "root_freshness": _root_freshness_summary(raw_freshness),
+                }
+                extra_notices = [
+                    {
+                        "level": "warning",
+                        "code": "CONFIGURATION_NOT_IN_RUN",
+                        "message": (
+                            f"Configuration {selected_cfg!r} is declared in the Project but was not recorded in "
+                            f"the attached run (recorded: {recorded_desc}). Showing nominal geometry for "
+                            f"{selected_cfg!r} only — not a computed optical result."
+                        ),
+                    }
+                ]
+                built = _build_preview_or_stale_snapshot(
+                    spec,
+                    applied_doc,
+                    check_info=check_info,
+                    result_mode="geometry_preview",
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    historical_run=None,
+                    effective_run=None,
+                    root_run_dir=spec.run_dir,
+                    selected_cfg=selected_cfg,
+                    available_cfgs=declared_cfgs,
+                    recorded_cfgs=recorded_list,
+                    root_project_hash=root_hash,
+                    power_ledger_reason="CONFIGURATION_NOT_IN_RUN",
+                    extra_notices=extra_notices,
+                )
+            else:
+                # Ordinary single-configuration run attached to a multi-configuration Project -> stale_run.
+                freshness_info = _normalize_freshness(
+                    raw_freshness,
+                    selected_cfg=selected_cfg,
+                    declared_cfgs=declared_cfgs,
+                    recorded_cfgs=[],
+                )
+                run_meta = raw_freshness.get("run") or {}
+                historical_run = {
+                    "run_dir": spec.run_dir.as_posix(),
+                    "project_hash": run_meta.get("project_hash"),
+                    "engine_input_hash": run_meta.get("engine_input_hash"),
+                    "engine_build_id": run_meta.get("engine_build_id"),
+                    "validation_status": run_meta.get("validation_status"),
+                    "freshness_state": freshness_info["state"],
+                    "freshness_reasons": freshness_info["reasons"],
+                }
+                built = _build_preview_or_stale_snapshot(
+                    spec,
+                    applied_doc,
+                    check_info=check_info,
+                    result_mode="stale_run",
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    historical_run=historical_run,
+                    effective_run=spec.run_dir,
+                    root_run_dir=None,
+                    selected_cfg=selected_cfg,
+                    available_cfgs=declared_cfgs,
+                    recorded_cfgs=[],
+                    root_project_hash=root_hash,
+                )
         else:
-            run_meta = raw_freshness.get("run") or {}
-            historical_run = {
-                "run_dir": freshness_target.as_posix(),
-                "project_hash": run_meta.get("project_hash"),
-                "engine_input_hash": run_meta.get("engine_input_hash"),
-                "engine_build_id": run_meta.get("engine_build_id"),
-                "validation_status": run_meta.get("validation_status"),
-                "freshness_state": freshness_info["state"],
-                "freshness_reasons": freshness_info["reasons"],
-            }
-            built = _build_preview_or_stale_snapshot(
-                spec,
-                document,
-                check_info=check_info,
-                result_mode="stale_run",
-                revision=revision,
-                fingerprint=fp_before,
-                freshness_info=freshness_info,
-                historical_run=historical_run,
-                effective_run=effective_run,
-                root_run_dir=spec.run_dir if is_multi_cfg_run else None,
-                selected_cfg=selected_cfg,
-                available_cfgs=available_cfgs,
-            )
+            # Single-configuration Project + run directory.
+            freshness_info = _normalize_freshness(raw_freshness)
+            if run_info.is_multi_cfg:
+                freshness_info["state"] = "HISTORICAL"
+                if "CONFIGURATIONS_CHANGED" not in freshness_info["reasons"]:
+                    freshness_info["reasons"].append("CONFIGURATIONS_CHANGED")
+            if not run_info.is_multi_cfg and freshness_info["state"] == "CURRENT":
+                built = _build_computed_run_snapshot(
+                    spec,
+                    spec.run_dir,
+                    root_run_dir=None,
+                    selected_cfg=None,
+                    available_cfgs=[],
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    project_check=check_info,
+                    expected_project_hash=freshness_info.get("current_project_hash"),
+                    root_project_hash=None,
+                )
+            else:
+                run_meta = raw_freshness.get("run") or {}
+                historical_run = {
+                    "run_dir": spec.run_dir.as_posix(),
+                    "project_hash": run_meta.get("project_hash"),
+                    "engine_input_hash": run_meta.get("engine_input_hash"),
+                    "engine_build_id": run_meta.get("engine_build_id"),
+                    "validation_status": run_meta.get("validation_status"),
+                    "freshness_state": freshness_info["state"],
+                    "freshness_reasons": freshness_info["reasons"],
+                }
+                built = _build_preview_or_stale_snapshot(
+                    spec,
+                    document,
+                    check_info=check_info,
+                    result_mode="stale_run",
+                    revision=revision,
+                    fingerprint=fp_before,
+                    freshness_info=freshness_info,
+                    historical_run=historical_run,
+                    effective_run=spec.run_dir,
+                    root_run_dir=None,
+                    selected_cfg=None,
+                    available_cfgs=[],
+                )
 
     fp_after = compute_fingerprint(spec)
     if fp_after != fp_before:

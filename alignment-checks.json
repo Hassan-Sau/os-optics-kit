@@ -106,7 +106,7 @@
     {
       "name": "catalog-tests",
       "description": "Catalog-dependent tests, run after the catalog is prepared; a missing catalog fails them",
-      "argv": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_optical_designs.py::CatalogVariantTests", "tests/test_workflow_examples.py::CatalogBeamExpanderDemoTests", "tests/test_workflow_postprocess.py::CandidateTests"],
+      "argv": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_optical_designs.py::CatalogVariantTests", "tests/test_workflow_examples.py::CatalogBeamExpanderDemoTests", "tests/test_workflow_postprocess.py::CandidateTests", "tests/test_viewer.py::ViewerCatalogGeometryTests"],
       "needs_catalog": true,
       "env": {"OS_OPTICS_KIT_REQUIRE_CATALOG": "1"},
       "timeout": 600
