@@ -14,7 +14,7 @@ import json
 import queue
 import threading
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 import webbrowser
 
 from .._engine import engine_version
@@ -155,6 +155,7 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if not head:
             self.wfile.write(body)
+        self.wfile.flush()
 
     def _send_json(
         self,
@@ -165,6 +166,43 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         extra_headers: tuple[tuple[str, str], ...] = (),
     ) -> None:
         self._send_bytes(status, _json_bytes(payload), "application/json; charset=utf-8", head=head, extra_headers=extra_headers)
+
+    def _send_superseded(
+        self,
+        *,
+        requested_snapshot_id: str | None,
+        requested_revision: int | None,
+        current_snapshot_id: str | None,
+        current_revision: int,
+        head: bool,
+    ) -> None:
+        self._send_json(
+            HTTPStatus.CONFLICT,
+            {
+                "error": {
+                    "code": "SNAPSHOT_SUPERSEDED",
+                    "message": "requested snapshot is no longer available in the viewer cache (superseded or unknown)",
+                    "requested_snapshot_id": requested_snapshot_id,
+                    "requested_revision": requested_revision,
+                    "current_snapshot_id": current_snapshot_id,
+                    "current_revision": current_revision,
+                }
+            },
+            head=head,
+        )
+
+    def _parse_snapshot_query(self, query: str) -> tuple[str | None, int | None, bool]:
+        """Parse optional ``snapshot_id`` and ``rev`` query parameters. Returns ``(snapshot_id, rev, ok)``."""
+        params = parse_qs(query, keep_blank_values=False)
+        req_snap_id = params.get("snapshot_id", [None])[0]
+        req_rev_raw = params.get("rev", [None])[0]
+        req_rev: int | None = None
+        if req_rev_raw is not None:
+            try:
+                req_rev = int(req_rev_raw)
+            except ValueError:
+                return req_snap_id, None, False
+        return req_snap_id, req_rev, True
 
     def _serve_sse(self) -> None:
         self.send_response(HTTPStatus.OK)
@@ -252,16 +290,46 @@ class _ViewerHandler(BaseHTTPRequestHandler):
 
         if path == "/api/snapshot":
             envelope = self.server.viewer_session.state.envelope(self.server.server_metadata())
-            snap_headers: tuple[tuple[str, str], ...] = (("X-Viewer-Revision", str(envelope["revision"])),)
-            self._send_json(HTTPStatus.OK, envelope, head=head, extra_headers=snap_headers)
+            active = envelope.get("snapshot") or envelope.get("last_valid_snapshot")
+            snap_headers: list[tuple[str, str]] = [("X-Viewer-Revision", str(envelope["revision"]))]
+            if isinstance(active, dict) and active.get("snapshot_id"):
+                snap_headers.append(("X-Viewer-Snapshot-Id", str(active["snapshot_id"])))
+            self._send_json(HTTPStatus.OK, envelope, head=head, extra_headers=tuple(snap_headers))
             return
 
         if path == "/api/scene-document":
-            doc, rev, snap_id = self.server.viewer_session.state.scene_document()
+            req_snap_id, req_rev, query_ok = self._parse_snapshot_query(parsed.query)
+            if not query_ok:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": {"code": "INVALID_REVISION", "message": "rev query parameter must be an integer"}},
+                    head=head,
+                )
+                return
+            state = self.server.viewer_session.state
+            if req_snap_id is not None or req_rev is not None:
+                built, cur_id, cur_rev = state.get_cached_snapshot(snapshot_id=req_snap_id, revision=req_rev)
+                if built is None or built.scene_document is None:
+                    self._send_superseded(
+                        requested_snapshot_id=req_snap_id,
+                        requested_revision=req_rev,
+                        current_snapshot_id=cur_id,
+                        current_revision=cur_rev,
+                        head=head,
+                    )
+                    return
+                doc_headers: tuple[tuple[str, str], ...] = (
+                    ("X-Viewer-Revision", str(built.snapshot["revision"])),
+                    ("X-Viewer-Snapshot-Id", str(built.snapshot["snapshot_id"])),
+                )
+                self._send_json(HTTPStatus.OK, built.scene_document, head=head, extra_headers=doc_headers)
+                return
+
+            doc, rev, snap_id = state.scene_document()
             if doc is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": {"code": "SCENE_UNAVAILABLE", "message": "no valid scene document available yet"}}, head=head)
                 return
-            doc_headers: tuple[tuple[str, str], ...] = (
+            doc_headers = (
                 ("X-Viewer-Revision", str(rev)),
                 ("X-Viewer-Snapshot-Id", snap_id or ""),
             )
@@ -289,17 +357,98 @@ class _ViewerHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/engine-view/"):
-            name = path[len("/engine-view/"):] or "index.html"
-            if name == "index.html":
-                self._send_bytes(HTTPStatus.OK, _engine_index_html(), "text/html; charset=utf-8", head=head)
+            rest = path[len("/engine-view/"):]
+            state = self.server.viewer_session.state
+            if "/" in rest:
+                raw_snap_id, asset = rest.split("/", 1)
+                req_snap_id = unquote(raw_snap_id)
+                asset = asset or "index.html"
+                if asset in ENGINE_ASSETS:
+                    self._send_bytes(HTTPStatus.OK, _engine_asset_bytes(asset), _media_type(asset), head=head)
+                    return
+                if asset in ("index.html", "view.json"):
+                    built, cur_id, cur_rev = state.get_cached_snapshot(snapshot_id=req_snap_id)
+                    if built is None or built.scene_document is None:
+                        self._send_superseded(
+                            requested_snapshot_id=req_snap_id,
+                            requested_revision=None,
+                            current_snapshot_id=cur_id,
+                            current_revision=cur_rev,
+                            head=head,
+                        )
+                        return
+                    pinned_headers: tuple[tuple[str, str], ...] = (
+                        ("X-Viewer-Revision", str(built.snapshot["revision"])),
+                        ("X-Viewer-Snapshot-Id", str(built.snapshot["snapshot_id"])),
+                    )
+                    if asset == "index.html":
+                        self._send_bytes(
+                            HTTPStatus.OK,
+                            _engine_index_html(),
+                            "text/html; charset=utf-8",
+                            head=head,
+                            extra_headers=pinned_headers,
+                        )
+                        return
+                    self._send_json(HTTPStatus.OK, built.scene_document, head=head, extra_headers=pinned_headers)
+                    return
+                self._send_json(
+                    HTTPStatus.NOT_FOUND,
+                    {"error": {"code": "NOT_FOUND", "message": f"unknown engine-view asset: {asset}"}},
+                    head=head,
+                )
                 return
+
+            name = rest or "index.html"
             if name in ENGINE_ASSETS:
                 self._send_bytes(HTTPStatus.OK, _engine_asset_bytes(name), _media_type(name), head=head)
                 return
-            if name == "view.json":
-                doc, rev, snap_id = self.server.viewer_session.state.scene_document()
+            if name in ("index.html", "view.json"):
+                req_snap_id, req_rev, query_ok = self._parse_snapshot_query(parsed.query)
+                if not query_ok:
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": {"code": "INVALID_REVISION", "message": "rev query parameter must be an integer"}},
+                        head=head,
+                    )
+                    return
+                if req_snap_id is not None or req_rev is not None:
+                    built, cur_id, cur_rev = state.get_cached_snapshot(snapshot_id=req_snap_id, revision=req_rev)
+                    if built is None or built.scene_document is None:
+                        self._send_superseded(
+                            requested_snapshot_id=req_snap_id,
+                            requested_revision=req_rev,
+                            current_snapshot_id=cur_id,
+                            current_revision=cur_rev,
+                            head=head,
+                        )
+                        return
+                    q_headers: tuple[tuple[str, str], ...] = (
+                        ("X-Viewer-Revision", str(built.snapshot["revision"])),
+                        ("X-Viewer-Snapshot-Id", str(built.snapshot["snapshot_id"])),
+                    )
+                    if name == "index.html":
+                        self._send_bytes(
+                            HTTPStatus.OK,
+                            _engine_index_html(),
+                            "text/html; charset=utf-8",
+                            head=head,
+                            extra_headers=q_headers,
+                        )
+                        return
+                    self._send_json(HTTPStatus.OK, built.scene_document, head=head, extra_headers=q_headers)
+                    return
+
+                if name == "index.html":
+                    self._send_bytes(HTTPStatus.OK, _engine_index_html(), "text/html; charset=utf-8", head=head)
+                    return
+                doc, rev, snap_id = state.scene_document()
                 if doc is None:
-                    self._send_json(HTTPStatus.NOT_FOUND, {"error": {"code": "SCENE_UNAVAILABLE", "message": "no valid scene document available yet"}}, head=head)
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND,
+                        {"error": {"code": "SCENE_UNAVAILABLE", "message": "no valid scene document available yet"}},
+                        head=head,
+                    )
                     return
                 view_headers: tuple[tuple[str, str], ...] = (
                     ("X-Viewer-Revision", str(rev)),
@@ -307,7 +456,25 @@ class _ViewerHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(HTTPStatus.OK, doc, head=head, extra_headers=view_headers)
                 return
-            self._send_json(HTTPStatus.NOT_FOUND, {"error": {"code": "NOT_FOUND", "message": f"unknown engine-view asset: {name}"}}, head=head)
+
+            # Bare /engine-view/<snapshot_id> without trailing slash: validate cache before redirecting.
+            req_snap_id = unquote(name)
+            built, cur_id, cur_rev = state.get_cached_snapshot(snapshot_id=req_snap_id)
+            if built is None or built.scene_document is None:
+                self._send_superseded(
+                    requested_snapshot_id=req_snap_id,
+                    requested_revision=None,
+                    current_snapshot_id=cur_id,
+                    current_revision=cur_rev,
+                    head=head,
+                )
+                return
+            self.send_response(HTTPStatus.TEMPORARY_REDIRECT)
+            self.send_header("Location", f"/engine-view/{name}/")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
+            self.end_headers()
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": {"code": "NOT_FOUND", "message": f"not found: {path}"}}, head=head)
@@ -319,6 +486,15 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         self._handle(head=True)
 
     def _refuse(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            length = 0
+        if 0 < length <= 65536:
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
         self._send_json(
             HTTPStatus.METHOD_NOT_ALLOWED,
             {"error": {"code": "METHOD_NOT_ALLOWED", "message": "local viewer is strictly read-only (GET/HEAD only)"}},

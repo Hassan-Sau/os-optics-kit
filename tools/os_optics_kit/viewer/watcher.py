@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ from .snapshot import (
 
 STATE_SCHEMA = "os-optics-kit.local_viewer.state"
 STATE_SCHEMA_VERSION = 1
+DEFAULT_SNAPSHOT_CACHE_SIZE = 6
 
 
 def _utc_now() -> str:
@@ -33,14 +35,18 @@ def _utc_now() -> str:
 class ViewerState:
     """Thread-safe container for the active snapshot, last valid snapshot, error state and SSE subscribers."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_cached_snapshots: int = DEFAULT_SNAPSHOT_CACHE_SIZE) -> None:
+        if max_cached_snapshots < 1:
+            raise ValueError("max_cached_snapshots must be at least 1")
         self._lock = threading.RLock()
+        self._max_cached_snapshots = int(max_cached_snapshots)
         self._status: str = "waiting"
         self._state_seq: int = 0
         self._revision: int = 0
         self._current_snapshot: dict[str, Any] | None = None
         self._last_valid_snapshot: dict[str, Any] | None = None
         self._last_valid_scene_document: dict[str, Any] | None = None
+        self._snapshot_cache: OrderedDict[str, BuiltSnapshot] = OrderedDict()
         self._error: dict[str, Any] | None = None
         self._error_key: tuple[str, str, str | None] | None = None
         self._updated_at: str = _utc_now()
@@ -53,12 +59,17 @@ class ViewerState:
 
     def publish_snapshot(self, built: BuiltSnapshot) -> dict[str, Any]:
         with self._lock:
+            snap_id = str(built.snapshot["snapshot_id"])
             self._revision = int(built.snapshot["revision"])
             self._state_seq += 1
             self._status = "ok"
             self._current_snapshot = built.snapshot
             self._last_valid_snapshot = built.snapshot
             self._last_valid_scene_document = built.scene_document
+            self._snapshot_cache[snap_id] = built
+            self._snapshot_cache.move_to_end(snap_id)
+            while len(self._snapshot_cache) > self._max_cached_snapshots:
+                self._snapshot_cache.popitem(last=False)
             self._error = None
             self._error_key = None
             self._updated_at = _utc_now()
@@ -152,6 +163,35 @@ class ViewerState:
             snap_id = snap["snapshot_id"] if snap is not None else None
             return self._last_valid_scene_document, self._revision, snap_id
 
+    def get_cached_snapshot(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        revision: int | None = None,
+    ) -> tuple[BuiltSnapshot | None, str | None, int]:
+        """Strictly look up a snapshot by ``snapshot_id`` and/or ``revision`` inside the bounded cache.
+
+        Returns ``(matched_built_snapshot, current_snapshot_id, current_revision)``.
+        Never substitutes a newer or different snapshot when an explicit key misses the cache.
+        """
+        with self._lock:
+            active = self._current_snapshot or self._last_valid_snapshot
+            current_snap_id = str(active["snapshot_id"]) if active is not None else None
+            current_rev = self._revision
+            if snapshot_id is not None:
+                found = self._snapshot_cache.get(snapshot_id)
+                if found is not None and revision is not None and int(found.snapshot["revision"]) != revision:
+                    found = None
+                return found, current_snap_id, current_rev
+            if revision is not None:
+                for built in reversed(self._snapshot_cache.values()):
+                    if int(built.snapshot["revision"]) == revision:
+                        return built, current_snap_id, current_rev
+                return None, current_snap_id, current_rev
+            if current_snap_id is not None:
+                return self._snapshot_cache.get(current_snap_id), current_snap_id, current_rev
+            return None, current_snap_id, current_rev
+
     def subscribe(self) -> queue.Queue[tuple[str, dict[str, Any]] | None]:
         sub: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue(maxsize=64)
         with self._lock:
@@ -191,6 +231,7 @@ class ViewerSession:
         *,
         poll_interval: float = 0.4,
         evaluate: bool = False,
+        max_cached_snapshots: int = DEFAULT_SNAPSHOT_CACHE_SIZE,
     ) -> None:
         if poll_interval <= 0:
             raise SnapshotError("USAGE", "--poll-interval must be a positive number of seconds")
@@ -201,7 +242,7 @@ class ViewerSession:
                 raise SnapshotError("USAGE", "--evaluate cannot be combined with --run")
 
         self.poll_interval = float(poll_interval)
-        self.state = ViewerState()
+        self.state = ViewerState(max_cached_snapshots=max_cached_snapshots)
         self._temp_eval_dir: Path | None = None
         self._spec = spec
         self._last_seen_fp: str | None = None

@@ -1,9 +1,15 @@
 (function () {
   "use strict";
 
-  var lastLoadedRevision = null;
-  var lastEnvelope = null;
+  var committedSnapshotId = null;
+  var stagingSnapshotId = null;
+  var committedEnvelope = null;
+  var latestSeenStateSeq = -1;
   var liveState = "connecting";
+  var activeFrameSlot = "a";
+  var transitionToken = 0;
+  var pendingPollTimer = null;
+  var retryFetchTimer = null;
 
   var CHANNEL_COLORS = {
     DETECTED: "#0d8a5f",
@@ -33,8 +39,10 @@
       modeStale: "Stale Run · Project Updated",
       modeNone: "Waiting for Valid Input",
       geomOnlyBadge: "Geometry Only",
+      schematicBadge: "Schematic Parts",
       sceneTitle: "Optical Path & Traced Rays",
-      updating3d: "Updating 3D scene…",
+      updating3d: "Syncing 3D scene…",
+      updatingRev: "Syncing Rev #{rev}…",
       execTitle: "Result Status",
       powerTitle: "Power Ledger",
       targetsTitle: "Target Assessments",
@@ -43,7 +51,9 @@
       detailsTitle: "Snapshot & Source Details",
       partsUnit: "parts",
       branchesUnit: "branches",
-      raysUnit: "rays",
+      drawableRaysUnit: "drawable rays",
+      crossingsUnit: "plane crossings",
+      summaryRaysTag: "summary ray data",
       noRaysPreview: "Geometry preview — no traced rays",
       kpiExecution: "Execution",
       kpiRequirements: "Requirements",
@@ -95,19 +105,25 @@
       tryEvaluateHint: "To run a one-shot local calculation without editing your Project file:",
       waitingTag: "Waiting",
       errorTag: "Error",
-      waitingHolding: "Holding last valid snapshot (Rev #{rev}) so geometry and numbers stay consistent. The page will recover automatically once valid data arrives.",
+      waitingHolding: "Input is incomplete or failed verification — holding last verified snapshot (Rev #{rev}) so geometry and numbers stay consistent. Updates automatically once valid files settle.",
+      waitingIntegrityHolding: "Run files failed manifest integrity check (incomplete or mixed write) — holding last verified snapshot (Rev #{rev}). Updates automatically once valid files settle.",
       exhaustedBudgets: "Compute budget reached: {list}. Bounded or indeterminate values reflect untraced power.",
       validationProblems: "Project validation reported {count} issue(s). Expand Snapshot & Source Details to inspect.",
       historicalTitle: "Withheld Historical Run Reference",
       detailInputPath: "Input path",
       detailProjectPath: "Project file",
       detailRunDir: "Run directory",
+      detailRootRunDir: "Root run directory",
       detailConfig: "Configuration",
       detailSnapshotId: "Snapshot ID",
       detailProjectHash: "Project hash",
+      detailRootProjectHash: "Root project hash",
       detailInputHash: "Engine input hash",
       detailResultHash: "Result hash",
       detailSceneHash: "Scene hash",
+      detailRayDataMode: "Ray data",
+      detailGeometrySources: "Geometry sources",
+      detailSchematicParts: "Schematic parts",
       detailVersions: "Versions",
       detailEvalMode: "Evaluation mode",
       evalModeNone: "Direct read-only input",
@@ -172,7 +188,9 @@
         RUN_INTEGRITY_FAILED: "Saved run files do not match their manifest hashes — treat this run as compromised or incomplete.",
         OUT_OF_MODEL_SCOPE: "One or more elements or targets fall outside the engine's declared optical model scope.",
         EXPLICIT_LOCAL_EVALUATION: "Evaluated once into a temporary directory via --evaluate. Your input Project file was not modified.",
-        EVALUATE_NOT_AUTORERUN: "The Project file changed after the initial --evaluate run. The viewer does not auto-rerun simulations on file edits."
+        EVALUATE_NOT_AUTORERUN: "The Project file changed after the initial --evaluate run. The viewer does not auto-rerun simulations on file edits.",
+        RAY_DATA_SUMMARY_ONLY: "Summary ray data (--ray-data summary): drawable branches and power ledger are shown; the optional per-ray plane-crossing table is absent.",
+        SCHEMATIC_GEOMETRY_USED: "Schematic placeholder geometry is used for parts without resolved catalog or nominal dimensions ({parts})."
       }
     },
     zh: {
@@ -188,8 +206,10 @@
       modeStale: "结果已过期 · 工程已更新",
       modeNone: "等待有效输入",
       geomOnlyBadge: "仅几何预览",
+      schematicBadge: "含示意几何",
       sceneTitle: "光路与追迹光线",
-      updating3d: "正在更新 3D 光路…",
+      updating3d: "正在同步 3D 光路…",
+      updatingRev: "正在同步 Rev #{rev}…",
       execTitle: "结果与执行状态",
       powerTitle: "功率账本",
       targetsTitle: "指标达成评估",
@@ -198,7 +218,9 @@
       detailsTitle: "快照绑定与来源详情",
       partsUnit: "个元件",
       branchesUnit: "条分支",
-      raysUnit: "条光线",
+      drawableRaysUnit: "条可绘光线",
+      crossingsUnit: "条平面交叉",
+      summaryRaysTag: "摘要光线模式",
       noRaysPreview: "仅几何布局预览，尚无追迹光线",
       kpiExecution: "执行状态",
       kpiRequirements: "指标要求",
@@ -250,19 +272,25 @@
       tryEvaluateHint: "如需在不修改原工程文件的前提下执行一次本地计算：",
       waitingTag: "等待写入",
       errorTag: "读取异常",
-      waitingHolding: "已保持上一份有效快照（Rev #{rev}），确保几何与数值严格对应同一快照；文件写入完整后页面将自动恢复更新。",
+      waitingHolding: "检测到文件未写齐或校验未通过——已保持上一份有效快照（Rev #{rev}），确保几何与数值严格一致；待文件写入完整后自动恢复更新。",
+      waitingIntegrityHolding: "运行目录未通过 manifest 完整性校验（可能处于半写入或新旧文件混杂状态）——已保持上一份有效快照（Rev #{rev}），待有效结果落盘后自动恢复。",
       exhaustedBudgets: "触发计算预算上限：{list}。部分物理量或目标判定为有界区间或待定状态。",
       validationProblems: "工程校验发现 {count} 项问题，可展开下方「快照绑定与来源详情」查看。",
       historicalTitle: "已隔离的历史运行记录（不代表当前工程）",
       detailInputPath: "输入路径",
       detailProjectPath: "工程文件",
       detailRunDir: "运行目录",
+      detailRootRunDir: "根运行目录",
       detailConfig: "构型",
       detailSnapshotId: "快照 ID",
       detailProjectHash: "工程哈希",
+      detailRootProjectHash: "根工程哈希",
       detailInputHash: "引擎输入哈希",
       detailResultHash: "结果哈希",
       detailSceneHash: "场景哈希",
+      detailRayDataMode: "光线数据模式",
+      detailGeometrySources: "几何来源",
+      detailSchematicParts: "示意占位元件",
       detailVersions: "版本信息",
       detailEvalMode: "计算模式",
       evalModeNone: "直接只读本地输入",
@@ -327,7 +355,9 @@
         RUN_INTEGRITY_FAILED: "运行目录中的文件与 manifest 校验哈希不一致，结果可能不完整或被改动。",
         OUT_OF_MODEL_SCOPE: "部分元件或目标超出了当前引擎声明的光学模型适用范围。",
         EXPLICIT_LOCAL_EVALUATION: "已通过显式 --evaluate 在临时目录完成一次本地计算，原始工程文件未被修改。",
-        EVALUATE_NOT_AUTORERUN: "工程文件在初始 --evaluate 后已修改；为避免频繁重算，查看器不会在文件保存时自动重新运行仿真。"
+        EVALUATE_NOT_AUTORERUN: "工程文件在初始 --evaluate 后已修改；为避免频繁重算，查看器不会在文件保存时自动重新运行仿真。",
+        RAY_DATA_SUMMARY_ONLY: "当前运行保存为摘要光线模式（--ray-data summary）：3D 光线分支与功率账本完整可用，可选的逐光线平面交叉明细表未记录。",
+        SCHEMATIC_GEOMETRY_USED: "部分未计算元件缺少目录或标称尺寸（{parts}），已按示意占位几何绘制并明确标注。"
       }
     }
   };
@@ -368,6 +398,14 @@
 
   function el(id) {
     return document.getElementById(id);
+  }
+
+  function getActiveFrame() {
+    return el(activeFrameSlot === "a" ? "engine-frame-a" : "engine-frame-b");
+  }
+
+  function getStagingFrame() {
+    return el(activeFrameSlot === "a" ? "engine-frame-b" : "engine-frame-a");
   }
 
   function clear(node) {
@@ -533,39 +571,30 @@
     return String(branchKind).replace(/_/g, " ");
   }
 
-  function syncEngineIframeLang(forceReload) {
+  function syncIframeLang(frame, clickButton) {
     var targetLang = lang === "zh" ? "zh-CN" : "en";
     try {
       window.localStorage.setItem("opensci-viewer-lang", targetLang);
     } catch (_e) {
       // ignore storage restrictions
     }
-    if (!forceReload) {
-      return;
-    }
-    var frame = el("engine-frame");
-    if (!frame || !frame.src) {
+    if (!clickButton || !frame) {
       return;
     }
     try {
       var doc = frame.contentDocument;
-      if (doc) {
-        var btn = doc.querySelector("button[data-action='lang'], #btn-lang, button");
-        var allBtns = doc.querySelectorAll("button");
-        for (var i = 0; i < allBtns.length; i++) {
-          var txt = (allBtns[i].textContent || "").trim();
-          if ((lang === "en" && txt === "English") || (lang === "zh" && txt === "中文")) {
-            allBtns[i].click();
-            return;
-          }
-        }
-        if (btn && ((lang === "en" && btn.textContent === "English") || (lang === "zh" && btn.textContent === "中文"))) {
-          btn.click();
-          return;
+      if (!doc) {
+        return;
+      }
+      var langBtn = doc.getElementById("lang");
+      if (langBtn) {
+        var txt = (langBtn.textContent || "").trim();
+        if ((lang === "en" && txt === "English") || (lang === "zh" && txt === "中文")) {
+          langBtn.click();
         }
       }
     } catch (_e) {
-      // fallback to reload below
+      // ignore cross-document access error
     }
   }
 
@@ -601,6 +630,7 @@
     el("badge-readonly").textContent = t("readOnly");
     el("lbl-scene-title").textContent = t("sceneTitle");
     el("badge-geom-only").textContent = t("geomOnlyBadge");
+    el("badge-schematic").textContent = t("schematicBadge");
     el("frame-updating").textContent = t("updating3d");
     el("lbl-exec-title").textContent = t("execTitle");
     el("lbl-power-title").textContent = t("powerTitle");
@@ -616,7 +646,7 @@
   function renderBannerError(envelope) {
     var box = el("banner-error");
     clear(box);
-    if (envelope.status === "ok" || !envelope.error) {
+    if (!envelope || envelope.status === "ok" || !envelope.error) {
       box.className = "banner hidden";
       return;
     }
@@ -626,7 +656,8 @@
     main.appendChild(h("span", "banner-tag", isErr ? t("errorTag") : t("waitingTag")));
     var msgText = envelope.error.message || envelope.error.code || "";
     if (envelope.last_valid_snapshot) {
-      msgText = t("waitingHolding", { rev: envelope.last_valid_snapshot.revision });
+      var holdKey = envelope.error.code === "RUN_INTEGRITY_FAILED" ? "waitingIntegrityHolding" : "waitingHolding";
+      msgText = t(holdKey, { rev: envelope.last_valid_snapshot.revision });
     }
     main.appendChild(h("span", "", msgText));
     box.appendChild(main);
@@ -658,7 +689,8 @@
         } else if (n.code === "EXECUTION_PARTIAL") {
           reasons = ((snap.execution && snap.execution.budgets && snap.execution.budgets.exhausted) || []).join(", ") || "budget";
         }
-        displayMsg = localized.replace("{reasons}", reasons);
+        var parts = ((snap.scene && snap.scene.schematic_part_ids) || []).join(", ") || "—";
+        displayMsg = localized.replace("{reasons}", reasons).replace("{parts}", parts);
       }
       main.appendChild(h("span", "", displayMsg));
       row.appendChild(main);
@@ -667,6 +699,20 @@
       }
       box.appendChild(row);
     });
+  }
+
+  function makeKpiTile(label, value, sub, tone) {
+    var tile = h("div", "kpi-tile" + (tone ? " " + tone : ""));
+    tile.appendChild(h("div", "kpi-label", label));
+    var v = h("div", "kpi-value", value);
+    v.title = value;
+    tile.appendChild(v);
+    if (sub) {
+      var s = h("div", "kpi-sub", sub);
+      s.title = sub;
+      tile.appendChild(s);
+    }
+    return tile;
   }
 
   function renderExecutionCard(snap) {
@@ -684,7 +730,6 @@
       ? ("os-optics " + snap.identity.engine_version)
       : "";
 
-    // Tile 1: Execution
     var execVal = t("notComputed");
     var execSub = snap.result_mode === "stale_run" ? t("freshHistorical") : t("geomOnlyBadge");
     var execTone = snap.result_mode === "stale_run" ? "warn" : "info";
@@ -705,7 +750,6 @@
     }
     kpis.appendChild(makeKpiTile(t("kpiExecution"), execVal, execSub, execTone));
 
-    // Tile 2: Requirements
     var reqCode = (exec && exec.requirement_outcome) || tsum.requirement_outcome || "NO_TARGETS";
     var reqVal = reqOutcomeLabel(reqCode);
     var reqTone = "";
@@ -720,7 +764,6 @@
     }
     kpis.appendChild(makeKpiTile(t("kpiRequirements"), reqVal, reqSub, reqTone));
 
-    // Tile 3: Integrity & Freshness
     var integVal = integ.checked ? (integ.consistent ? t("consistent") : t("integrityFailed")) : t("notChecked");
     var freshText = t("freshNoRun");
     if (fresh.state === "CURRENT") freshText = t("freshCurrent");
@@ -734,7 +777,6 @@
     else if (integ.consistent && (fresh.state === "CURRENT" || fresh.state === "RUN_ONLY")) intTone = "ok";
     kpis.appendChild(makeKpiTile(t("kpiIntegrity"), integVal, freshText, intTone));
 
-    // Inline alerts
     if (exec && exec.budgets && exec.budgets.exhausted && exec.budgets.exhausted.length) {
       alerts.appendChild(h("div", "inline-alert", t("exhaustedBudgets", { list: exec.budgets.exhausted.join(", ") })));
     }
@@ -742,20 +784,6 @@
       var pCount = (snap.project_check.problems || []).length || 1;
       alerts.appendChild(h("div", "inline-alert err", t("validationProblems", { count: pCount })));
     }
-  }
-
-  function makeKpiTile(label, value, sub, tone) {
-    var tile = h("div", "kpi-tile" + (tone ? " " + tone : ""));
-    tile.appendChild(h("div", "kpi-label", label));
-    var v = h("div", "kpi-value", value);
-    v.title = value;
-    tile.appendChild(v);
-    if (sub) {
-      var s = h("div", "kpi-sub", sub);
-      s.title = sub;
-      tile.appendChild(s);
-    }
-    return tile;
   }
 
   function renderPowerLedger(snap) {
@@ -789,7 +817,6 @@
       badge.classList.add("hidden");
     }
 
-    // Hero stats
     var hero = h("div", "power-hero");
     var sIn = h("div", "power-stat");
     sIn.appendChild(h("div", "power-stat-label", t("totalInput")));
@@ -806,7 +833,6 @@
     hero.appendChild(sRes);
     body.appendChild(hero);
 
-    // Stacked horizontal proportion bar
     var channels = (power.channels || []).slice().sort(function (a, b) {
       return (b.power_W || 0) - (a.power_W || 0);
     });
@@ -826,7 +852,6 @@
       body.appendChild(track);
     }
 
-    // Channel table
     var wrap = h("div", "table-wrap");
     var table = document.createElement("table");
     var thead = document.createElement("thead");
@@ -868,7 +893,6 @@
     wrap.appendChild(table);
     body.appendChild(wrap);
 
-    // Optional per-element breakdown accordion
     var byEl = power.by_element || [];
     if (byEl.length) {
       var det = h("details", "sub-details");
@@ -1047,7 +1071,6 @@
       return;
     }
 
-    // Scene footer chips linking 3D ray colors directly to power & termination
     branches.slice(0, 6).forEach(function (b) {
       var chip = h("span", "branch-chip");
       var dot = h("span", "swatch");
@@ -1113,6 +1136,7 @@
 
     var src = snap.source || {};
     var id = snap.identity || {};
+    var scene = snap.scene || {};
     var evalInfo = src.evaluation || {};
     el("details-hint").textContent = shortHash(id.project_hash || snap.snapshot_id);
 
@@ -1121,17 +1145,40 @@
       [t("detailSnapshotId"), snap.snapshot_id || "—"],
       [t("detailInputPath"), src.input_path || "—"],
       [t("detailProjectPath"), src.project_path || "—"],
-      [t("detailRunDir"), src.run_dir || "—"],
-      [t("detailEvalMode"), evalInfo.mode === "explicit_local_temp" ? t("evalModeTemp") : t("evalModeNone")],
-      [t("detailProjectHash"), id.project_hash || "—"],
-      [t("detailInputHash"), id.engine_input_hash || "—"],
-      [t("detailResultHash"), id.result_hash || "—"],
-      [t("detailSceneHash"), id.scene_content_hash || "—"],
-      [t("detailVersions"), "kit " + (id.kit_version || "—") + " · os-optics " + (id.engine_version || "—")]
+      [t("detailRunDir"), src.run_dir || "—"]
     ];
-    if (src.configuration_id) {
-      pairs.splice(4, 0, [t("detailConfig"), src.configuration_id]);
+    if (src.root_run_dir && src.root_run_dir !== src.run_dir) {
+      pairs.push([t("detailRootRunDir"), src.root_run_dir]);
     }
+    if (src.configuration_id) {
+      var cfgText = src.configuration_id;
+      if (src.available_configurations && src.available_configurations.length) {
+        cfgText += " (" + src.available_configurations.join(", ") + ")";
+      }
+      pairs.push([t("detailConfig"), cfgText]);
+    }
+    pairs.push([t("detailEvalMode"), evalInfo.mode === "explicit_local_temp" ? t("evalModeTemp") : t("evalModeNone")]);
+    if (scene.ray_data_mode) {
+      var crossingInfo = scene.crossing_table_available
+        ? (scene.ray_data_mode + " (" + scene.crossing_row_count + " " + t("crossingsUnit") + ")")
+        : (scene.ray_data_mode + " (" + t("summaryRaysTag") + ")");
+      pairs.push([t("detailRayDataMode"), crossingInfo]);
+    }
+    if (scene.geometry_sources && scene.geometry_sources.length) {
+      pairs.push([t("detailGeometrySources"), scene.geometry_sources.join(", ")]);
+    }
+    if (scene.schematic_part_ids && scene.schematic_part_ids.length) {
+      pairs.push([t("detailSchematicParts"), scene.schematic_part_ids.join(", ")]);
+    }
+    pairs.push([t("detailProjectHash"), id.project_hash || "—"]);
+    if (id.root_project_hash && id.root_project_hash !== id.project_hash) {
+      pairs.push([t("detailRootProjectHash"), id.root_project_hash]);
+    }
+    pairs.push([t("detailInputHash"), id.engine_input_hash || "—"]);
+    pairs.push([t("detailResultHash"), id.result_hash || "—"]);
+    pairs.push([t("detailSceneHash"), id.scene_content_hash || "—"]);
+    pairs.push([t("detailVersions"), "kit " + (id.kit_version || "—") + " · os-optics " + (id.engine_version || "—")]);
+
     pairs.forEach(function (pair) {
       kv.appendChild(h("div", "kv-key", pair[0]));
       kv.appendChild(h("div", "kv-val", pair[1]));
@@ -1166,22 +1213,46 @@
       body.appendChild(pBox);
     }
 
-    // Binding stamp at bottom-right of 3D viewport
     var stampParts = ["Rev #" + snap.revision];
     if (id.project_hash) stampParts.push("proj " + shortHash(id.project_hash));
     if (id.result_hash) stampParts.push("res " + shortHash(id.result_hash));
+    if (id.scene_content_hash) stampParts.push("scene " + shortHash(id.scene_content_hash));
     if (envelope && envelope.server && envelope.server.engine_version) {
       stampParts.push("os-optics " + envelope.server.engine_version);
     }
     el("binding-stamp").textContent = stampParts.join(" · ");
   }
 
-  function renderEnvelope(envelope) {
-    lastEnvelope = envelope;
-    var snap = envelope.snapshot || envelope.last_valid_snapshot;
+  function formatSceneMeta(scene) {
+    var branchCount = scene.branch_count !== undefined && scene.branch_count !== null
+      ? scene.branch_count
+      : (scene.beam_count || 0);
+    var drawableCount = scene.drawable_ray_count !== undefined && scene.drawable_ray_count !== null
+      ? scene.drawable_ray_count
+      : (scene.ray_count || 0);
+    var parts = [
+      (scene.part_count || 0) + " " + t("partsUnit"),
+      branchCount + " " + t("branchesUnit"),
+      drawableCount + " " + t("drawableRaysUnit")
+    ];
+    if (!scene.geometry_only) {
+      if (scene.crossing_table_available && scene.crossing_row_count !== null && scene.crossing_row_count !== undefined) {
+        parts.push(scene.crossing_row_count + " " + t("crossingsUnit"));
+      } else if (scene.ray_data_mode === "summary") {
+        parts.push(t("summaryRaysTag"));
+      }
+    }
+    return parts.join(" · ");
+  }
+
+  function commitPanelAndHeaders(envelope, snap) {
+    committedEnvelope = envelope;
+    var appEl = el("app");
+    appEl.setAttribute("data-revision", String(snap ? snap.revision : (envelope.revision || 0)));
+    appEl.setAttribute("data-snapshot-id", snap ? (snap.snapshot_id || "") : "");
 
     renderBannerError(envelope);
-    setPill("badge-rev", "Rev #" + (envelope.revision || 0), "pill-mono");
+    setPill("badge-rev", "Rev #" + (snap ? snap.revision : (envelope.revision || 0)), "pill-mono");
 
     if (!snap) {
       setPill("badge-mode", t("modeNone"), "warn");
@@ -1189,7 +1260,6 @@
       return;
     }
 
-    // Mode pill
     if (snap.result_mode === "computed_run") {
       setPill("badge-mode", t("modeComputed"), "ok");
     } else if (snap.result_mode === "stale_run") {
@@ -1198,7 +1268,6 @@
       setPill("badge-mode", t("modePreview"), "info");
     }
 
-    // Freshness pill
     var fresh = snap.freshness || {};
     if (fresh.checked) {
       var fLabel = fresh.state === "CURRENT" ? t("freshCurrent")
@@ -1208,7 +1277,6 @@
       setPill("badge-freshness", "", "");
     }
 
-    // Source path chip
     var rawPath = (snap.source && snap.source.input_path) || "";
     var srcEl = el("source-path");
     srcEl.title = rawPath;
@@ -1217,26 +1285,10 @@
 
     renderNotices(snap);
 
-    // 3D scene header & iframe update
     var scene = snap.scene || {};
     el("badge-geom-only").classList.toggle("hidden", !scene.geometry_only);
-    el("scene-meta").textContent =
-      (scene.part_count || 0) + " " + t("partsUnit") + " · " +
-      (scene.beam_count || 0) + " " + t("branchesUnit") + " · " +
-      (scene.ray_count || 0) + " " + t("raysUnit");
-
-    if (scene.engine_view_url && lastLoadedRevision !== snap.revision) {
-      lastLoadedRevision = snap.revision;
-      syncEngineIframeLang(false);
-      var updating = el("frame-updating");
-      updating.classList.remove("hidden");
-      var frame = el("engine-frame");
-      frame.onload = function () {
-        updating.classList.add("hidden");
-        syncEngineIframeLang(true);
-      };
-      frame.src = scene.engine_view_url;
-    }
+    el("badge-schematic").classList.toggle("hidden", !scene.has_schematic_geometry);
+    el("scene-meta").textContent = formatSceneMeta(scene);
 
     renderExecutionCard(snap);
     renderPowerLedger(snap);
@@ -1244,6 +1296,202 @@
     renderQuantities(snap);
     renderBranches(snap);
     renderDetails(snap, envelope);
+  }
+
+  function stopPendingPoll() {
+    if (pendingPollTimer !== null) {
+      window.clearInterval(pendingPollTimer);
+      pendingPollTimer = null;
+    }
+  }
+
+  function scheduleFreshRetry() {
+    if (retryFetchTimer !== null) {
+      return;
+    }
+    retryFetchTimer = window.setTimeout(function () {
+      retryFetchTimer = null;
+      fetchSnapshot();
+    }, 250);
+  }
+
+  function stageAndAtomicSwap(envelope, snap) {
+    stopPendingPoll();
+    var myToken = ++transitionToken;
+    var expectedSnapshotId = snap.snapshot_id;
+    stagingSnapshotId = expectedSnapshotId;
+    var expectedSceneHash = (snap.scene && snap.scene.scene_content_hash) || (snap.identity && snap.identity.scene_content_hash) || null;
+    var url = snap.scene && snap.scene.engine_view_url;
+
+    if (!url) {
+      stagingSnapshotId = null;
+      committedSnapshotId = expectedSnapshotId;
+      commitPanelAndHeaders(envelope, snap);
+      return;
+    }
+
+    var updating = el("frame-updating");
+    updating.textContent = t("updatingRev", { rev: snap.revision });
+    updating.classList.remove("hidden");
+
+    // Keep waiting/error banners immediately visible if status is non-ok while staging
+    if (envelope.status !== "ok") {
+      renderBannerError(envelope);
+    }
+
+    var staging = getStagingFrame();
+    var oldActive = getActiveFrame();
+    syncIframeLang(staging, false);
+
+    function finishCommit() {
+      if (myToken !== transitionToken) {
+        return;
+      }
+      stopPendingPoll();
+      updating.classList.add("hidden");
+      syncIframeLang(staging, true);
+
+      // Atomic synchronous swap: visible 3D scene AND right-hand panel flip together in one JS tick!
+      staging.setAttribute("data-snapshot-id", expectedSnapshotId);
+      staging.setAttribute("data-revision", String(snap.revision));
+      staging.classList.remove("staging");
+      staging.classList.add("active");
+      staging.removeAttribute("aria-hidden");
+
+      oldActive.classList.remove("active");
+      oldActive.classList.add("staging");
+      oldActive.setAttribute("aria-hidden", "true");
+      activeFrameSlot = activeFrameSlot === "a" ? "b" : "a";
+
+      stagingSnapshotId = null;
+      committedSnapshotId = expectedSnapshotId;
+      commitPanelAndHeaders(envelope, snap);
+    }
+
+    function handleSuperseded() {
+      if (myToken !== transitionToken) {
+        return;
+      }
+      stagingSnapshotId = null;
+      stopPendingPoll();
+      // Never swap to a superseded/409 iframe; fetch a fresh coherent snapshot instead.
+      scheduleFreshRetry();
+    }
+
+    function inspectStaging() {
+      if (myToken !== transitionToken) {
+        stopPendingPoll();
+        return;
+      }
+      try {
+        var win = staging.contentWindow;
+        var doc = staging.contentDocument;
+        if (!win || !doc) {
+          return;
+        }
+        // Detect HTTP 409 JSON error body returned directly for /engine-view/<superseded_id>/
+        if (!doc.getElementById("stage") && doc.body && doc.body.textContent && doc.body.textContent.indexOf("SNAPSHOT_SUPERSEDED") !== -1) {
+          handleSuperseded();
+          return;
+        }
+        // Engine viewer sets window.__opensciViewer ONLY after view.json finishes loading and viewer.init() renders!
+        if (win.__opensciViewer) {
+          var loadedDoc = win.__opensciViewer.doc;
+          var loadedHash = loadedDoc && loadedDoc.identity && loadedDoc.identity.scene_content_hash;
+          if (expectedSceneHash && loadedHash && loadedHash !== expectedSceneHash) {
+            handleSuperseded();
+            return;
+          }
+          finishCommit();
+          return;
+        }
+        // Engine viewer failed inside loadDocument() (e.g. view.json returned HTTP 409 SNAPSHOT_SUPERSEDED)
+        var errNode = doc.getElementById("error");
+        if (errNode) {
+          var errText = errNode.textContent || "";
+          if (errText.indexOf("409") !== -1 || errText.toLowerCase().indexOf("load") !== -1 || errText.indexOf("加载") !== -1) {
+            handleSuperseded();
+            return;
+          }
+          // Non-superseded rendering error (e.g. WebGL unavailable): still commit panel coherently.
+          finishCommit();
+          return;
+        }
+      } catch (_e) {
+        // still navigating
+      }
+    }
+
+    staging.onload = function () {
+      if (myToken !== transitionToken) {
+        return;
+      }
+      inspectStaging();
+      if (myToken === transitionToken && committedSnapshotId !== expectedSnapshotId) {
+        var startedAt = Date.now();
+        pendingPollTimer = window.setInterval(function () {
+          if (myToken !== transitionToken) {
+            stopPendingPoll();
+            return;
+          }
+          inspectStaging();
+          if (Date.now() - startedAt > 15000) {
+            handleSuperseded();
+          }
+        }, 25);
+      }
+    };
+
+    staging.onerror = function () {
+      handleSuperseded();
+    };
+
+    staging.src = url;
+  }
+
+  function handleEnvelope(envelope) {
+    if (!envelope || typeof envelope !== "object") {
+      return;
+    }
+    var seq = typeof envelope.state_seq === "number" ? envelope.state_seq : 0;
+    // Strictly discard late / out-of-order responses superseded by a newer state_seq!
+    if (seq < latestSeenStateSeq) {
+      return;
+    }
+    latestSeenStateSeq = seq;
+
+    var snap = envelope.snapshot || envelope.last_valid_snapshot;
+    if (!snap) {
+      stopPendingPoll();
+      transitionToken++;
+      el("frame-updating").classList.add("hidden");
+      committedSnapshotId = null;
+      commitPanelAndHeaders(envelope, null);
+      return;
+    }
+
+    // Same snapshot already visible (e.g. waiting banner appeared/cleared while holding last_valid_snapshot):
+    // update banners/status immediately without reloading the 3D scene!
+    if (snap.snapshot_id === committedSnapshotId) {
+      stagingSnapshotId = null;
+      stopPendingPoll();
+      transitionToken++;
+      el("frame-updating").classList.add("hidden");
+      commitPanelAndHeaders(envelope, snap);
+      return;
+    }
+
+    // Already staging this exact snapshot_id (e.g. initial fetch + immediate SSE state event):
+    // do not abort and restart the in-flight iframe load.
+    if (snap.snapshot_id === stagingSnapshotId) {
+      if (envelope.status !== "ok") {
+        renderBannerError(envelope);
+      }
+      return;
+    }
+
+    // New snapshot_id: stage its bound 3D iframe offscreen and atomically swap panel + scene together!
+    stageAndAtomicSwap(envelope, snap);
   }
 
   function fetchSnapshot() {
@@ -1254,7 +1502,7 @@
         }
         return r.json();
       })
-      .then(renderEnvelope)
+      .then(handleEnvelope)
       .catch(function (err) {
         liveState = "disconnected";
         renderLiveBadge();
@@ -1308,9 +1556,10 @@
       // ignore storage errors
     }
     applyStaticLabels();
-    syncEngineIframeLang(true);
-    if (lastEnvelope) {
-      renderEnvelope(lastEnvelope);
+    syncIframeLang(getActiveFrame(), true);
+    if (committedEnvelope) {
+      var snap = committedEnvelope.snapshot || committedEnvelope.last_valid_snapshot;
+      commitPanelAndHeaders(committedEnvelope, snap);
     }
   }
 

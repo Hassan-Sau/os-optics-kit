@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import signal
 import sys
@@ -107,18 +108,29 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with json_cli_stdout():
             args = build_parser().parse_args(argv)
-            require_engine()
             from .viewer.server import LocalViewerServer, validate_loopback_host
-            from .viewer.snapshot import resolve_target
+            from .viewer.snapshot import SnapshotError, resolve_target
             from .viewer.watcher import ViewerSession
 
+            # Validate engine-independent CLI arguments and input paths BEFORE requiring os-optics.
             host = validate_loopback_host(args.host)
+            if not (0 <= args.port <= 65535):
+                raise SnapshotError("USAGE", f"--port must be an integer between 0 and 65535, got {args.port!r}")
+            if not math.isfinite(args.poll_interval) or args.poll_interval <= 0:
+                raise SnapshotError("USAGE", "--poll-interval must be a positive number of seconds")
             spec = resolve_target(
                 args.path,
                 project=args.project,
                 run=args.run,
                 configuration=args.configuration,
             )
+            if args.evaluate:
+                if spec.kind != "project":
+                    raise SnapshotError("USAGE", "--evaluate can only be used with a Project JSON file (not a run directory)")
+                if spec.run_dir is not None:
+                    raise SnapshotError("USAGE", "--evaluate cannot be combined with --run")
+
+            require_engine()
             session = ViewerSession(
                 spec,
                 poll_interval=args.poll_interval,

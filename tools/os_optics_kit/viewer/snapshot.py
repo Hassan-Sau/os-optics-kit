@@ -34,6 +34,11 @@ WATCHED_RUN_FILES = (
     "optical_scene.glb",
     "ray_data.json",
 )
+WATCHED_ROOT_CONFIG_FILES = (
+    "manifest.json",
+    "project.json",
+    "comparison.json",
+)
 
 ROLE_TO_PART_CLASS = {
     "source": "SOURCE",
@@ -191,9 +196,15 @@ def compute_fingerprint(spec: TargetSpec) -> str:
         effective_run, selected_cfg, available = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
         hasher.update(f"CFG:{selected_cfg or ''}:{','.join(available)}\0".encode("utf-8"))
         if selected_cfg is not None:
-            _hash_file_entry(hasher, "root/manifest.json", spec.run_dir / "manifest.json")
-        for filename in WATCHED_RUN_FILES:
-            _hash_file_entry(hasher, f"run/{filename}", effective_run / filename)
+            for root_file in WATCHED_ROOT_CONFIG_FILES:
+                _hash_file_entry(hasher, f"root/{root_file}", spec.run_dir / root_file)
+            for cfg_id in available:
+                cfg_dir = spec.run_dir / "configurations" / cfg_id
+                for filename in WATCHED_RUN_FILES:
+                    _hash_file_entry(hasher, f"cfg/{cfg_id}/{filename}", cfg_dir / filename)
+        else:
+            for filename in WATCHED_RUN_FILES:
+                _hash_file_entry(hasher, f"run/{filename}", effective_run / filename)
     return hasher.hexdigest()
 
 
@@ -344,6 +355,328 @@ def _rgb3(values: Any) -> tuple[float, float, float]:
     return (float(values[0]), float(values[1]), float(values[2]))
 
 
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+        return out if math.isfinite(out) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _linear_to_srgb(linear: float) -> float:
+    c = max(0.0, min(1.0, float(linear)))
+    return c * 12.92 if c <= 0.0031308 else 1.055 * (c ** (1.0 / 2.4)) - 0.055
+
+
+def _glb_node_meshes(gltf: dict[str, Any], binary: bytes, node: dict[str, Any]) -> list[Any]:
+    """Extract world-space ``ViewMesh`` objects from a glTF element/observation node and its children."""
+    import numpy as np
+    from os_optics.optical_view import read_accessor
+    from os_optics.viewer.model import ViewMesh, place
+
+    pos = node.get("translation", (0.0, 0.0, 0.0))
+    rx, ry, rz, rw = node.get("rotation", (0.0, 0.0, 0.0, 1.0))
+    q_wxyz = (float(rw), float(rx), float(ry), float(rz))
+    no_trans = (0.0, 0.0, 0.0)
+
+    meshes: list[Any] = []
+    for child_idx in node.get("children", ()):
+        for child_mesh in _glb_node_meshes(gltf, binary, gltf["nodes"][child_idx]):
+            rotated_normals = (
+                place(child_mesh.normals, no_trans, q_wxyz)
+                if child_mesh.normals is not None
+                else None
+            )
+            meshes.append(
+                ViewMesh(
+                    positions=place(child_mesh.positions, pos, q_wxyz),
+                    triangles=child_mesh.triangles,
+                    rgb=child_mesh.rgb,
+                    alpha=child_mesh.alpha,
+                    material=child_mesh.material,
+                    surface_id=child_mesh.surface_id,
+                    normals=rotated_normals,
+                    metallic=child_mesh.metallic,
+                    roughness=child_mesh.roughness,
+                    transmission=child_mesh.transmission,
+                    ior=child_mesh.ior,
+                    thickness_mm=child_mesh.thickness_mm,
+                    tint=child_mesh.tint,
+                )
+            )
+
+    if "mesh" not in node:
+        return meshes
+
+    extras = node.get("extras") or {}
+    surface_id = (
+        (extras.get("engine_surface_id") or extras.get("surface_id"))
+        if extras.get("kind") == "OPTICAL_SURFACE"
+        else None
+    )
+    coated_names = {
+        "filter_face", "splitter_face", "polarization_plane", "polarizer_body",
+        "waveplate_body", "thin_lens", "attenuator_plane", "faraday_plane",
+        "faraday_body", "grating_face",
+    }
+    for prim in gltf["meshes"][node["mesh"]]["primitives"]:
+        local = np.asarray(read_accessor(gltf, binary, prim["attributes"]["POSITION"]), dtype=float)
+        indices = np.asarray(read_accessor(gltf, binary, prim["indices"]), dtype=np.int64).reshape(-1, 3)
+        material = gltf["materials"][prim["material"]]
+        pbr = material.get("pbrMetallicRoughness") or {}
+        factor = pbr.get("baseColorFactor") or (0.7, 0.7, 0.7, 1.0)
+        rgb = (
+            round(_linear_to_srgb(factor[0]), 4),
+            round(_linear_to_srgb(factor[1]), 4),
+            round(_linear_to_srgb(factor[2]), 4),
+        )
+        normals = None
+        if "NORMAL" in prim["attributes"]:
+            raw_normals = np.asarray(read_accessor(gltf, binary, prim["attributes"]["NORMAL"]), dtype=float)
+            normals = place(raw_normals, no_trans, q_wxyz)
+        exts = material.get("extensions") or {}
+        mat_name = str(material.get("name") or "preview")
+        alpha = float(factor[3])
+        meshes.append(
+            ViewMesh(
+                positions=place(local, pos, q_wxyz),
+                triangles=indices,
+                rgb=rgb,
+                alpha=alpha,
+                material=mat_name,
+                surface_id=surface_id,
+                normals=normals,
+                metallic=float(pbr.get("metallicFactor", 0.0)),
+                roughness=float(pbr.get("roughnessFactor", 0.35)),
+                transmission=float((exts.get("KHR_materials_transmission") or {}).get("transmissionFactor", 0.0)),
+                ior=(exts.get("KHR_materials_ior") or {}).get("ior"),
+                thickness_mm=(exts.get("KHR_materials_volume") or {}).get("thicknessFactor"),
+                tint=(0.45 * alpha) if mat_name in coated_names else 0.0,
+            )
+        )
+    return meshes
+
+
+_SURFACE_FACT_KEYS = (
+    "surface_id", "member_id", "role", "radius_mm", "conic", "aspheric_coefficients",
+    "linear_sag_coefficient", "cylinder_axis", "vertex_z_mm", "origin_mm", "normal",
+    "clear_radius_mm", "clear_half_widths_mm", "aperture_center_mm", "edge_radius_mm",
+    "edge_half_widths_mm", "coating_kind", "medium_before", "medium_after",
+    "solid_medium", "placement", "obstruction_radius_mm", "focal_length_mm",
+)
+
+
+def _glb_surface_facts(gltf: dict[str, Any], node: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    out: list[dict[str, Any]] = []
+    for child_idx in node.get("children", ()):
+        child = gltf["nodes"][child_idx]
+        extras = child.get("extras") or {}
+        if extras.get("kind") == "OPTICAL_SURFACE":
+            facts = {k: extras[k] for k in _SURFACE_FACT_KEYS if k in extras}
+            facts["surface_id"] = extras.get("engine_surface_id") or extras.get("surface_id")
+            out.append(facts)
+        out.extend(_glb_surface_facts(gltf, child))
+    return tuple(out)
+
+
+def _geometry_provenance_from_engine(geom: dict[str, Any] | Any) -> tuple[str, bool]:
+    """Classify an engine geometry descriptor into ``(geometry_source, schematic)``."""
+    if isinstance(geom, dict):
+        basis = geom.get("basis")
+        status = geom.get("status")
+        kind = geom.get("kind")
+    else:
+        raw_basis = getattr(geom, "basis", None)
+        basis = getattr(raw_basis, "value", raw_basis)
+        raw_status = getattr(geom, "status", None)
+        status = getattr(raw_status, "value", raw_status)
+        raw_kind = getattr(geom, "kind", None)
+        kind = getattr(raw_kind, "value", raw_kind)
+
+    if basis == "PUBLIC_CATALOG_DESIGN_GEOMETRY" and status == "NOMINAL":
+        return "catalog", False
+    if basis == "PROJECT_DECLARED_MODEL" and status == "NOMINAL":
+        return "engine_nominal", False
+    if kind == "SOURCE_EMITTER":
+        return "engine_nominal", False
+    if status == "PLACEHOLDER" or basis == "VIEW_PLACEHOLDER":
+        return "schematic", True
+    return "engine_nominal", False
+
+
+def _declared_configurations(document: dict[str, Any]) -> list[str]:
+    return [
+        str(cfg["configuration_id"])
+        for cfg in (document.get("configurations") or [])
+        if isinstance(cfg, dict) and cfg.get("configuration_id")
+    ]
+
+
+def _layout_document_for_configuration(document: dict[str, Any], selected_cfg: str | None) -> dict[str, Any]:
+    """Return a single-configuration Project payload for ``json_api.project_layout``."""
+    declared = _declared_configurations(document)
+    if not declared:
+        return document
+    cfg_id = selected_cfg if selected_cfg in declared else declared[0]
+    from os_optics.project_document import parse_project_document
+
+    return parse_project_document(document).configured(cfg_id).payload()
+
+
+def _preview_scene_content_hash(project_hash: str | None, title: str, parts: list[Any]) -> str:
+    payload = {
+        "project_hash": project_hash,
+        "title": title,
+        "parts": [
+            {
+                "id": p.part_id,
+                "class": p.part_class,
+                "label": p.label,
+                "sku": p.sku,
+                "facts": p.facts,
+                "bounds": [
+                    [round(float(v), 6) for v in p.bounds[0]],
+                    [round(float(v), 6) for v in p.bounds[1]],
+                ],
+            }
+            for p in parts
+        ],
+    }
+    raw = json.dumps(json_safe(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _build_layout_parts_from_engine(
+    document: dict[str, Any],
+    *,
+    selected_cfg: str | None,
+    palette: dict[str, Any],
+) -> list[Any] | None:
+    """Build exact nominal/catalog ``ViewPart`` meshes via ``os_optics.local.json_api.project_layout`` (zero tracing)."""
+    from os_optics.local import json_api
+    from os_optics.optical_view import parse_glb
+    from os_optics.viewer.model import ViewPart
+
+    try:
+        layout_doc = _layout_document_for_configuration(document, selected_cfg)
+        reply = json_api.project_layout(layout_doc)
+    except Exception:  # noqa: BLE001 - fall back to schematic/design_geometry builder when layout cannot lower
+        return None
+    if not reply.get("ok"):
+        return None
+
+    layout = reply.get("layout") or {}
+    glb_bytes = (reply.get("files") or {}).get("optical_layout.glb")
+    if not isinstance(glb_bytes, (bytes, bytearray)):
+        return None
+
+    try:
+        gltf, binary = parse_glb(bytes(glb_bytes))
+    except Exception:  # noqa: BLE001
+        return None
+
+    elements_by_id = {
+        e["element_id"]: e
+        for e in (layout.get("elements") or [])
+        if isinstance(e, dict) and e.get("element_id")
+    }
+    planes_by_id = {
+        p["observation_id"]: p
+        for p in (layout.get("observation_planes") or [])
+        if isinstance(p, dict) and p.get("observation_id")
+    }
+
+    parts: list[Any] = []
+    for node in gltf.get("nodes") or []:
+        extras = node.get("extras") or {}
+        name = str(node.get("name") or "")
+        if name.startswith("element:") and extras.get("element_id") in elements_by_id:
+            elem = elements_by_id[extras["element_id"]]
+            geom = elem.get("geometry") or {}
+            geom_source, is_schematic = _geometry_provenance_from_engine(geom)
+            part_class = str(extras.get("part_class") or ROLE_TO_PART_CLASS.get(str(elem.get("optical_role") or "").lower(), "OTHER_OPTICAL"))
+            if part_class == "OTHER_OPTICAL":
+                mk = geom.get("model_kind")
+                if mk == "APERTURE_STOP" or str(elem.get("optical_role") or "").lower() == "aperture":
+                    part_class = "APERTURE"
+                elif mk in ("IDEAL_THIN_LENS", "TABULATED_THIN_LENS"):
+                    part_class = "LENS"
+                elif mk == "NEUTRAL_DENSITY":
+                    part_class = "FILTER"
+            if part_class not in palette:
+                part_class = "OTHER_OPTICAL"
+
+            pose = elem.get("pose") or {}
+            pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
+            facts: dict[str, Any] = {
+                "optical_role": elem.get("optical_role"),
+                "position_mm": [round(float(pos_raw[0]), 6), round(float(pos_raw[1]), 6), round(float(pos_raw[2]), 6)],
+                "geometry_preview_only": True,
+                "geometry_source": geom_source,
+                "schematic": is_schematic,
+            }
+            if elem.get("optical_model_id") is not None:
+                facts["optical_model_id"] = elem["optical_model_id"]
+            if geom.get("category") is not None:
+                facts["category"] = geom["category"]
+            if geom.get("form") is not None:
+                facts["form"] = geom["form"]
+            if geom.get("diameter_mm") is not None:
+                facts["diameter_mm"] = float(geom["diameter_mm"])
+            if geom.get("z_min_mm") is not None and geom.get("z_max_mm") is not None:
+                facts["thickness_mm"] = round(abs(float(geom["z_max_mm"]) - float(geom["z_min_mm"])), 6)
+            if geom.get("half_extents_mm") is not None:
+                facts["size_mm"] = [round(2.0 * float(h), 6) for h in geom["half_extents_mm"]]
+
+            meshes = tuple(_glb_node_meshes(gltf, binary, node))
+            if not meshes:
+                continue
+            parts.append(
+                ViewPart(
+                    part_id=str(elem["element_id"]),
+                    part_class=part_class,
+                    label=str(elem.get("label") or elem["element_id"]),
+                    sku=elem.get("optical_sku"),
+                    meshes=meshes,
+                    facts=facts,
+                    surfaces=_glb_surface_facts(gltf, node),
+                )
+            )
+        elif name.startswith("observation:") and extras.get("observation_id") in planes_by_id:
+            plane = planes_by_id[extras["observation_id"]]
+            is_target = str(plane.get("kind") or "").upper() == "TARGET"
+            part_class = "TARGET_PLANE" if is_target else "OBSERVATION_PLANE"
+            pose = plane.get("pose") or {}
+            pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
+            facts = {
+                "plane_kind": "TARGET" if is_target else "OBSERVATION",
+                "absorbing_extent": plane.get("absorbing_extent"),
+                "target_ids": list(plane.get("target_ids") or []),
+                "position_mm": [round(float(pos_raw[0]), 6), round(float(pos_raw[1]), 6), round(float(pos_raw[2]), 6)],
+                "footprints": [],
+                "geometry_preview_only": True,
+                "geometry_source": "engine_nominal",
+                "schematic": False,
+            }
+            meshes = tuple(_glb_node_meshes(gltf, binary, node))
+            if not meshes:
+                continue
+            obs_id = str(plane["observation_id"])
+            parts.append(
+                ViewPart(
+                    part_id=obs_id,
+                    part_class=part_class,
+                    label=("Target plane " if is_target else "Observation plane ") + obs_id,
+                    sku=None,
+                    meshes=meshes,
+                    facts=facts,
+                )
+            )
+    return parts
+
+
 def _build_project_preview_scene(
     document: dict[str, Any],
     *,
@@ -351,122 +684,160 @@ def _build_project_preview_scene(
     title: str,
     note_code: str,
     note_text: str,
+    selected_cfg: str | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    """Build a geometry-only ``ViewerScene`` directly from a Project document (zero ray tracing)."""
+    """Build a geometry-only ``ViewerScene`` directly from a Project document (zero ray tracing).
+
+    Prefers the engine's nominal/catalog layout via ``os_optics.local.json_api.project_layout``.
+    When a Project cannot be lowered (e.g. invalid Project or unavailable catalog), falls back
+    to explicit ``design_geometry`` where stated and marks any placeholder/unavailable dimensions
+    explicitly as ``schematic: True`` (``geometry_source: "schematic"``).
+    """
     import numpy as np
     from os_optics.viewer.model import OPTICAL_VIEW, ViewPart, ViewerScene, scene_summary, view_document
     from os_optics.viewer.palette import class_table
 
     palette = class_table(OPTICAL_VIEW)
-    models = {m.get("model_id"): m for m in (document.get("optical_models") or []) if isinstance(m, dict)}
-    target_obs_ids = {t.get("observation_id") for t in (document.get("targets") or []) if isinstance(t, dict)}
-    component_poses: dict[str, tuple[tuple[float, float, float], tuple[float, float, float, float]]] = {}
-    parts: list[Any] = []
+    parts = _build_layout_parts_from_engine(document, selected_cfg=selected_cfg, palette=palette)
 
-    for comp in document.get("components") or []:
-        if not isinstance(comp, dict) or not comp.get("instance_id"):
-            continue
-        inst_id = str(comp["instance_id"])
-        role = str(comp.get("optical_role") or "other_optical").lower()
-        part_class = ROLE_TO_PART_CLASS.get(role, "OTHER_OPTICAL")
-        style = palette.get(part_class) or palette["OTHER_OPTICAL"]
-        pose = comp.get("nominal_pose") or {}
-        pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
-        pos = (float(pos_raw[0]), float(pos_raw[1]), float(pos_raw[2]))
-        quat = _normalize_quaternion(pose.get("quaternion_wxyz"))
-        component_poses[inst_id] = (pos, quat)
+    if parts is None:
+        parts = []
+        models = {m.get("model_id"): m for m in (document.get("optical_models") or []) if isinstance(m, dict)}
+        target_obs_ids = {t.get("observation_id") for t in (document.get("targets") or []) if isinstance(t, dict)}
+        component_poses: dict[str, tuple[tuple[float, float, float], tuple[float, float, float, float]]] = {}
 
-        model_entry = models.get(comp.get("optical_model_id")) if comp.get("optical_model_id") else None
-        design_geom = (model_entry or {}).get("design_geometry") or {}
-        model_spec = (model_entry or {}).get("model") or {}
-        geom_kind = str(design_geom.get("kind") or "").upper()
+        for comp in document.get("components") or []:
+            if not isinstance(comp, dict) or not comp.get("instance_id"):
+                continue
+            inst_id = str(comp["instance_id"])
+            role = str(comp.get("optical_role") or "other_optical").lower()
+            part_class = ROLE_TO_PART_CLASS.get(role, "OTHER_OPTICAL")
+            style = palette.get(part_class) or palette["OTHER_OPTICAL"]
+            pose = comp.get("nominal_pose") or {}
+            pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
+            pos = (float(pos_raw[0]), float(pos_raw[1]), float(pos_raw[2]))
+            quat = _normalize_quaternion(pose.get("quaternion_wxyz"))
+            component_poses[inst_id] = (pos, quat)
 
-        if geom_kind == "BOX":
-            hx = 0.5 * _float_or(design_geom.get("width_x_mm") or design_geom.get("x_mm"), 20.0)
-            hy = 0.5 * _float_or(design_geom.get("height_y_mm") or design_geom.get("y_mm"), 20.0)
-            z0 = _float_or(design_geom.get("z_min_mm"), -2.0)
-            z1 = _float_or(design_geom.get("z_max_mm"), 2.0)
-            mesh = _box_mesh(hx, hy, z0, z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
-        elif geom_kind == "CYLINDER":
-            radius = 0.5 * _float_or(design_geom.get("diameter_mm"), 25.4)
-            z0 = _float_or(design_geom.get("z_min_mm"), -2.0)
-            z1 = _float_or(design_geom.get("z_max_mm"), 2.0)
-            mesh = _cylinder_mesh(radius, z0, z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
-        elif role == "source":
-            mesh = _cylinder_mesh(5.0, -8.0, 0.0, pos, quat, _rgb3(style.rgb), 0.92)
-        else:
-            radius = _float_or(
-                model_spec.get("edge_radius_mm")
-                or (0.5 * _float_or(model_spec.get("clear_aperture_diameter_mm"), 0.0) if model_spec.get("clear_aperture_diameter_mm") else None)
-                or 12.7,
-                12.7,
+            model_entry = models.get(comp.get("optical_model_id")) if comp.get("optical_model_id") else None
+            design_geom = (model_entry or {}).get("design_geometry") or {}
+            model_spec = (model_entry or {}).get("model") or {}
+            geom_kind = str(design_geom.get("kind") or "").upper()
+            extra_dims: dict[str, Any] = {}
+
+            box_wx = _finite_float(design_geom.get("width_x_mm") or design_geom.get("x_mm"))
+            box_hy = _finite_float(design_geom.get("height_y_mm") or design_geom.get("y_mm"))
+            geom_z0 = _finite_float(design_geom.get("z_min_mm"))
+            geom_z1 = _finite_float(design_geom.get("z_max_mm"))
+            cyl_diam = _finite_float(design_geom.get("diameter_mm"))
+
+            if (
+                geom_kind == "BOX"
+                and box_wx is not None
+                and box_hy is not None
+                and geom_z0 is not None
+                and geom_z1 is not None
+            ):
+                mesh = _box_mesh(0.5 * box_wx, 0.5 * box_hy, geom_z0, geom_z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
+                geom_source, is_schematic = "project_design_geometry", False
+                extra_dims["size_mm"] = [round(box_wx, 6), round(box_hy, 6)]
+                extra_dims["thickness_mm"] = round(abs(geom_z1 - geom_z0), 6)
+            elif (
+                geom_kind == "CYLINDER"
+                and cyl_diam is not None
+                and geom_z0 is not None
+                and geom_z1 is not None
+            ):
+                mesh = _cylinder_mesh(0.5 * cyl_diam, geom_z0, geom_z1, pos, quat, _rgb3(style.rgb), float(style.alpha))
+                geom_source, is_schematic = "project_design_geometry", False
+                extra_dims["diameter_mm"] = round(cyl_diam, 6)
+                extra_dims["thickness_mm"] = round(abs(geom_z1 - geom_z0), 6)
+            elif role == "source":
+                mesh = _cylinder_mesh(5.0, -8.0, 0.0, pos, quat, _rgb3(style.rgb), 0.92)
+                geom_source, is_schematic = "schematic", True
+            else:
+                radius = _float_or(
+                    model_spec.get("edge_radius_mm")
+                    or (0.5 * _float_or(model_spec.get("clear_aperture_diameter_mm"), 0.0) if model_spec.get("clear_aperture_diameter_mm") else None)
+                    or 12.7,
+                    12.7,
+                )
+                mesh = _cylinder_mesh(radius, -1.5, 1.5, pos, quat, _rgb3(style.rgb), float(style.alpha))
+                geom_source, is_schematic = "schematic", True
+
+            product = comp.get("product") or {}
+            sku = product.get("optical_sku") if isinstance(product, dict) else None
+            label = (
+                (model_entry or {}).get("display_name")
+                or sku
+                or (comp.get("custom_part") or {}).get("description")
+                or inst_id
             )
-            mesh = _cylinder_mesh(radius, -1.5, 1.5, pos, quat, _rgb3(style.rgb), float(style.alpha))
+            facts: dict[str, Any] = {
+                "optical_role": role,
+                "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
+                "geometry_preview_only": True,
+                "geometry_source": geom_source,
+                "schematic": is_schematic,
+                **extra_dims,
+            }
+            if comp.get("optical_model_id"):
+                facts["optical_model_id"] = comp["optical_model_id"]
+            parts.append(ViewPart(part_id=inst_id, part_class=part_class, label=str(label), sku=sku, meshes=(mesh,), facts=facts))
 
-        product = comp.get("product") or {}
-        sku = product.get("optical_sku") if isinstance(product, dict) else None
-        label = (
-            (model_entry or {}).get("display_name")
-            or sku
-            or (comp.get("custom_part") or {}).get("description")
-            or inst_id
-        )
-        facts: dict[str, Any] = {
-            "optical_role": role,
-            "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
-            "geometry_preview_only": True,
-        }
-        if comp.get("optical_model_id"):
-            facts["optical_model_id"] = comp["optical_model_id"]
-        parts.append(ViewPart(part_id=inst_id, part_class=part_class, label=str(label), sku=sku, meshes=(mesh,), facts=facts))
+        for obs in document.get("observations") or []:
+            if not isinstance(obs, dict) or not obs.get("observation_id"):
+                continue
+            obs_id = str(obs["observation_id"])
+            is_target = obs_id in target_obs_ids
+            part_class = "TARGET_PLANE" if is_target else "OBSERVATION_PLANE"
+            style = palette[part_class]
+            pose = obs.get("pose") or {}
+            pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
+            local_pos = (float(pos_raw[0]), float(pos_raw[1]), float(pos_raw[2]))
+            local_quat = _normalize_quaternion(pose.get("quaternion_wxyz"))
+            device_id = obs.get("device_instance_id")
+            if device_id and device_id in component_poses:
+                dev_pos, dev_quat = component_poses[device_id]
+                rot_local = _rotate_vec(dev_quat, local_pos)
+                pos = (dev_pos[0] + rot_local[0], dev_pos[1] + rot_local[1], dev_pos[2] + rot_local[2])
+                quat = _quat_mul(dev_quat, local_quat)
+            else:
+                pos, quat = local_pos, local_quat
 
-    for obs in document.get("observations") or []:
-        if not isinstance(obs, dict) or not obs.get("observation_id"):
-            continue
-        obs_id = str(obs["observation_id"])
-        is_target = obs_id in target_obs_ids
-        part_class = "TARGET_PLANE" if is_target else "OBSERVATION_PLANE"
-        style = palette[part_class]
-        pose = obs.get("pose") or {}
-        pos_raw = pose.get("position_mm") or [0.0, 0.0, 0.0]
-        local_pos = (float(pos_raw[0]), float(pos_raw[1]), float(pos_raw[2]))
-        local_quat = _normalize_quaternion(pose.get("quaternion_wxyz"))
-        device_id = obs.get("device_instance_id")
-        if device_id and device_id in component_poses:
-            dev_pos, dev_quat = component_poses[device_id]
-            rot_local = _rotate_vec(dev_quat, local_pos)
-            pos = (dev_pos[0] + rot_local[0], dev_pos[1] + rot_local[1], dev_pos[2] + rot_local[2])
-            quat = _quat_mul(dev_quat, local_quat)
-        else:
-            pos, quat = local_pos, local_quat
+            aperture = obs.get("aperture") or {}
+            shape = str(aperture.get("shape") or "circle").lower()
+            if shape == "rectangle":
+                has_dims = _finite_float(aperture.get("half_width_x_mm") or aperture.get("half_width_u_mm")) is not None and _finite_float(
+                    aperture.get("half_height_y_mm") or aperture.get("half_width_v_mm")
+                ) is not None
+                hx = _float_or(aperture.get("half_width_x_mm") or aperture.get("half_width_u_mm"), 10.0)
+                hy = _float_or(aperture.get("half_height_y_mm") or aperture.get("half_width_v_mm"), 10.0)
+                mesh = _box_mesh(hx, hy, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
+            else:
+                has_dims = _finite_float(aperture.get("radius_mm")) is not None
+                radius = _float_or(aperture.get("radius_mm"), 12.5)
+                mesh = _cylinder_mesh(radius, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
 
-        aperture = obs.get("aperture") or {}
-        shape = str(aperture.get("shape") or "circle").lower()
-        if shape == "rectangle":
-            hx = _float_or(aperture.get("half_width_x_mm") or aperture.get("half_width_u_mm"), 10.0)
-            hy = _float_or(aperture.get("half_height_y_mm") or aperture.get("half_width_v_mm"), 10.0)
-            mesh = _box_mesh(hx, hy, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
-        else:
-            radius = _float_or(aperture.get("radius_mm"), 12.5)
-            mesh = _cylinder_mesh(radius, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
-
-        target_ids = [t.get("target_id") for t in (document.get("targets") or []) if isinstance(t, dict) and t.get("observation_id") == obs_id]
-        facts = {
-            "plane_kind": "TARGET" if is_target else "OBSERVATION",
-            "absorbing": bool(obs.get("absorbing", False)),
-            "target_ids": target_ids,
-            "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
-            "footprints": [],
-            "geometry_preview_only": True,
-        }
-        parts.append(ViewPart(
-            part_id=obs_id,
-            part_class=part_class,
-            label=("Target plane " if is_target else "Observation plane ") + obs_id,
-            sku=None,
-            meshes=(mesh,),
-            facts=facts,
-        ))
+            target_ids = [t.get("target_id") for t in (document.get("targets") or []) if isinstance(t, dict) and t.get("observation_id") == obs_id]
+            facts = {
+                "plane_kind": "TARGET" if is_target else "OBSERVATION",
+                "absorbing": bool(obs.get("absorbing", False)),
+                "target_ids": target_ids,
+                "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
+                "footprints": [],
+                "geometry_preview_only": True,
+                "geometry_source": "project_design_geometry" if has_dims else "schematic",
+                "schematic": not has_dims,
+            }
+            parts.append(ViewPart(
+                part_id=obs_id,
+                part_class=part_class,
+                label=("Target plane " if is_target else "Observation plane ") + obs_id,
+                sku=None,
+                meshes=(mesh,),
+                facts=facts,
+            ))
 
     if parts:
         all_pts = np.concatenate([m.positions for p in parts for m in p.meshes])
@@ -475,6 +846,7 @@ def _build_project_preview_scene(
         lo = np.asarray([-10.0, -10.0, -10.0], dtype=float)
         hi = np.asarray([10.0, 10.0, 10.0], dtype=float)
 
+    scene_content_hash = _preview_scene_content_hash(project_hash, title, parts)
     scene = ViewerScene(
         view_kind=OPTICAL_VIEW,
         frame="PROJECT_DESIGN_FRAME",
@@ -486,10 +858,41 @@ def _build_project_preview_scene(
         focus_max=hi,
         bounds_min=lo,
         bounds_max=hi,
-        identity={"project_hash": project_hash, "geometry_preview_only": True},
+        identity={
+            "project_hash": project_hash,
+            "scene_content_hash": scene_content_hash,
+            "geometry_preview_only": True,
+        },
         notes=({"code": note_code, "text": note_text},),
     )
     return scene, view_document(scene), scene_summary(scene)
+
+
+def _count_drawable_rays(viewer_scene: Any) -> int:
+    """Count distinct drawable rays (chief + pupil) present in the 3D scene."""
+    source_scene = getattr(viewer_scene, "source_scene", None)
+    beam_paths = getattr(source_scene, "beam_paths", None)
+    if beam_paths is not None:
+        total = 0
+        for path in beam_paths:
+            for ray in (path.chief_ray, *path.pupil_rays):
+                if len(ray.points_mm) >= 2 or ray.display_extension_to_mm is not None:
+                    total += 1
+        return total
+    return sum(max(len(b.runs), len(b.extensions)) for b in getattr(viewer_scene, "beams", ()))
+
+
+def _computed_part_provenance(viewer_scene: Any) -> dict[str, tuple[str, bool]]:
+    """Map element/observation IDs in a computed ``ViewerScene`` to ``(geometry_source, schematic)``."""
+    out: dict[str, tuple[str, bool]] = {}
+    source_scene = getattr(viewer_scene, "source_scene", None)
+    if source_scene is None:
+        return out
+    for elem in getattr(source_scene, "elements", ()) or ():
+        out[str(elem.element_id)] = _geometry_provenance_from_engine(elem.geometry)
+    for plane in getattr(source_scene, "observation_planes", ()) or ():
+        out[str(plane.observation_id)] = ("engine_nominal", False)
+    return out
 
 
 def _format_power_ledger(power: dict[str, Any] | None, monitors: list[dict[str, Any]]) -> dict[str, Any]:
@@ -572,14 +975,30 @@ def _compact_scene_payload(
     summary: dict[str, Any],
     doc: dict[str, Any],
     *,
-    revision: int,
+    snapshot_id: str,
     geometry_only: bool,
-    ray_count: int,
+    branch_count: int,
+    drawable_ray_count: int,
+    crossing_row_count: int | None,
+    crossing_table_available: bool,
+    ray_data_mode: str | None,
+    part_provenance: dict[str, tuple[str, bool]] | None = None,
 ) -> dict[str, Any]:
     parts = []
     for part_class, group in (summary.get("parts_by_class") or {}).items():
         for entry in group:
-            parts.append({"class": part_class, **entry})
+            part_entry = {"class": part_class, **entry}
+            if "geometry_source" not in part_entry or "schematic" not in part_entry:
+                prov = (part_provenance or {}).get(str(part_entry.get("id") or ""))
+                if prov is not None:
+                    part_entry.setdefault("geometry_source", prov[0])
+                    part_entry.setdefault("schematic", prov[1])
+                else:
+                    part_entry.setdefault("geometry_source", "engine_nominal")
+                    part_entry.setdefault("schematic", False)
+            parts.append(part_entry)
+    schematic_part_ids = [str(p["id"]) for p in parts if p.get("schematic")]
+    geometry_sources = sorted({str(p["geometry_source"]) for p in parts if p.get("geometry_source")})
     beams = []
     for beam in summary.get("beams") or []:
         chief_runs = [run for run in (beam.get("runs") or []) if run.get("role") in ("PRIMARY", "SECONDARY", "REFERENCE")]
@@ -610,13 +1029,21 @@ def _compact_scene_payload(
         "camera_presets": list((doc.get("camera_presets") or {}).keys()),
         "part_count": len(parts),
         "beam_count": len(beams),
-        "ray_count": ray_count,
+        "branch_count": branch_count,
+        "drawable_ray_count": drawable_ray_count,
+        "ray_count": drawable_ray_count,
+        "crossing_row_count": crossing_row_count,
+        "crossing_table_available": crossing_table_available,
+        "ray_data_mode": ray_data_mode,
+        "has_schematic_geometry": bool(schematic_part_ids),
+        "schematic_part_ids": schematic_part_ids,
+        "geometry_sources": geometry_sources,
         "classes": summary.get("classes") or [],
         "parts": parts,
         "beams": beams,
         "notes": doc.get("notes") or [],
-        "document_url": f"/api/scene-document?rev={revision}",
-        "engine_view_url": f"/engine-view/?rev={revision}",
+        "document_url": f"/api/scene-document?snapshot_id={snapshot_id}",
+        "engine_view_url": f"/engine-view/{snapshot_id}/",
     }
 
 
@@ -746,7 +1173,7 @@ def _project_check_summary(check_reply: dict[str, Any]) -> dict[str, Any]:
 def _normalize_freshness(raw: dict[str, Any]) -> dict[str, Any]:
     run_info = raw.get("run") or {}
     current_info = raw.get("current") or {}
-    return {
+    out: dict[str, Any] = {
         "checked": True,
         "state": raw.get("freshness", "UNDETERMINED"),
         "reasons": list(raw.get("reasons") or []),
@@ -757,12 +1184,29 @@ def _normalize_freshness(raw: dict[str, Any]) -> dict[str, Any]:
         "current_engine_input_hash": current_info.get("engine_input_hash"),
         "integrity": raw.get("integrity"),
     }
+    if "configurations" in raw:
+        out["configuration_ids"] = list(current_info.get("configuration_ids") or [])
+        out["run_configuration_ids"] = list(run_info.get("configuration_ids") or [])
+    return out
+
+
+def _raise_if_integrity_failed(integrity: dict[str, Any] | None, *, run_dir: Path) -> None:
+    if not isinstance(integrity, dict):
+        return
+    if integrity.get("checked") and not integrity.get("consistent"):
+        raise SnapshotTransientError(
+            "RUN_INTEGRITY_FAILED",
+            "run files failed manifest integrity verification (incomplete or mixed write)",
+            problems=list(integrity.get("problems") or []),
+            run_dir=run_dir.as_posix(),
+        )
 
 
 def _build_computed_run_snapshot(
     spec: TargetSpec,
     effective_run: Path,
     *,
+    root_run_dir: Path | None = None,
     selected_cfg: str | None,
     available_cfgs: list[str],
     revision: int,
@@ -770,8 +1214,9 @@ def _build_computed_run_snapshot(
     freshness_info: dict[str, Any],
     project_check: dict[str, Any] | None,
     expected_project_hash: str | None,
+    root_project_hash: str | None = None,
 ) -> BuiltSnapshot:
-    from os_optics.results import load_run
+    from os_optics.results import ResultsError, load_run
     from os_optics.viewer import ViewerInputError, optical_view_scene, scene_summary, view_document
 
     try:
@@ -779,6 +1224,14 @@ def _build_computed_run_snapshot(
     except Exception as exc:  # noqa: BLE001 - transient mid-write or unreadable run
         raise SnapshotTransientError("RUN_UNREADABLE", f"run directory is not readable yet: {exc}",
                                      run_dir=effective_run.as_posix()) from None
+
+    if results.integrity_problems:
+        raise SnapshotTransientError(
+            "RUN_INTEGRITY_FAILED",
+            "run files failed manifest integrity verification (incomplete or mixed write)",
+            problems=list(results.integrity_problems),
+            run_dir=effective_run.as_posix(),
+        )
 
     try:
         viewer_scene = optical_view_scene(effective_run)
@@ -810,18 +1263,50 @@ def _build_computed_run_snapshot(
             "run project_hash changed relative to the checked Project during load",
         )
 
+    describe = results.describe()
     artifacts = {"run_directory": effective_run, "manifest": effective_run / "manifest.json"}
-    artifacts.update({item["role"]: effective_run / item["name"] for item in results.describe().get("files") or []})
+    artifacts.update({item["role"]: effective_run / item["name"] for item in describe.get("files") or []})
     kit_summary = summarize_results(results, artifacts=artifacts, details=True)
+    integrity = kit_summary["integrity"]
+    _raise_if_integrity_failed(integrity, run_dir=effective_run)
+
     compact_targets = results.targets()
     monitors = results.monitors()
     paths = results.paths()
     power = results.power_budget()
-    ray_count = len(results.rays()) if results.has_ray_data else 0
 
+    avail = describe.get("available") or {}
+    ray_data_mode = avail.get("ray_data_recording")
+    crossing_table_available = False
+    crossing_row_count: int | None = None
+    if results.has_ray_data and ray_data_mode == "full":
+        try:
+            crossing_row_count = len(results.rays())
+            crossing_table_available = True
+        except ResultsError as exc:
+            if exc.code in ("PUPIL_RAYS_NOT_RECORDED", "RAY_DATA_NOT_AVAILABLE"):
+                crossing_table_available = False
+                crossing_row_count = None
+            else:
+                raise
+
+    snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
+    drawable_ray_count = _count_drawable_rays(viewer_scene)
+    part_provenance = _computed_part_provenance(viewer_scene)
     scene_doc = view_document(viewer_scene)
     scene_sum = scene_summary(viewer_scene)
-    scene_payload = _compact_scene_payload(scene_sum, scene_doc, revision=revision, geometry_only=False, ray_count=ray_count)
+    scene_payload = _compact_scene_payload(
+        scene_sum,
+        scene_doc,
+        snapshot_id=snapshot_id,
+        geometry_only=False,
+        branch_count=len(paths),
+        drawable_ray_count=drawable_ray_count,
+        crossing_row_count=crossing_row_count,
+        crossing_table_available=crossing_table_available,
+        ray_data_mode=ray_data_mode,
+        part_provenance=part_provenance,
+    )
     power_ledger = _format_power_ledger(power, monitors)
     branches = _merge_branches(paths, scene_payload["beams"])
 
@@ -854,7 +1339,6 @@ def _build_computed_run_snapshot(
         "requirement_outcome": kit_summary["requirement_outcome"],
     }
 
-    integrity = kit_summary["integrity"]
     notices: list[dict[str, str]] = []
     if execution_raw.get("outcome") == "PARTIAL":
         exhausted = (execution_raw.get("budgets") or {}).get("exhausted") or []
@@ -864,17 +1348,17 @@ def _build_computed_run_snapshot(
             "code": "EXECUTION_PARTIAL",
             "message": f"Simulation execution was PARTIAL: a compute budget was reached{suffix}. Some quantities or targets may be bounded or indeterminate.",
         })
-    if integrity.get("checked") and not integrity.get("consistent"):
-        notices.append({
-            "level": "error",
-            "code": "RUN_INTEGRITY_FAILED",
-            "message": "Run files do not match their recorded manifest hashes: " + "; ".join(integrity.get("problems") or []),
-        })
     if not kit_summary["in_model_scope"]:
         notices.append({
             "level": "warning",
             "code": "OUT_OF_MODEL_SCOPE",
             "message": "One or more elements or targets fall outside the declared optical model scope.",
+        })
+    if ray_data_mode == "summary":
+        notices.append({
+            "level": "info",
+            "code": "RAY_DATA_SUMMARY_ONLY",
+            "message": "Run recorded summary ray data (chief rays only); the per-plane crossing table is unavailable.",
         })
     if spec.evaluation_mode == "explicit_local_temp":
         notices.append({
@@ -883,7 +1367,38 @@ def _build_computed_run_snapshot(
             "message": "Computed once via explicit --evaluate into a temporary directory; the input Project file was not modified.",
         })
 
-    snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
+    identity_doc: dict[str, Any] = {
+        "engine_version": identity.get("engine_version") or engine_version(),
+        "engine_build_id": identity.get("engine_build_id"),
+        "project_hash": identity.get("project_hash"),
+        "engine_input_hash": identity.get("engine_input_hash") or identity.get("input_hash"),
+        "result_hash": identity.get("result_hash"),
+        "trace_hash": identity.get("trace_hash"),
+        "scene_content_hash": scene_identity.get("scene_content_hash"),
+        "catalog_version": identity.get("catalog_version"),
+        "kit_version": KIT_VERSION,
+    }
+    if root_project_hash is not None:
+        identity_doc["root_project_hash"] = root_project_hash
+
+    source_doc: dict[str, Any] = {
+        "kind": spec.kind,
+        "input_path": spec.input_path.as_posix(),
+        "project_path": spec.project_path.as_posix() if spec.project_path is not None else None,
+        "run_dir": effective_run.as_posix(),
+        "configuration_id": selected_cfg,
+        "available_configurations": available_cfgs,
+        "read_only": True,
+        "evaluation": {
+            "mode": spec.evaluation_mode,
+            "input_modified": False,
+            "stale_after_edit": False,
+        },
+        "fingerprint": fingerprint,
+    }
+    if root_run_dir is not None and selected_cfg is not None:
+        source_doc["root_run_dir"] = root_run_dir.as_posix()
+
     snapshot = json_safe({
         "schema": SNAPSHOT_SCHEMA,
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -892,32 +1407,8 @@ def _build_computed_run_snapshot(
         "generated_at": _utc_now(),
         "result_mode": "computed_run",
         "is_computed_result": True,
-        "source": {
-            "kind": spec.kind,
-            "input_path": spec.input_path.as_posix(),
-            "project_path": spec.project_path.as_posix() if spec.project_path is not None else None,
-            "run_dir": effective_run.as_posix(),
-            "configuration_id": selected_cfg,
-            "available_configurations": available_cfgs,
-            "read_only": True,
-            "evaluation": {
-                "mode": spec.evaluation_mode,
-                "input_modified": False,
-                "stale_after_edit": False,
-            },
-            "fingerprint": fingerprint,
-        },
-        "identity": {
-            "engine_version": identity.get("engine_version") or engine_version(),
-            "engine_build_id": identity.get("engine_build_id"),
-            "project_hash": identity.get("project_hash"),
-            "engine_input_hash": identity.get("engine_input_hash") or identity.get("input_hash"),
-            "result_hash": identity.get("result_hash"),
-            "trace_hash": identity.get("trace_hash"),
-            "scene_content_hash": scene_identity.get("scene_content_hash"),
-            "catalog_version": identity.get("catalog_version"),
-            "kit_version": KIT_VERSION,
-        },
+        "source": source_doc,
+        "identity": identity_doc,
         "freshness": freshness_info,
         "integrity": integrity,
         "execution": execution,
@@ -948,6 +1439,7 @@ def _build_preview_or_stale_snapshot(
     effective_run: Path | None,
     selected_cfg: str | None,
     available_cfgs: list[str],
+    root_run_dir: Path | None = None,
 ) -> BuiltSnapshot:
     assert result_mode in ("geometry_preview", "stale_run")
     status_label = "STALE_RUN" if result_mode == "stale_run" else "NOT_COMPUTED"
@@ -969,14 +1461,26 @@ def _build_preview_or_stale_snapshot(
             "this is NOT a computed optical result."
         )
 
+    snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
     _scene, scene_doc, scene_sum = _build_project_preview_scene(
         document,
         project_hash=project_hash,
         title=title,
         note_code=note_code,
         note_text=note_text,
+        selected_cfg=selected_cfg,
     )
-    scene_payload = _compact_scene_payload(scene_sum, scene_doc, revision=revision, geometry_only=True, ray_count=0)
+    scene_payload = _compact_scene_payload(
+        scene_sum,
+        scene_doc,
+        snapshot_id=snapshot_id,
+        geometry_only=True,
+        branch_count=0,
+        drawable_ray_count=0,
+        crossing_row_count=None,
+        crossing_table_available=False,
+        ray_data_mode=None,
+    )
     targets, target_summary = _uncomputed_targets(document, status_label)
     quantities = _uncomputed_quantities(document, status_label)
 
@@ -987,6 +1491,16 @@ def _build_preview_or_stale_snapshot(
             "message": note_text,
         }
     ]
+    if scene_payload["has_schematic_geometry"]:
+        schem_list = ", ".join(scene_payload["schematic_part_ids"])
+        notices.append({
+            "level": "warning",
+            "code": "SCHEMATIC_GEOMETRY_USED",
+            "message": (
+                "Schematic placeholder geometry is used for part(s) without resolved catalog or declared dimensions: "
+                f"{schem_list}."
+            ),
+        })
     if not check_info.get("ok"):
         notices.append({
             "level": "warning",
@@ -1011,7 +1525,24 @@ def _build_preview_or_stale_snapshot(
         if isinstance(m, dict)
     ]
 
-    snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
+    source_doc: dict[str, Any] = {
+        "kind": spec.kind,
+        "input_path": spec.input_path.as_posix(),
+        "project_path": spec.project_path.as_posix() if spec.project_path is not None else None,
+        "run_dir": effective_run.as_posix() if effective_run is not None else None,
+        "configuration_id": selected_cfg,
+        "available_configurations": available_cfgs,
+        "read_only": True,
+        "evaluation": {
+            "mode": spec.evaluation_mode,
+            "input_modified": False,
+            "stale_after_edit": spec.evaluation_mode == "explicit_local_temp" and result_mode == "stale_run",
+        },
+        "fingerprint": fingerprint,
+    }
+    if root_run_dir is not None and selected_cfg is not None:
+        source_doc["root_run_dir"] = root_run_dir.as_posix()
+
     snapshot = json_safe({
         "schema": SNAPSHOT_SCHEMA,
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -1020,21 +1551,7 @@ def _build_preview_or_stale_snapshot(
         "generated_at": _utc_now(),
         "result_mode": result_mode,
         "is_computed_result": False,
-        "source": {
-            "kind": spec.kind,
-            "input_path": spec.input_path.as_posix(),
-            "project_path": spec.project_path.as_posix() if spec.project_path is not None else None,
-            "run_dir": effective_run.as_posix() if effective_run is not None else None,
-            "configuration_id": selected_cfg,
-            "available_configurations": available_cfgs,
-            "read_only": True,
-            "evaluation": {
-                "mode": spec.evaluation_mode,
-                "input_modified": False,
-                "stale_after_edit": spec.evaluation_mode == "explicit_local_temp" and result_mode == "stale_run",
-            },
-            "fingerprint": fingerprint,
-        },
+        "source": source_doc,
         "identity": {
             "engine_version": engine_version(),
             "engine_build_id": None,
@@ -1042,7 +1559,7 @@ def _build_preview_or_stale_snapshot(
             "engine_input_hash": check_info.get("engine_input_hash"),
             "result_hash": None,
             "trace_hash": None,
-            "scene_content_hash": None,
+            "scene_content_hash": scene_payload["scene_content_hash"],
             "catalog_version": None,
             "kit_version": KIT_VERSION,
         },
@@ -1078,6 +1595,24 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         from os_optics.local import json_api
 
         document = _read_project_json(spec.project_path)
+        declared_cfgs = _declared_configurations(document)
+        selected_cfg: str | None = None
+        if declared_cfgs:
+            selected_cfg = spec.configuration_id if spec.configuration_id is not None else declared_cfgs[0]
+            if selected_cfg not in declared_cfgs:
+                raise SnapshotError(
+                    "CONFIGURATION_NOT_FOUND",
+                    f"unknown configuration {selected_cfg!r}; available: {', '.join(declared_cfgs)}",
+                    configuration_id=selected_cfg,
+                    available_configurations=declared_cfgs,
+                )
+        elif spec.configuration_id is not None:
+            raise SnapshotError(
+                "CONFIGURATION_NOT_FOUND",
+                f"project declares no configurations: {spec.project_path.as_posix()}",
+                configuration_id=spec.configuration_id,
+            )
+
         check_info = _project_check_summary(json_api.check_project(document))
         freshness_info = {
             "checked": False,
@@ -1100,12 +1635,37 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
             freshness_info=freshness_info,
             historical_run=None,
             effective_run=None,
-            selected_cfg=None,
-            available_cfgs=[],
+            selected_cfg=selected_cfg,
+            available_cfgs=declared_cfgs,
         )
     elif spec.run_dir is not None and spec.project_path is None:
         # Standalone saved run directory.
         effective_run, selected_cfg, available_cfgs = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
+        root_project_hash: str | None = None
+        if selected_cfg is not None:
+            from os_optics.local.configurations import run_reader, verify_configurations_run
+
+            reader = run_reader(spec.run_dir)
+            if reader is None:
+                raise SnapshotTransientError(
+                    "RUN_INCOMPLETE",
+                    f"multi-configuration root manifest is missing or unreadable: {spec.run_dir.as_posix()}",
+                    run_dir=spec.run_dir.as_posix(),
+                )
+            root_problems = list(verify_configurations_run(reader))
+            if root_problems:
+                raise SnapshotTransientError(
+                    "RUN_INTEGRITY_FAILED",
+                    "run files failed manifest integrity verification (incomplete or mixed write)",
+                    problems=root_problems,
+                    run_dir=spec.run_dir.as_posix(),
+                )
+            try:
+                root_manifest = json.loads(reader("manifest.json").decode("utf-8"))
+                root_project_hash = ((root_manifest.get("project") or {}).get("project_hash") or {}).get("digest")
+            except Exception:  # noqa: BLE001
+                root_project_hash = None
+
         freshness_info = {
             "checked": False,
             "state": "RUN_ONLY",
@@ -1120,6 +1680,7 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         built = _build_computed_run_snapshot(
             spec,
             effective_run,
+            root_run_dir=spec.run_dir if selected_cfg is not None else None,
             selected_cfg=selected_cfg,
             available_cfgs=available_cfgs,
             revision=revision,
@@ -1127,6 +1688,7 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
             freshness_info=freshness_info,
             project_check=None,
             expected_project_hash=None,
+            root_project_hash=root_project_hash,
         )
     else:
         # Both Project file and run directory are present: ALWAYS enforce freshness binding!
@@ -1137,30 +1699,50 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
         document = _read_project_json(spec.project_path)
         check_info = _project_check_summary(json_api.check_project(document))
         effective_run, selected_cfg, available_cfgs = _resolve_configuration_dir(spec.run_dir, spec.configuration_id)
+        is_multi_cfg_run = selected_cfg is not None or (spec.run_dir / "configurations").is_dir()
+        freshness_target = spec.run_dir if is_multi_cfg_run else effective_run
         try:
-            raw_freshness = run_freshness(document, effective_run)
+            raw_freshness = run_freshness(document, freshness_target)
         except RunNotReadable as exc:
-            raise SnapshotTransientError("RUN_UNREADABLE", str(exc), run_dir=effective_run.as_posix()) from None
+            raise SnapshotTransientError("RUN_UNREADABLE", str(exc), run_dir=freshness_target.as_posix()) from None
         except Exception as exc:  # noqa: BLE001
             raise SnapshotTransientError("FRESHNESS_UNREADABLE", f"could not evaluate freshness: {exc}") from None
 
+        # On-disk integrity failure must NEVER publish stale/corrupted data or overwrite last_valid_snapshot.
+        _raise_if_integrity_failed(raw_freshness.get("integrity"), run_dir=freshness_target)
+        selected_cfg_row: dict[str, Any] | None = None
+        if is_multi_cfg_run and selected_cfg is not None:
+            for row in raw_freshness.get("configurations") or []:
+                if isinstance(row, dict) and row.get("configuration_id") == selected_cfg:
+                    selected_cfg_row = row
+                    break
+            if selected_cfg_row is not None:
+                _raise_if_integrity_failed(selected_cfg_row.get("integrity"), run_dir=effective_run)
+
         freshness_info = _normalize_freshness(raw_freshness)
         if freshness_info["state"] == "CURRENT":
+            expected_hash = (
+                (selected_cfg_row.get("current") or {}).get("project_hash")
+                if selected_cfg_row is not None
+                else freshness_info.get("current_project_hash")
+            )
             built = _build_computed_run_snapshot(
                 spec,
                 effective_run,
+                root_run_dir=spec.run_dir if is_multi_cfg_run else None,
                 selected_cfg=selected_cfg,
                 available_cfgs=available_cfgs,
                 revision=revision,
                 fingerprint=fp_before,
                 freshness_info=freshness_info,
                 project_check=check_info,
-                expected_project_hash=freshness_info.get("current_project_hash"),
+                expected_project_hash=expected_hash,
+                root_project_hash=freshness_info.get("current_project_hash") if is_multi_cfg_run else None,
             )
         else:
             run_meta = raw_freshness.get("run") or {}
             historical_run = {
-                "run_dir": effective_run.as_posix(),
+                "run_dir": freshness_target.as_posix(),
                 "project_hash": run_meta.get("project_hash"),
                 "engine_input_hash": run_meta.get("engine_input_hash"),
                 "engine_build_id": run_meta.get("engine_build_id"),
@@ -1178,6 +1760,7 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
                 freshness_info=freshness_info,
                 historical_run=historical_run,
                 effective_run=effective_run,
+                root_run_dir=spec.run_dir if is_multi_cfg_run else None,
                 selected_cfg=selected_cfg,
                 available_cfgs=available_cfgs,
             )
@@ -1192,9 +1775,10 @@ def build_snapshot(spec: TargetSpec, *, revision: int = 1) -> BuiltSnapshot:
 
 
 def run_explicit_local_evaluation(project_path: Path, temp_dir: Path) -> tuple[Path, str | None]:
-    """Run ``os_optics.local.run_optical_project`` once into ``temp_dir`` without touching ``project_path``."""
+    """Run ``os_optics.local.run_optical_project`` (or ``run_configured_project``) once into ``temp_dir``."""
     require_engine()
     from os_optics.local import json_api, run_optical_project
+    from os_optics.local.configurations import run_configured_project
 
     document = _read_project_json(project_path)
     check = json_api.check_project(document)
@@ -1207,7 +1791,10 @@ def run_explicit_local_evaluation(project_path: Path, temp_dir: Path) -> tuple[P
         )
     run_dir = temp_dir / "run"
     try:
-        run_optical_project(document, output_dir=run_dir)
+        if _declared_configurations(document):
+            run_configured_project(document, output_dir=run_dir)
+        else:
+            run_optical_project(document, output_dir=run_dir)
     except Exception as exc:  # noqa: BLE001
         raise SnapshotError("EVALUATION_FAILED", f"explicit local evaluation failed: {exc}") from None
     return run_dir, check.get("project_hash")

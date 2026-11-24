@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/assets/viewer.css">
 </head>
 <body>
-<div id="app">
+<div id="app" data-revision="0" data-snapshot-id="">
   <header class="topbar">
     <div class="topbar-left">
       <div class="brand-mark" aria-hidden="true">
@@ -52,13 +52,15 @@
         <div class="pane-title-group">
           <h2 id="lbl-scene-title">Optical Path &amp; Traced Rays</h2>
           <span class="pill pill-info hidden" id="badge-geom-only">Geometry Only</span>
+          <span class="pill pill-warn hidden" id="badge-schematic">Schematic Parts</span>
         </div>
         <div class="pane-meta" id="scene-meta"></div>
       </div>
 
       <div class="viewport-frame-wrap">
-        <iframe id="engine-frame" title="Interactive 3D Optical Simulation View"></iframe>
-        <div id="frame-updating" class="frame-updating hidden">Updating 3D view…</div>
+        <iframe id="engine-frame-a" class="engine-frame active" title="Interactive 3D Optical Simulation View"></iframe>
+        <iframe id="engine-frame-b" class="engine-frame staging" title="Interactive 3D Optical Simulation View Staging" aria-hidden="true"></iframe>
+        <div id="frame-updating" class="frame-updating hidden">Syncing 3D scene…</div>
       </div>
 
       <div class="viewport-footer">

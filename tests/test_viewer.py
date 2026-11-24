@@ -18,10 +18,11 @@ import urllib.error
 import urllib.request
 
 from os_optics_kit import cli
-from os_optics_kit.viewer import LocalViewerServer, ViewerSession, build_snapshot, resolve_target
+from os_optics_kit.viewer import LocalViewerServer, SnapshotTransientError, ViewerSession, build_snapshot, resolve_target
 from tests.workflow_fixtures import KIT, ROOT, TempDir, quiet_environment, requires_engine
 
 DETECTOR_CASE_PROJECT = ROOT / "cases" / "detector-measurements" / "project.json"
+BEAM_EXPANDER_PROJECT = ROOT / "cases" / "beam-expander" / "project.json"
 
 
 def _sha256_bytes(path: Path) -> str:
@@ -76,11 +77,66 @@ def _write_json(path: Path, data: dict) -> Path:
     return path
 
 
-def _run_project(doc: dict, out_dir: Path) -> Path:
+def _run_project(doc: dict, out_dir: Path, *, ray_data: str = "full") -> Path:
     from os_optics.local import run_optical_project
 
-    run_optical_project(doc, output_dir=out_dir)
+    run_optical_project(doc, output_dir=out_dir, ray_data=ray_data)
     return out_dir
+
+
+def _run_configured_project(doc: dict, out_dir: Path) -> Path:
+    from os_optics.local.configurations import run_configured_project
+
+    run_configured_project(doc, output_dir=out_dir)
+    return out_dir
+
+
+def _multiconfig_project(*, high_power_w: float = 0.003) -> dict:
+    base = _detector_base()
+    src = next(c for c in base["components"] if c["instance_id"] == "SRC")
+    hi_source = json.loads(json.dumps(src["source_model"]))
+    hi_source["power_w"] = high_power_w
+    doc = json.loads(json.dumps(base))
+    doc["configurations"] = [
+        {"configuration_id": "low", "label": "Low power"},
+        {
+            "configuration_id": "high",
+            "label": "High power",
+            "source_models": [{"instance_id": "SRC", "source_model": hi_source}],
+        },
+    ]
+    return doc
+
+
+def _http_get_status_json(url: str) -> tuple[int, dict, dict[str, str]]:
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            return resp.status, json.loads(resp.read().decode("utf-8")), headers
+    except urllib.error.HTTPError as exc:
+        headers = {k.lower(): v for k, v in exc.headers.items()}
+        return exc.code, json.loads(exc.read().decode("utf-8")), headers
+
+
+def _run_view_without_engine(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run ``os_optics_kit.cli.main(['view', ...])`` with both ``os_optics`` import and dist metadata blocked."""
+    script = (
+        "import importlib.metadata as md, sys\n"
+        "class _Block:\n"
+        "  def find_spec(self, fullname, *a):\n"
+        "    if fullname == 'os_optics' or fullname.startswith('os_optics.'):\n"
+        "      raise ModuleNotFoundError(fullname, name=fullname)\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "_orig_version = md.version\n"
+        "def _fake_version(name):\n"
+        "  if name == 'os-optics':\n"
+        "    raise md.PackageNotFoundError(name)\n"
+        "  return _orig_version(name)\n"
+        "md.version = _fake_version\n"
+        "from os_optics_kit.cli import main\n"
+        "raise SystemExit(main(['view', *sys.argv[1:]]))\n"
+    )
+    return subprocess.run([sys.executable, "-c", script, *args], capture_output=True, text=True, timeout=60)
 
 
 def _http_get_json(url: str) -> tuple[int, dict, dict[str, str]]:
@@ -178,44 +234,46 @@ def _write_text_from_subprocess(path: Path, text: str) -> None:
 class ViewerCLIOfflineTests(unittest.TestCase):
     def test_view_registered_and_help_lazy_imports(self):
         self.assertEqual(cli.COMMANDS["view"][0], "viewer_tool")
-        block = (
-            "import sys\n"
-            "class B:\n"
-            "  def find_spec(self, fullname, *a):\n"
-            "    if fullname == 'os_optics' or fullname.startswith('os_optics.'):\n"
-            "      raise ModuleNotFoundError(fullname, name=fullname)\n"
-            "sys.meta_path.insert(0, B())\n"
-            "from os_optics_kit.cli import main\n"
-            "raise SystemExit(main(['view', '--help']))\n"
-        )
-        done = subprocess.run([sys.executable, "-c", block], capture_output=True, text=True, timeout=60)
+        done = _run_view_without_engine("--help")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue(done.stdout.startswith("usage: os-optics-kit view"))
 
-    def test_non_loopback_host_refused(self):
+    def test_non_loopback_host_refused_without_engine(self):
         with TempDir() as tmp:
             p = _write_json(tmp / "p.json", _detector_base())
-            done = subprocess.run(
-                [sys.executable, *KIT, "view", str(p), "--host", "0.0.0.0", "--no-open"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            done = _run_view_without_engine(str(p), "--host", "0.0.0.0", "--no-open")
             self.assertEqual(done.returncode, 4)
             err = json.loads(done.stderr)["error"]
             self.assertEqual(err["code"], "HOST_NOT_LOOPBACK")
 
-    def test_missing_path_refused(self):
+    def test_missing_path_refused_without_engine(self):
         with TempDir() as tmp:
-            done = subprocess.run(
-                [sys.executable, *KIT, "view", str(tmp / "missing.json"), "--once"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            done = _run_view_without_engine(str(tmp / "missing.json"), "--once")
             self.assertEqual(done.returncode, 4)
             err = json.loads(done.stderr)["error"]
             self.assertEqual(err["code"], "INPUT_NOT_FOUND")
+
+    def test_usage_checks_run_before_engine_check(self):
+        with TempDir() as tmp:
+            run_dir = tmp / "fake_run"
+            run_dir.mkdir()
+            done_eval = _run_view_without_engine(str(run_dir), "--evaluate", "--once")
+            self.assertEqual(done_eval.returncode, 4)
+            self.assertEqual(json.loads(done_eval.stderr)["error"]["code"], "USAGE")
+
+            p = _write_json(tmp / "p.json", _detector_base())
+            done_poll = _run_view_without_engine(str(p), "--poll-interval", "0", "--once")
+            self.assertEqual(done_poll.returncode, 4)
+            self.assertEqual(json.loads(done_poll.stderr)["error"]["code"], "USAGE")
+
+    def test_valid_project_without_engine_reports_missing_engine(self):
+        with TempDir() as tmp:
+            p = _write_json(tmp / "p.json", _detector_base())
+            done = _run_view_without_engine(str(p), "--once")
+            self.assertEqual(done.returncode, 4)
+            self.assertEqual(done.stdout, "")
+            err = json.loads(done.stderr)["error"]
+            self.assertEqual(err["code"], "ENGINE_NOT_INSTALLED")
 
 
 @requires_engine
@@ -643,6 +701,319 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
                     proc.kill()
                     proc.wait(timeout=5)
             self.assertEqual(_dir_hashes(run_dir), hashes_before)
+
+    def test_on_disk_integrity_failure_never_publishes_and_recovers(self):
+        """Fixture A (1 mW, completed, 2 branches) vs Fixture B (3 mW, partial, 1 branch):
+        mixing A's ray_data.json into B must NEVER publish ok or overwrite last_valid_snapshot.
+        """
+        with TempDir() as tmp:
+            doc_a = _multichannel_project(power_w=0.001)
+            doc_b = _partial_project()
+            for comp in doc_b["components"]:
+                if comp["instance_id"] == "SRC":
+                    comp["source_model"]["power_w"] = 0.003
+
+            run_a = _run_project(doc_a, tmp / "run_a")
+            run_b = _run_project(doc_b, tmp / "run_b")
+            watched = tmp / "watched"
+            shutil.copytree(run_b, watched)
+            project_b_path = _write_json(tmp / "project_b.json", doc_b)
+
+            # 1) Valid PARTIAL run B MUST publish ok / computed_run with its real results & limits.
+            with ViewerSession(resolve_target(watched), poll_interval=0.08) as session:
+                snap1 = session.load_initial().snapshot
+                self.assertEqual(snap1["result_mode"], "computed_run")
+                self.assertEqual(snap1["execution"]["outcome"], "PARTIAL")
+                self.assertAlmostEqual(snap1["power_ledger"]["total_input_W"], 0.003, places=12)
+                self.assertEqual(len(snap1["branches"]), 1)
+                self.assertTrue(snap1["integrity"]["consistent"])
+
+                # 2) Temporarily overwrite ONLY B's ray_data.json with A's ray_data.json.
+                shutil.copy2(run_a / "ray_data.json", watched / "ray_data.json")
+                self.assertTrue(session.poll_once())
+                env_bad = session.state.envelope()
+                self.assertEqual(env_bad["status"], "waiting")
+                self.assertIsNone(env_bad["snapshot"])
+                self.assertEqual(env_bad["error"]["code"], "RUN_INTEGRITY_FAILED")
+                self.assertTrue(env_bad["error"]["details"].get("problems"))
+                # Last genuinely verified snapshot (B, rev 1) stays intact!
+                self.assertEqual(env_bad["last_valid_snapshot"]["revision"], 1)
+                self.assertEqual(env_bad["last_valid_snapshot"]["snapshot_id"], snap1["snapshot_id"])
+
+                # 3) Also check startup / --once with NO prior valid snapshot refuses corrupted run.
+                with self.assertRaises(SnapshotTransientError) as ctx:
+                    build_snapshot(resolve_target(watched), revision=1)
+                self.assertEqual(ctx.exception.code, "RUN_INTEGRITY_FAILED")
+
+                once_bad = subprocess.run(
+                    [sys.executable, *KIT, "view", str(watched), "--once"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                self.assertEqual(once_bad.returncode, 4)
+                self.assertEqual(once_bad.stdout, "")
+                self.assertEqual(json.loads(once_bad.stderr)["error"]["code"], "RUN_INTEGRITY_FAILED")
+
+                # 4) Also check Project + Run pairing: integrity failure must raise RUN_INTEGRITY_FAILED
+                #    instead of silently publishing stale_run!
+                with self.assertRaises(SnapshotTransientError) as ctx_pair:
+                    build_snapshot(resolve_target(project_b_path, run=watched), revision=1)
+                self.assertEqual(ctx_pair.exception.code, "RUN_INTEGRITY_FAILED")
+
+                # 5) Restore valid B ray_data.json -> watcher recovers automatically!
+                shutil.copy2(run_b / "ray_data.json", watched / "ray_data.json")
+                self.assertTrue(session.poll_once())
+                env_rec = session.state.envelope()
+                self.assertEqual(env_rec["status"], "ok")
+                self.assertIsNone(env_rec["error"])
+                self.assertEqual(env_rec["snapshot"]["result_mode"], "computed_run")
+                self.assertAlmostEqual(env_rec["snapshot"]["power_ledger"]["total_input_W"], 0.003, places=12)
+
+    def test_snapshot_id_strict_binding_and_eviction_returns_409(self):
+        """Every HTTP scene/engine-view request pinned to snapshot_id must return THAT snapshot's
+        exact bytes or HTTP 409 SNAPSHOT_SUPERSEDED once evicted — NEVER another snapshot's bytes.
+        """
+        with TempDir() as tmp:
+            runs = [
+                _run_project(_multichannel_project(power_w=0.001 * (i + 1), bs_x_mm=float(i * 5)), tmp / f"run_{i}")
+                for i in range(5)
+            ]
+            watched = tmp / "watched"
+            shutil.copytree(runs[0], watched)
+
+            with ViewerSession(resolve_target(watched), poll_interval=0.1, max_cached_snapshots=3) as session:
+                snap_a = session.load_initial().snapshot
+                snap_a_id = snap_a["snapshot_id"]
+                hash_a = snap_a["identity"]["project_hash"]
+                scene_hash_a = snap_a["scene"]["scene_content_hash"]
+
+                with LocalViewerServer(session, host="127.0.0.1", port=0) as server:
+                    # Verify snapshot URLs are strictly bound to snapshot_id.
+                    self.assertEqual(snap_a["scene"]["engine_view_url"], f"/engine-view/{snap_a_id}/")
+                    self.assertEqual(snap_a["scene"]["document_url"], f"/api/scene-document?snapshot_id={snap_a_id}")
+
+                    # Advance to Run B (rev 2); both A and B are in the bounded cache (size 3).
+                    _replace_dir_from_subprocess(runs[1], watched)
+                    self.assertTrue(session.poll_once())
+                    snap_b = session.state.envelope()["snapshot"]
+                    snap_b_id = snap_b["snapshot_id"]
+                    hash_b = snap_b["identity"]["project_hash"]
+                    self.assertNotEqual(hash_a, hash_b)
+
+                    # Delayed fetch for A's pinned URLs MUST still return A's exact bytes (NEVER B's!).
+                    st_a1, view_a, hdr_a1 = _http_get_status_json(f"{server.url}engine-view/{snap_a_id}/view.json")
+                    self.assertEqual(st_a1, 200)
+                    self.assertEqual(hdr_a1["x-viewer-snapshot-id"], snap_a_id)
+                    self.assertEqual(hdr_a1["x-viewer-revision"], "1")
+                    self.assertEqual(hdr_a1["cache-control"], "no-store")
+                    self.assertEqual(view_a["identity"]["project_hash"], hash_a)
+                    self.assertEqual(view_a["identity"]["scene_content_hash"], scene_hash_a)
+
+                    st_a2, doc_a, hdr_a2 = _http_get_status_json(f"{server.url}api/scene-document?snapshot_id={snap_a_id}")
+                    self.assertEqual(st_a2, 200)
+                    self.assertEqual(hdr_a2["x-viewer-snapshot-id"], snap_a_id)
+                    self.assertEqual(doc_a["identity"]["project_hash"], hash_a)
+
+                    st_a_html, html_a, hdr_a_html = _http_get_bytes(f"{server.url}engine-view/{snap_a_id}/")
+                    self.assertEqual(st_a_html, 200)
+                    self.assertEqual(hdr_a_html["x-viewer-snapshot-id"], snap_a_id)
+                    self.assertIn(b"viewer.js", html_a)
+
+                    # B's pinned URL returns B's exact bytes.
+                    st_b, view_b, hdr_b = _http_get_status_json(f"{server.url}engine-view/{snap_b_id}/view.json")
+                    self.assertEqual(st_b, 200)
+                    self.assertEqual(hdr_b["x-viewer-snapshot-id"], snap_b_id)
+                    self.assertEqual(view_b["identity"]["project_hash"], hash_b)
+
+                    # Push 3 more updates (revs 3, 4, 5) so rev 1 (A) and rev 2 (B) are evicted from cache of size 3.
+                    for idx in (2, 3, 4):
+                        _replace_dir_from_subprocess(runs[idx], watched)
+                        self.assertTrue(session.poll_once())
+                    snap_latest = session.state.envelope()["snapshot"]
+                    self.assertEqual(snap_latest["revision"], 5)
+
+                    # Requesting evicted A MUST return HTTP 409 SNAPSHOT_SUPERSEDED (never latest bytes!).
+                    for url in (
+                        f"{server.url}engine-view/{snap_a_id}/view.json",
+                        f"{server.url}engine-view/{snap_a_id}/",
+                        f"{server.url}api/scene-document?snapshot_id={snap_a_id}",
+                        f"{server.url}api/scene-document?rev=1",
+                        f"{server.url}engine-view/rev-999-unknown/view.json",
+                    ):
+                        with self.subTest(url=url):
+                            st, body, _ = _http_get_status_json(url)
+                            self.assertEqual(st, 409)
+                            err = body["error"]
+                            self.assertEqual(err["code"], "SNAPSHOT_SUPERSEDED")
+                            self.assertEqual(err["current_snapshot_id"], snap_latest["snapshot_id"])
+                            self.assertEqual(err["current_revision"], 5)
+
+    def test_ray_data_summary_run_succeeds_without_crossing_table(self):
+        with TempDir() as tmp:
+            run_dir = _run_project(_multichannel_project(), tmp / "summary_run", ray_data="summary")
+
+            # CLI --once must exit 0 (not exit 4 on PUPIL_RAYS_NOT_RECORDED!).
+            once = subprocess.run(
+                [sys.executable, *KIT, "view", str(run_dir), "--once"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(once.returncode, 0, once.stderr)
+            env = json.loads(once.stdout)
+            self.assertEqual(env["status"], "ok")
+            snap = env["snapshot"]
+
+            self.assertEqual(snap["result_mode"], "computed_run")
+            self.assertTrue(snap["is_computed_result"])
+            self.assertTrue(snap["power_ledger"]["available"])
+            self.assertEqual(len(snap["branches"]), 2)
+            self.assertEqual(snap["scene"]["branch_count"], 2)
+            self.assertEqual(snap["scene"]["beam_count"], 2)
+            self.assertGreater(snap["scene"]["drawable_ray_count"], 0)
+            self.assertEqual(snap["scene"]["ray_count"], snap["scene"]["drawable_ray_count"])
+            self.assertFalse(snap["scene"]["crossing_table_available"])
+            self.assertIsNone(snap["scene"]["crossing_row_count"])
+            self.assertEqual(snap["scene"]["ray_data_mode"], "summary")
+            self.assertIn("RAY_DATA_SUMMARY_ONLY", {n["code"] for n in snap["notices"]})
+
+    def test_no_observation_plane_run_distinguishes_drawable_rays_from_crossings(self):
+        with TempDir() as tmp:
+            doc = _detector_base()
+            doc["observations"] = []
+            doc["targets"] = []
+            run_dir = _run_project(doc, tmp / "noobs_run")
+
+            snap = build_snapshot(resolve_target(run_dir), revision=1).snapshot
+            self.assertEqual(snap["result_mode"], "computed_run")
+            self.assertEqual(snap["scene"]["branch_count"], 2)
+            self.assertEqual(snap["scene"]["beam_count"], 2)
+            self.assertEqual(snap["scene"]["drawable_ray_count"], 26)
+            self.assertEqual(snap["scene"]["ray_count"], 26)
+            self.assertTrue(snap["scene"]["crossing_table_available"])
+            self.assertEqual(snap["scene"]["crossing_row_count"], 0)
+
+    def test_multi_configuration_project_and_root_run_freshness(self):
+        with TempDir() as tmp:
+            doc = _multiconfig_project(high_power_w=0.003)
+            project_path = _write_json(tmp / "project.json", doc)
+            root_run = _run_configured_project(doc, tmp / "cfg_run")
+
+            # 1) view PROJECT --run ROOT_RUN (both default and explicit configuration) -> CURRENT / computed_run.
+            snap_proj_default = build_snapshot(resolve_target(project_path, run=root_run), revision=1).snapshot
+            self.assertEqual(snap_proj_default["result_mode"], "computed_run")
+            self.assertTrue(snap_proj_default["is_computed_result"])
+            self.assertEqual(snap_proj_default["freshness"]["state"], "CURRENT")
+            self.assertEqual(snap_proj_default["source"]["available_configurations"], ["high", "low"])
+            self.assertEqual(snap_proj_default["source"]["configuration_id"], "high")
+            self.assertAlmostEqual(snap_proj_default["power_ledger"]["total_input_W"], 0.003, places=12)
+
+            snap_proj_low = build_snapshot(
+                resolve_target(project_path, run=root_run, configuration="low"), revision=2
+            ).snapshot
+            self.assertEqual(snap_proj_low["result_mode"], "computed_run")
+            self.assertEqual(snap_proj_low["freshness"]["state"], "CURRENT")
+            self.assertEqual(snap_proj_low["source"]["configuration_id"], "low")
+            self.assertAlmostEqual(snap_proj_low["power_ledger"]["total_input_W"], 0.001, places=12)
+
+            # 2) view ROOT_RUN --project PROJECT -> CURRENT / computed_run.
+            snap_run_pair = build_snapshot(
+                resolve_target(root_run, project=project_path, configuration="high"), revision=3
+            ).snapshot
+            self.assertEqual(snap_run_pair["result_mode"], "computed_run")
+            self.assertEqual(snap_run_pair["freshness"]["state"], "CURRENT")
+            self.assertEqual(snap_run_pair["source"]["configuration_id"], "high")
+            self.assertAlmostEqual(snap_run_pair["power_ledger"]["total_input_W"], 0.003, places=12)
+
+            # 3) Edit the multi-configuration Project -> flips to HISTORICAL / stale_run and withholds stale power!
+            _write_json(project_path, _multiconfig_project(high_power_w=0.004))
+            for spec in (
+                resolve_target(project_path, run=root_run, configuration="high"),
+                resolve_target(root_run, project=project_path, configuration="high"),
+            ):
+                snap_stale = build_snapshot(spec, revision=4).snapshot
+                self.assertEqual(snap_stale["result_mode"], "stale_run")
+                self.assertFalse(snap_stale["is_computed_result"])
+                self.assertEqual(snap_stale["freshness"]["state"], "HISTORICAL")
+                self.assertFalse(snap_stale["power_ledger"]["available"])
+                self.assertEqual(snap_stale["power_ledger"]["reason"], "STALE_RUN")
+                self.assertEqual(snap_stale["scene"]["beam_count"], 0)
+
+    def test_beam_expander_catalog_geometry_and_schematic_fallback(self):
+        # 1) Real unevaluated catalog Project (cases/beam-expander/project.json): true 12.7 mm x 2.6 / 2.2 mm lenses.
+        built = build_snapshot(resolve_target(BEAM_EXPANDER_PROJECT), revision=1)
+        snap = built.snapshot
+        self.assertEqual(snap["result_mode"], "geometry_preview")
+        self.assertFalse(snap["is_computed_result"])
+        self.assertTrue(snap["scene"]["geometry_only"])
+        self.assertEqual(snap["scene"]["beam_count"], 0)
+        self.assertEqual(built.scene_document["beams"], [])
+        self.assertFalse(snap["scene"]["has_schematic_geometry"])
+        self.assertNotIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap["notices"]})
+        self.assertEqual(snap["identity"]["scene_content_hash"], built.scene_document["identity"]["scene_content_hash"])
+
+        parts = {p["id"]: p for p in snap["scene"]["parts"]}
+        for lens_id, expected_thk in (("L1", 2.6), ("L2", 2.2)):
+            lens_part = parts[lens_id]
+            self.assertEqual(lens_part["geometry_source"], "catalog")
+            self.assertFalse(lens_part["schematic"])
+            self.assertAlmostEqual(lens_part["diameter_mm"], 12.7, places=3)
+            self.assertAlmostEqual(lens_part["thickness_mm"], expected_thk, places=3)
+            lo = lens_part["bounds"]["min_mm"]
+            hi = lens_part["bounds"]["max_mm"]
+            self.assertAlmostEqual(hi[0] - lo[0], expected_thk, places=2)
+            self.assertAlmostEqual(hi[1] - lo[1], 12.7, places=2)
+            self.assertAlmostEqual(hi[2] - lo[2], 12.7, places=2)
+
+        # 2) Valid Project with an unspecified custom detector (ELEMENT_MARKER placeholder) -> marked schematic!
+        with TempDir() as tmp:
+            doc_custom = _detector_base()
+            doc_custom["components"].append({
+                "instance_id": "CUSTOM_DET",
+                "optical_role": "detector",
+                "custom_part": {"custom_part_key": "custom-det", "description": "Custom detector housing"},
+                "nominal_pose": {"position_mm": [220.0, 0.0, 0.0], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]},
+                "selected_parameters": [],
+                "retained_dofs": [],
+            })
+            doc_custom["observations"].append({
+                "observation_id": "custom_face",
+                "device_instance_id": "CUSTOM_DET",
+                "pose": {"position_mm": [0.0, 0.0, 0.0], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]},
+                "aperture": {"shape": "circle", "radius_mm": 5.0, "center_offset_mm": [0.0, 0.0], "obstruction_radius_mm": 0.0},
+                "absorbing": True,
+                "medium": "air",
+            })
+            p_custom = _write_json(tmp / "custom.json", doc_custom)
+            snap_custom = build_snapshot(resolve_target(p_custom), revision=1).snapshot
+            c_parts = {p["id"]: p for p in snap_custom["scene"]["parts"]}
+            self.assertTrue(c_parts["CUSTOM_DET"]["schematic"])
+            self.assertEqual(c_parts["CUSTOM_DET"]["geometry_source"], "schematic")
+            self.assertTrue(snap_custom["scene"]["has_schematic_geometry"])
+            self.assertIn("CUSTOM_DET", snap_custom["scene"]["schematic_part_ids"])
+            self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap_custom["notices"]})
+
+            # 3) Unlowerable Project (bare custom lens with no dimensions) -> fallback marks schematic explicitly!
+            doc_bare = _detector_base()
+            doc_bare["components"].append({
+                "instance_id": "BARE_LENS",
+                "optical_role": "lens",
+                "custom_part": {"custom_part_key": "bare-lens", "description": "Unspecified custom lens"},
+                "nominal_pose": {"position_mm": [80.0, 0.0, 0.0], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]},
+                "selected_parameters": [],
+                "retained_dofs": [],
+            })
+            p_bare = _write_json(tmp / "bare.json", doc_bare)
+            snap_bare = build_snapshot(resolve_target(p_bare), revision=1).snapshot
+            b_parts = {p["id"]: p for p in snap_bare["scene"]["parts"]}
+            self.assertTrue(b_parts["BARE_LENS"]["schematic"])
+            self.assertEqual(b_parts["BARE_LENS"]["geometry_source"], "schematic")
+            self.assertFalse(b_parts["BS"]["schematic"])
+            self.assertEqual(b_parts["BS"]["geometry_source"], "project_design_geometry")
+            self.assertTrue(snap_bare["scene"]["has_schematic_geometry"])
+            self.assertIn("BARE_LENS", snap_bare["scene"]["schematic_part_ids"])
+            self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap_bare["notices"]})
 
 
 if __name__ == "__main__":
