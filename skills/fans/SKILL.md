@@ -39,11 +39,11 @@ error on stderr (`CHIEF_RAY_MISSING`, `PUPIL_RAYS_MISSING`, `PATH_NOT_FOUND`, `E
 
 ## Conventions
 
-- Pupil coordinate: launch offset normalized by the outermost ring (rho = 1 at the edge). Tangential fan:
-  pupil y axis; sagittal: pupil x axis.
-- Transverse aberration: image-plane (u, v) minus the chief ray's, in micrometres.
-- Longitudinal aberration: distance along the chief ray, from the plane, where a fan ray crosses it; null for
-  a ray parallel to the chief ray.
+- Pupil coordinate: launch offset normalized by the outermost ring (rho = 1 at the edge). Tangential
+  direction: from the axis towards the chief ray's image point (+v on axis); sagittal: perpendicular to it.
+- Transverse aberration: displacement from the chief ray along the fan direction, in micrometres.
+- Longitudinal aberration: distance along the plane normal where a fan ray crosses the chief ray; positive =
+  behind the plane; null for a ray parallel to the chief ray. Assumes no image rotation in the path.
 - OPD: the engine's per-ray OPD (reference plane through the chief ray, piston removed), in waves.
 
 ## Minimal example

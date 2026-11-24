@@ -6,12 +6,14 @@ Everything is computed from published engine outputs ('os-optics results rays' a
 traced here. Each path of the run is one field point at one wavelength. For each path:
 
 * pupil coordinates are the rays' launch offsets, normalized by the outermost ring (rho = 1 at the pupil edge);
-* the tangential fan is the rays on the pupil's y axis, the sagittal fan those on its x axis (|other coordinate| <= 1e-9
-  of the pupil radius after normalization);
-* transverse aberration is a ray's image-plane (u, v) minus the chief ray's, in micrometres;
-* longitudinal aberration is the distance along the chief ray, from the image plane, at which a ray of the fan crosses
-  the chief ray in the fan's plane: -(transverse) / (tangent of the ray's angle to the chief ray), in millimetres; a ray
-  parallel to the chief ray has none (null);
+* the tangential direction is the unit vector in the plane's (u, v) from the axis towards the chief ray's image point
+  (+v for an on-axis field); the sagittal direction is perpendicular to it. Launch offsets, image displacements and
+  slopes are projected onto both; a ray belongs to a fan when its other pupil component is within 1e-9 of zero. This
+  assumes the source's launch frame is not rotated against the plane's (u, v) (no image rotation in the path);
+* transverse aberration is a ray's image-plane displacement from the chief ray along the fan direction, in micrometres;
+* longitudinal aberration is the distance along the plane normal, from the image plane, at which a fan ray crosses the
+  chief ray in that direction: -(transverse) / (difference of their slopes du/dn or dv/dn), in millimetres; positive
+  means the crossing lies behind the plane (further along the light). A ray parallel to the chief ray has none (null);
 * OPD is the engine's own per-ray OPD ('results wavefront', reference plane through the chief ray, piston removed), in
   waves.
 
@@ -46,7 +48,11 @@ def _engine_json(argv: list[str], runner=subprocess.run):
     done = runner(command + argv, capture_output=True, text=True, encoding="utf-8")
     if done.returncode not in (0, 1):
         raise FanError("ENGINE_RESULTS_FAILED", (done.stderr or done.stdout or "").strip()[-500:])
-    return json.loads(done.stdout)
+    try:
+        return json.loads(done.stdout)
+    except (TypeError, ValueError):
+        raise FanError("ENGINE_RESULTS_FAILED", "the engine did not return one JSON document: "
+                       + (done.stderr or done.stdout or "").strip()[-500:]) from None
 
 
 def load_rays(run_dir: Path, monitor: str, runner=subprocess.run) -> list[dict]:
@@ -68,6 +74,14 @@ def _pupil(rays: list[dict]) -> tuple[dict, float]:
     return chief, radius
 
 
+def tangential_axis(u_mm: float, v_mm: float) -> tuple[float, float]:
+    """Unit vector in the plane's (u, v) from the axis towards the chief ray's image point; +v on axis."""
+    length = math.hypot(u_mm, v_mm)
+    if length < 1e-9:
+        return 0.0, 1.0
+    return u_mm / length, v_mm / length
+
+
 def _longitudinal_mm(transverse_mm: float, slope: float) -> float | None:
     return None if abs(slope) < 1e-12 else -transverse_mm / slope
 
@@ -82,6 +96,8 @@ def path_fans(rays: list[dict], wavefront: dict | None = None, zones: int | None
         step = len(rings) / zones
         kept = {rings[min(len(rings) - 1, round((i + 1) * step) - 1)] for i in range(zones)}
     opd = {item["ray_index"]: item["opd_waves"] for item in (wavefront or {}).get("rays", [])}
+    tu, tv = tangential_axis(chief["u_mm"], chief["v_mm"])
+    su_, sv_ = -tv, tu
     fans: dict[str, list[dict]] = {"tangential": [], "sagittal": []}
     for ray in counted:
         if ray.get("chief") or ray.get("ring_index") not in kept:
@@ -90,8 +106,11 @@ def path_fans(rays: list[dict], wavefront: dict | None = None, zones: int | None
         du_mm, dv_mm = ray["u_mm"] - chief["u_mm"], ray["v_mm"] - chief["v_mm"]
         su = ray["direction_u"] / ray["direction_n"] - chief["direction_u"] / chief["direction_n"]
         sv = ray["direction_v"] / ray["direction_n"] - chief["direction_v"] / chief["direction_n"]
-        # the fan's plane: launch x maps onto the plane's u axis, launch y onto v (the engine's source frame)
-        for name, rho, other, transverse, slope in (("tangential", py, px, dv_mm, sv), ("sagittal", px, py, du_mm, su)):
+        # project onto the tangential (towards the chief ray's image point) and sagittal axes
+        pt, ps = px * tu + py * tv, px * su_ + py * sv_
+        dt, ds = du_mm * tu + dv_mm * tv, du_mm * su_ + dv_mm * sv_
+        st, ss = su * tu + sv * tv, su * su_ + sv * sv_
+        for name, rho, other, transverse, slope in (("tangential", pt, ps, dt, st), ("sagittal", ps, pt, ds, ss)):
             if abs(other) <= AXIS_TOLERANCE and abs(rho) > 0:
                 fans[name].append({"ray_index": ray["ray_index"], "zone": ray["ring_index"], "rho": rho,
                                    "transverse_um": transverse * 1000.0,

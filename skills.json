@@ -72,8 +72,8 @@
       "command": "os-optics-kit fans",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/fans/SKILL.md",
-      "tokens": 715,
-      "sha256": "a3ba127c926ac0bedb73e3e01c722ef1d5c12bf3cf004076cef4ba7785264c68"
+      "tokens": 751,
+      "sha256": "beae23ab52ffcee8b83fc5a852ab12b9a6fb6e6e1a406d54af30ae126d2323db"
     },
     {
       "name": "measurements",
