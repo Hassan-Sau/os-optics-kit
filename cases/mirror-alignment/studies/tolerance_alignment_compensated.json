@@ -1,0 +1,79 @@
+{
+ "description": "Tolerance sampling of the fold-mirror alignment design with mirror-alignment compensation: mirror tilts about local Y and X (normal, sigma 0.1 mrad, truncated at 3 sigma) and a source offset in y (uniform +-0.05 mm) are sampled; for each sample the M1 tilts about local Y and X are solved within +-1 mrad to centre the beam on the far plane, and the as-built and compensated results are both recorded. Run with --no-compensation for the same samples without it.",
+ "design": {
+  "builder": "alignment",
+  "arguments": {}
+ },
+ "targets": [
+  "near_position_u",
+  "near_position_v",
+  "far_position_u",
+  "far_position_v",
+  "far_pointing_u",
+  "far_pointing_v"
+ ],
+ "samples": 4,
+ "seed": 20261018,
+ "max_evaluations": 5,
+ "parameters": [
+  {
+   "name": "mirror_tilt_y",
+   "unit": "mrad",
+   "ops": [
+    {"op": "transform", "selector": {"ids": ["M1"]}, "frame": {"component": "M1"}, "pivot": {"component": "M1"},
+     "rotation": {"axis": [0, 1, 0], "angle_deg": "$value"}}
+   ],
+   "distribution": {"kind": "normal", "sigma": 0.1, "mean_offset": 0, "truncate_sigma": 3}
+  },
+  {
+   "name": "mirror_tilt_x",
+   "unit": "mrad",
+   "ops": [
+    {"op": "transform", "selector": {"ids": ["M1"]}, "frame": {"component": "M1"}, "pivot": {"component": "M1"},
+     "rotation": {"axis": [1, 0, 0], "angle_deg": "$value"}}
+   ],
+   "distribution": {"kind": "normal", "sigma": 0.1, "mean_offset": 0, "truncate_sigma": 3}
+  },
+  {
+   "name": "source_offset_y",
+   "unit": "mm",
+   "ops": [
+    {"op": "transform", "selector": {"ids": ["SRC"]}, "frame": "design", "translation_mm": [0, "$value", 0]}
+   ],
+   "distribution": {"kind": "uniform", "low": -0.05, "high": 0.05}
+  }
+ ],
+ "compensation": {
+  "description": "mirror alignment: re-tilt M1 about its local Y and X axes",
+  "objective": [
+   {"target": "far_position_u", "goal": 0, "scale": 0.1},
+   {"target": "far_position_v", "goal": 0, "scale": 0.1}
+  ],
+  "compensators": [
+   {
+    "name": "align_tilt_y",
+    "unit": "mrad",
+    "nominal": 0,
+    "ops": [
+     {"op": "transform", "selector": {"ids": ["M1"]}, "frame": {"component": "M1"}, "pivot": {"component": "M1"},
+      "rotation": {"axis": [0, 1, 0], "angle_deg": "$value"}}
+    ],
+    "bounds": [-1, 1],
+    "tolerance": 0.001
+   },
+   {
+    "name": "align_tilt_x",
+    "unit": "mrad",
+    "nominal": 0,
+    "ops": [
+     {"op": "transform", "selector": {"ids": ["M1"]}, "frame": {"component": "M1"}, "pivot": {"component": "M1"},
+      "rotation": {"axis": [1, 0, 0], "angle_deg": "$value"}}
+    ],
+    "bounds": [-1, 1],
+    "tolerance": 0.001
+   }
+  ],
+  "max_evaluations": 120,
+  "max_sweeps": 4
+ }
+}

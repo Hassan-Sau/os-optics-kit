@@ -438,6 +438,7 @@
         "studies/sensitivity_expander.json",
         "studies/sensitivity_expander_band_edge.json",
         "studies/tolerance_expander.json",
+        "studies/tolerance_expander_refocus.json",
         "workflow.py"
       ],
       "project_sha256": "617fc34c578308c9a4a7555884bf07502cd41ddb0cb3e7a6bee026077d3a59ee"
@@ -912,6 +913,7 @@
         "project.json",
         "studies/sensitivity_alignment.json",
         "studies/tolerance_alignment.json",
+        "studies/tolerance_alignment_compensated.json",
         "workflow.py"
       ],
       "project_sha256": "136629b24714052338cf06d5031b7a3481723cc4626cebf84a03c17b0962622a"

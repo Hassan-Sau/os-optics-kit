@@ -1,0 +1,53 @@
+{
+ "description": "Tolerance sampling of the expander/focus design with refocus compensation: L2 axial position (uniform +-0.5 mm) and source waist radius (normal, sigma 5 um, truncated at 3 sigma) are sampled; for each sample the focus-plane axial position is solved within +-2 mm to minimise the spot radius, and the as-built and compensated results are both recorded. Run with --no-compensation for the same samples without it.",
+ "design": {
+  "builder": "expander_focus",
+  "arguments": {}
+ },
+ "targets": [
+  "expanded_radius",
+  "spot_radius",
+  "waist_location"
+ ],
+ "samples": 4,
+ "seed": 20261018,
+ "max_evaluations": 5,
+ "parameters": [
+  {
+   "name": "L2_axial",
+   "unit": "mm",
+   "ops": [
+    {"op": "transform", "selector": {"ids": ["L2"]}, "frame": {"component": "L2"},
+     "translation_mm": [0, 0, "$value"]}
+   ],
+   "distribution": {"kind": "uniform", "low": -0.5, "high": 0.5}
+  },
+  {
+   "name": "source_waist_radius",
+   "unit": "um",
+   "nominal": 500,
+   "ops": [
+    {"op": "set_source_model", "instance_id": "SRC", "changes": {"waist_radius_mm": "$value"}}
+   ],
+   "distribution": {"kind": "normal", "sigma": 5, "mean_offset": 0, "truncate_sigma": 3}
+  }
+ ],
+ "compensation": {
+  "description": "refocus: move the focus plane along the axis",
+  "objective": [{"target": "spot_radius", "goal": 0, "scale": 0.02}],
+  "compensators": [
+   {
+    "name": "refocus",
+    "unit": "mm",
+    "nominal": 0,
+    "ops": [
+     {"op": "transform", "selector": {"ids": ["focus"]}, "frame": "design",
+      "translation_mm": ["$value", 0, 0]}
+    ],
+    "bounds": [-2, 2],
+    "tolerance": 0.002
+   }
+  ],
+  "max_evaluations": 40
+ }
+}
