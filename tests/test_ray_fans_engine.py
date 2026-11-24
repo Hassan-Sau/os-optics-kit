@@ -104,5 +104,64 @@ class RayFansAgainstTheEngine(unittest.TestCase):
                 self.assertTrue(all(row["opd_waves"] is None for row in path["fans"]["tangential"]))
 
 
+SPOT_TOL_REL = 0.10
+SPOT_MIN_UM = 4.0
+
+
+@unittest.skipUnless(HAS_ENGINE, "needs os-optics (the engine)")
+class RayFansOnARealLens(unittest.TestCase):
+    """aspheric-lens: 3 fields x 3 wavelengths, the engine's spot and OPD numbers at the same field points.
+
+    OPD: the kit's per-path RMS of the engine's per-ray OPD equals 'results wavefront' rms_waves (consistency, rel 1e-9).
+    Spot: the kit's RMS radius about the centroid (equal weights, the run's 96 saved pupil rays) against the engine's
+    'geometric_spot_rms_radius' from 'results imaging', which re-traces a dense pupil grid (launch grid 192, refined):
+    the samplings differ, so the tolerance is +-10 % and applies only to spots of at least 4 um, where the sampling
+    difference is small against the spot (observed: within 5.6 %; the 1.39 um on-axis spot differs by 15 %).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        case = ROOT / "cases/aspheric-lens"
+        cls.run_dir = base / "run"
+        done = subprocess.run([sys.executable, "-m", "os_optics", "project", "run", str(case / "project.json"),
+                               "--out-dir", str(cls.run_dir)], capture_output=True, text=True)
+        if not (cls.run_dir / "manifest.json").exists():
+            raise unittest.SkipTest(f"aspheric-lens did not run (catalog?): {done.stderr[-300:]}")
+        imaging = subprocess.run([sys.executable, "-m", "os_optics", "results", "imaging", str(cls.run_dir),
+                                  "--monitor", "image_plane", "--request", str(case / "imaging-request.json")],
+                                 capture_output=True, text=True)
+        cls.document = ray_fans.build(cls.run_dir, "image_plane", imaging=json.loads(imaging.stdout))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_covers_several_fields_and_wavelengths(self):
+        paths = self.document["paths"]
+        self.assertGreaterEqual(len({p["source_id"].split("_")[0] for p in paths}), 2)
+        self.assertGreaterEqual(len({p["wavelength_nm"] for p in paths}), 2)
+
+    def test_opd_rms_equals_the_engine_wavefront(self):
+        for path in self.document["paths"]:
+            engine = path["engine"]["opd_rms_waves"]
+            with self.subTest(path=path["path_id"]):
+                self.assertEqual(path["engine"]["wavefront_status"], "OK")
+                self.assertAlmostEqual(path["opd_rms_waves"], engine, delta=1e-9 * max(1.0, abs(engine)))
+
+    def test_spot_rms_against_the_engine_spot_radius(self):
+        checked = 0
+        for path in self.document["paths"]:
+            engine = path["engine"]["spot_rms_um"]
+            self.assertIsNotNone(engine, path["path_id"])
+            if engine < SPOT_MIN_UM:
+                continue
+            checked += 1
+            with self.subTest(path=path["path_id"], engine_um=engine, kit_um=path["spot_rms_um"]):
+                self.assertLessEqual(abs(path["spot_rms_um"] - engine) / engine, SPOT_TOL_REL)
+        self.assertGreaterEqual(checked, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
