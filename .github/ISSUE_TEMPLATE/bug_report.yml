@@ -50,3 +50,17 @@ body:
         The JSON the command printed, its exit code, and any traceback. Remove anything you do not want to make
         public.
       render: text
+  - type: input
+    id: where
+    attributes:
+      label: Where the work lives
+      description: The tool, case, skill or presentation path involved, for example `tools/os_optics_kit/<module>.py` or `cases/<name>/`.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: >-
+        How to check the fix: a given input and its expected output, a command and its result, or a test that
+        fails now and passes after the fix.
+    validations:
+      required: true

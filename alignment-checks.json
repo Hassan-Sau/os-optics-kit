@@ -106,7 +106,7 @@
     {
       "name": "catalog-tests",
       "description": "Catalog-dependent tests, run after the catalog is prepared; a missing catalog fails them",
-      "argv": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_optical_designs.py::CatalogVariantTests", "tests/test_workflow_examples.py::CatalogBeamExpanderDemoTests", "tests/test_workflow_postprocess.py::CandidateTests"],
+      "argv": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_optical_designs.py::CatalogVariantTests", "tests/test_workflow_examples.py::CatalogBeamExpanderDemoTests", "tests/test_workflow_postprocess.py::CandidateTests", "tests/test_viewer.py::ViewerCatalogGeometryTests"],
       "needs_catalog": true,
       "env": {"OS_OPTICS_KIT_REQUIRE_CATALOG": "1"},
       "timeout": 600
@@ -171,6 +171,21 @@
       "name": "tolerance-polarization",
       "description": "Seeded tolerance sampling, 20 samples, out-of-model samples counted",
       "argv": ["{python}", "-m", "os_optics_kit", "tolerance", "cases/polarization-control/studies/tolerance_polarization.json", "--out", "{runs}/tolerance-polarization", "--samples", "20", "--no-plots", "--no-report"],
+      "expected_status": "COMPLETED",
+      "timeout": 300
+    },
+    {
+      "name": "tolerance-polarization-workers",
+      "description": "The same tolerance study in two worker processes completes",
+      "argv": ["{python}", "-m", "os_optics_kit", "tolerance", "cases/polarization-control/studies/tolerance_polarization.json", "--out", "{runs}/tolerance-polarization-workers", "--samples", "20", "--no-plots", "--no-report", "--workers", "2"],
+      "expected_status": "COMPLETED",
+      "timeout": 300
+    },
+    {
+      "name": "study-resume",
+      "description": "study run --resume of the completed tolerance study completes",
+      "argv": ["{python}", "-m", "os_optics_kit", "study", "run", "{runs}/tolerance-polarization", "--resume"],
+      "needs": ["tolerance-polarization"],
       "expected_status": "COMPLETED",
       "timeout": 300
     },
