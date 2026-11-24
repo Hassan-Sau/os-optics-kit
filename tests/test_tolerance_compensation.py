@@ -115,6 +115,64 @@ def test_compensate_as_built_error(monkeypatch, tmp_path):
     assert block["reason"]["code"] == "AS_BUILT_ERROR" and calls == []
 
 
+def _fake_final(monkeypatch, trial_of, final_of):
+    """Like ``_fake``, but the final compensated run (folder ``compensated``) is answered by ``final_of``."""
+    monkeypatch.setattr(cm, "compensated_document",
+                        lambda doc, comps, offsets: {**doc, "offset": offsets[comps[0]["name"]]})
+
+    def run(sub, folder, limits):
+        x = sub["project"]["offset"]
+        return final_of(x) if Path(folder).name == "compensated" else trial_of(x)
+    return run
+
+
+def test_compensate_final_run_failure_keeps_as_built(monkeypatch, tmp_path):
+    run = _fake_final(monkeypatch, lambda x: _record(abs(x - 0.25) + 0.01),
+                      lambda x: _record(None, error="RUN_REFUSED"))
+    block = cm.compensate(_request(), _record(0.26), tmp_path, PLAN, run=run)
+    assert block["state"] == cm.FAILED and block["compensated"] is None
+    assert block["reason"]["code"] == "EVALUATION_ERROR"
+    assert block["reason"]["message"].startswith("compensated run:")
+    assert block["compensators"]["refocus"]["offset"] is None
+
+
+def test_compensate_worse_than_as_built_keeps_as_built(monkeypatch, tmp_path):
+    run = _fake_final(monkeypatch, lambda x: _record(abs(x - 0.25) + 0.01), lambda x: _record(0.5))
+    block = cm.compensate(_request(), _record(0.26), tmp_path, PLAN, run=run)
+    assert block["state"] == cm.FAILED and block["compensated"] is None
+    assert block["reason"]["code"] == "WORSE_THAN_AS_BUILT"
+    assert block["reason"]["compensated_cost"] > block["reason"]["as_built_cost"]
+    assert block["compensators"]["refocus"]["offset"] is None
+
+
+def test_compensate_run_stopped(monkeypatch, tmp_path):
+    run, _calls = _fake(monkeypatch, lambda x: _record(None, error="RUN_STOPPED"))
+    block = cm.compensate(_request(), _record(0.26), tmp_path, PLAN, run=run)
+    assert block["state"] == cm.FAILED and block["compensated"] is None
+    assert block["reason"]["code"] == "RUN_STOPPED"
+
+
+def test_compensate_ops_refused(monkeypatch, tmp_path):
+    def refuse(doc, comps, offsets):
+        raise wc.WorkflowError("OPS_INVALID", "no such component")
+    monkeypatch.setattr(cm, "compensated_document", refuse)
+    calls = []
+    block = cm.compensate(_request(), _record(0.26), tmp_path, PLAN,
+                          run=lambda sub, folder, limits: calls.append(1) or _record(0.1))
+    assert block["state"] == cm.FAILED and block["compensated"] is None and calls == []
+    assert block["reason"]["code"] == "EVALUATION_ERROR"
+    assert "compensator ops refused" in block["reason"]["message"]
+
+
+def test_bounds_must_strictly_contain_zero():
+    kw = {"document": {}, "targets": ["spot"], "units": {"spot": "mm"}, "parameter_names": []}
+    for bounds in ([0.0, 1.0], [-1.0, 0.0]):
+        raw = {"objective": [{"target": "spot", "goal": 0, "scale": 1}],
+               "compensators": [dict(COMP, bounds=bounds, ops=[])]}
+        with pytest.raises(wc.WorkflowError):
+            cm.normalize(raw, **kw)
+
+
 def test_failed_sample_is_kept_in_aggregation_rows():
     record = {**_record(0.3), "result_stage": "as_built",
               "compensation": {"state": cm.FAILED, "reason": {"code": "BOUNDS_HIT"}, "evaluations": 9,
@@ -180,3 +238,47 @@ def test_spec_without_compensation_plans_identical_requests(tmp_path):
     ts.plan_tolerance(spec, tmp_path / "b", spec_dir=REFOCUS.parent, compensation=False)
     for name in ("plan.jsonl", "samples.csv", "sampling.json"):
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes(), name
+
+
+def _engine_failure_run(tmp_path, mutate):
+    from os_optics_kit import tolerance_study as ts
+
+    spec = json.loads(REFOCUS.read_text(encoding="utf-8"))
+    spec["samples"], spec["max_evaluations"] = 2, 3
+    mutate(spec["compensation"]["compensators"][0])
+    off = ts.run_tolerance(spec, tmp_path / "off", spec_dir=REFOCUS.parent, plots=False, report=False,
+                           compensation=False)
+    on = ts.run_tolerance(spec, tmp_path / "on", spec_dir=REFOCUS.parent, plots=False, report=True)
+    assert len(on["rows"]) == len(off["rows"]) == 2  # no sample is dropped
+    for a, b in zip(off["rows"], on["rows"], strict=True):
+        assert a["sample_id"] == b["sample_id"] and a["result_hash"] == b["result_hash"]
+        assert a["outcome"] == b["outcome"] and b["result_stage"] == "as_built"
+        for key in [k for k in a if k.startswith("target:")]:
+            assert a[key] == b[key], key  # the as-built values stay
+    return on
+
+
+@engine
+def test_engine_bounds_hit_keeps_as_built(tmp_path):
+    def narrow(comp):
+        comp["bounds"], comp["tolerance"] = [-0.01, 0.01], 0.0005
+    on = _engine_failure_run(tmp_path, narrow)
+    failed = [r for r in on["rows"] if r["compensation:state"] == cm.FAILED]
+    assert failed and all(r["compensation:reason"] == "BOUNDS_HIT" for r in failed)
+    assert on["compensation"]["failure_reasons"].get("BOUNDS_HIT") == len(failed)
+    for r in failed:
+        assert r.get("compensated:outcome") in (None, "")
+
+
+@engine
+def test_engine_invalid_compensator_op_is_evaluation_error(tmp_path):
+    def invalid(comp):
+        comp["ops"][0]["selector"] = {"ids": ["no-such-component"]}
+    on = _engine_failure_run(tmp_path, invalid)
+    assert all(r["compensation:state"] == cm.FAILED and r["compensation:reason"] == "EVALUATION_ERROR"
+               for r in on["rows"])
+    assert on["compensation"]["failure_reasons"] == {"EVALUATION_ERROR": 2}
+    assert on["compensation"]["states"][cm.SOLVED] == 0
+    report = (tmp_path / "on" / "report" / "report.md").read_text(encoding="utf-8")
+    assert "## Compensation" in report and "compensated_or_as_built" in report
+    assert "FAILED: EVALUATION_ERROR" in report

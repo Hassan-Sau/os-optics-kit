@@ -31,7 +31,12 @@ A solve that fails keeps the as-built result and records a structured reason (``
 ``AS_BUILT_ERROR`` (the as-built run gave no usable objective), ``EVALUATION_ERROR`` (a trial run failed or gave no
 finite objective value), ``NOT_CONVERGED`` (``max_evaluations`` or ``max_sweeps`` reached first), ``BOUNDS_HIT``
 (the best offset lies at a bound: the optimum may lie outside), ``RUN_STOPPED`` (a trial was stopped: the time
-limit or a cancellation). The sample is never dropped: its outcome stays the as-built outcome.
+limit or a cancellation), ``WORSE_THAN_AS_BUILT`` (the final compensated run, with the study's full outputs, has a
+higher objective than as-built beyond a relative 1e-9). The sample is never dropped: its outcome stays the as-built
+outcome.
+
+The tolerance spec's top-level ``max_evaluations`` caps the planned runs (nominal + one per sample); the trial runs of
+a solve are bounded separately, per sample, by ``compensation.max_evaluations`` (plus one final compensated run).
 """
 
 from __future__ import annotations
@@ -47,7 +52,9 @@ EVALUATOR = "os_optics_kit.study.compensation:run_compensated"
 PLAN_LABEL = "compensation_plan"
 STAGES = ("nominal", "as_built", "compensated")
 SOLVED, FAILED = "SOLVED", "FAILED"
-REASONS = ("AS_BUILT_ERROR", "EVALUATION_ERROR", "NOT_CONVERGED", "BOUNDS_HIT", "RUN_STOPPED")
+REASONS = ("AS_BUILT_ERROR", "EVALUATION_ERROR", "NOT_CONVERGED", "BOUNDS_HIT", "RUN_STOPPED", "WORSE_THAN_AS_BUILT")
+#: Relative objective increase of the final compensated run over as-built that is refused (WORSE_THAN_AS_BUILT).
+WORSE_TOLERANCE = 1e-9
 DEFAULTS = {"max_evaluations": 100, "max_sweeps": 4, "cost_tolerance": 1e-6}
 TRACE_LIMIT = 200
 _INVPHI = (math.sqrt(5.0) - 1.0) / 2.0
@@ -119,9 +126,9 @@ def normalize(raw, *, document, targets, units, parameter_names, enabled=True):
             raise wc.WorkflowError("SPEC_INVALID", f"compensator {common['name']!r}: bounds must be [low, high]")
         low = sa.quantity(bounds[0], common["unit"], f"compensator {common['name']} bounds[0]")
         high = sa.quantity(bounds[1], common["unit"], f"compensator {common['name']} bounds[1]")
-        if not low <= 0.0 <= high or not low < high:
-            raise wc.WorkflowError("SPEC_INVALID", f"compensator {common['name']!r}: bounds need low <= 0 <= high "
-                                   "and low < high (offsets from the as-built state)")
+        if not low < 0.0 < high:
+            raise wc.WorkflowError("SPEC_INVALID", f"compensator {common['name']!r}: bounds need low < 0 < high "
+                                   "(offsets from the as-built state, which must lie strictly inside)")
         tolerance = (sa.quantity(comp["tolerance"], common["unit"], f"compensator {common['name']} tolerance")
                      if "tolerance" in comp else (high - low) * 1e-3)
         if not tolerance > 0 or not math.isfinite(tolerance):
@@ -345,6 +352,11 @@ def compensate(request, record, sample_dir, plan, run=None, limits=None):
     except SolveFailure as exc:
         block["reason"] = {**exc.reason, "message": f"compensated run: {exc.reason['message']}"}
         return block
+    if cost > start_cost + WORSE_TOLERANCE * max(1.0, abs(start_cost)):
+        block["reason"] = {"code": "WORSE_THAN_AS_BUILT", "message": "the compensated run has a higher objective "
+                           "than the as-built run", "as_built_cost": start_cost, "compensated_cost": cost}
+        block["objective"]["compensated"] = {"cost": cost, "values": values}
+        return block
     block.update(state=SOLVED, compensated=_stage_record(final, "compensated", request["sample_id"], "compensated"))
     block["objective"]["compensated"] = {"cost": cost, "values": values}
     for comp in compensators:
@@ -395,6 +407,43 @@ def row_fields(record, plan):
     row["compensated:result_hash"] = (compensated.get("identity") or {}).get("result_hash")
     row["compensated:run_dir"] = compensated.get("run_dir")
     return row
+
+
+def _fmt(value):
+    return "-" if value is None else f"{value:.6g}"
+
+
+def report_lines(block, table):
+    """Report lines of a summary's ``compensation`` block; ``table(header, rows)`` renders a markdown table."""
+    lines = ["## Compensation", "", f"Compensators: {'; '.join(describe(block))}. Objective: "
+             f"{block['objective_definition']} over {', '.join(t['target'] for t in block['objective'])}. Solver: "
+             f"{block['solver']['solver']} (at most {block['solver']['max_evaluations']} trial runs per sample).", ""]
+    stages = [("nominal", None), ("as_built", block["as_built"]["by_outcome"]),
+              ("compensated", block["compensated"]["by_outcome"]),
+              ("compensated_or_as_built", block["compensated_or_as_built"]["by_outcome"])]
+    outcomes = list(wc.OUTCOMES)
+    rows = []
+    for name, counts in stages:
+        if counts is None:
+            counts = {o: int(o == block["nominal"]["outcome"]) for o in outcomes}
+            denominator = 1
+        else:
+            denominator = block["compensated"]["denominator"] if name == "compensated" else block["requested"]
+        rows.append([name, *[counts.get(o, 0) for o in outcomes], denominator])
+    lines += table(["stage", *outcomes, "of"], rows) + [""]
+    reasons = block["failure_reasons"]
+    lines += table(["solve state", "samples"], [[k, v] for k, v in block["states"].items()]
+                   + [[f"FAILED: {k}", v] for k, v in reasons.items()]) + [""]
+    stat_rows = []
+    for target_id, value in block["nominal"]["targets"].items():
+        stat_rows.append([target_id, "nominal", 1, _fmt(value), _fmt(value), _fmt(value), _fmt(value)])
+        for stage in ("as_built", "compensated"):
+            s = block[stage]["target_statistics"][target_id]
+            stat_rows.append([target_id, stage, f"{s['count']}/{s['denominator']}", _fmt(s.get("min")),
+                              _fmt(s.get("mean")), _fmt(s.get("max")), _fmt(s.get("max_abs"))])
+    lines += ["Target values (exact values only; compensated over solved samples):", ""]
+    lines += table(["target", "stage", "count", "min", "mean", "max", "max abs"], stat_rows) + [""]
+    return lines
 
 
 def summarize(rows, plan, targets, units, nominal_row):

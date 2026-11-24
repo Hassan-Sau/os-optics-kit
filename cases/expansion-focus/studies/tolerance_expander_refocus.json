@@ -1,5 +1,5 @@
 {
- "description": "Tolerance sampling of the expander/focus design with refocus compensation: L2 axial position (uniform +-0.5 mm) and source waist radius (normal, sigma 5 um, truncated at 3 sigma) are sampled; for each sample the focus-plane axial position is solved within +-2 mm to minimise the spot radius, and the as-built and compensated results are both recorded. Run with --no-compensation for the same samples without it.",
+ "description": "Tolerance sampling of the expander/focus design with refocus compensation: L2 axial position (uniform +-2 mm) and source waist radius (normal, sigma 5 um, truncated at 3 sigma) are sampled; for each sample the focus-plane axial position is solved within +-2 mm to minimise the spot radius, and the as-built and compensated results are both recorded. Run with --no-compensation for the same samples without it. The top-level max_evaluations caps the planned runs (nominal plus one per sample); compensation.max_evaluations separately caps the solver's trial runs per sample.",
  "design": {
   "builder": "expander_focus",
   "arguments": {}
@@ -20,7 +20,7 @@
     {"op": "transform", "selector": {"ids": ["L2"]}, "frame": {"component": "L2"},
      "translation_mm": [0, 0, "$value"]}
    ],
-   "distribution": {"kind": "uniform", "low": -0.5, "high": 0.5}
+   "distribution": {"kind": "uniform", "low": -2, "high": 2}
   },
   {
    "name": "source_waist_radius",

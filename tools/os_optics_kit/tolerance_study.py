@@ -543,7 +543,8 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
         summary["report"] = sa.append_report(
             study_dir, plots=[study_dir / "plots"] if skipped is None else None, title="Tolerance sampling",
             lines=report_lines(summary), extra={"tolerance": {k: summary[k] for k in (
-                "sampling", "parameters", "nominal", "counts", "target_distributions", "zero_offset_check")}},
+                "sampling", "parameters", "nominal", "counts", "target_distributions", "zero_offset_check",
+                *(("compensation",) if summary.get("compensation") else ()))}},
             artifacts=[(study_dir / "samples.csv", "sampled offsets"),
                        (study_dir / "sampling.json", "sampling record")])
         summary["paths"]["report"] = "report/report.md"
@@ -632,6 +633,8 @@ def report_lines(summary):
                      f"{check['same_result_hash']}; maximum absolute target difference: "
                      f"{wc.canonical_json(check['max_abs_difference'])} (tolerance 0).")
         lines.append("")
+    if summary.get("compensation"):
+        lines += [""] + comp_mod.report_lines(summary["compensation"], sa.sweep_table)
     lines.append("Reproduce the sample set: `os-optics-kit tolerance --verify-seed <study dir>`.")
     return lines
 
