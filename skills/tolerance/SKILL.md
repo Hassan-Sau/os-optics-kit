@@ -3,7 +3,7 @@ name: tolerance
 description: Seeded tolerance study - draw independent offsets from declared uniform or truncated-normal distributions, save the sample set before any run, run and count every sample, and report target distributions. Use it to estimate how often a design meets its targets.
 version: 0.3.0
 command: os-optics-kit tolerance
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

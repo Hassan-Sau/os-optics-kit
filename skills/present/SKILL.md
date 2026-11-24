@@ -3,7 +3,7 @@ name: present
 description: Prepare slide-ready material from saved runs and studies - system views, plots, comparisons, animations, an offline gallery and a bundle - and restyle it (language, background, sizes) from a saved configuration without simulating.
 version: 0.2.1
 command: os-optics-kit present
-requires: os-optics>=0.13,<0.14; os-optics-kit[plot]; os-optics-kit[render] for views and animations; os-optics-kit[media] for MP4
+requires: os-optics>=0.14,<0.15; os-optics-kit[plot]; os-optics-kit[render] for views and animations; os-optics-kit[media] for MP4
 kind: tool
 ---
 

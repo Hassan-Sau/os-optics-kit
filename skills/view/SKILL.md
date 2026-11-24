@@ -3,7 +3,7 @@ name: view
 description: Open a read-only local browser viewer for a native Project JSON or saved run directory and follow live updates.
 version: 0.1.0
 command: os-optics-kit view
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

@@ -54,7 +54,7 @@ focus span ≤0.06 mm. Thresholds remain fixed in the defocused and perturbed ex
 ## Run and vary
 
 ```bash
-python -m pip install "os-optics[protected]==0.13.0" "os-optics-kit[plot,render]"
+python -m pip install "os-optics[protected]==0.14.0" "os-optics-kit[plot,render]"
 os-optics-kit cases copy achromatic-imaging --dest .
 cd achromatic-imaging
 os-optics-kit cases verify achromatic-imaging

@@ -172,6 +172,19 @@ class RepositoryCheckTests(RepositoryTree):
                             if item["check"] == "baseline"]
                 self.assertTrue(any(fragment in message for message in messages), messages)
 
+    def test_candidate_engine_keeps_the_last_verified_version(self):
+        # The kit requires a candidate (>=0.12,<0.13) not yet verified: verified_version stays the older release.
+        engine = dict(BASELINE["engine"], verified_version="0.11.0", candidate_version="0.12.0")
+        self.write("baseline.json", json.dumps(dict(BASELINE, engine=engine)))
+        self.assertEqual(self.problems("baseline"), [])
+        for change, fragment in (({"candidate_version": "0.13.0"}, "candidate_version '0.13.0' is outside"),
+                                 ({"verified_version": "0.12.0"}, "must precede")):
+            with self.subTest(change=change):
+                self.write("baseline.json", json.dumps(dict(BASELINE, engine=dict(engine, **change))))
+                messages = [item["message"] for item in check_repo.run_checks(self.root)["problems"]
+                            if item["check"] == "baseline"]
+                self.assertTrue(any(fragment in message for message in messages), messages)
+
     def test_engine_module_states_the_baseline_requirement(self):
         engine = 'ENGINE_DISTRIBUTION = "os-optics"\nENGINE_REQUIREMENT = ">=0.12,<0.13"\n'
         self.write("tools/os_optics_kit/_engine.py", engine)
@@ -363,13 +376,22 @@ class EngineReleaseTests(unittest.TestCase):
 
     def test_require_published_fails_the_release_build_for_an_unpublished_engine(self):
         for run, code in ((False, 1), (True, 0)):
-            with self.subTest(run=run), patch.object(engine_release, "decide", return_value={
+            with self.subTest(run=run), patch.object(engine_release, "unverified_candidate", return_value=None), \
+                    patch.object(engine_release, "decide", return_value={
                     "run": run, "version": "0.12.0", "verified": "0.12.0", "message": None if run else "not yet"}), \
                     patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()) as stderr:
                 self.assertEqual(engine_release.main(["--require-published"]), code)
                 self.assertEqual("publish the engine release first" in stderr.getvalue(), not run)
         with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
             engine_release.main(["--require-published", "--candidate", "latest"])
+
+    def test_require_published_refuses_an_unverified_candidate_engine(self):
+        with patch.object(engine_release, "unverified_candidate", return_value="0.13.0"), \
+                patch.object(engine_release, "decide", return_value={
+                    "run": True, "version": "0.12.0", "verified": "0.12.0", "message": None}), \
+                patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()) as stderr:
+            self.assertEqual(engine_release.main(["--require-published"]), 1)
+        self.assertIn("unverified candidate engine 0.13.0", stderr.getvalue())
 
 
 class WorkflowTests(unittest.TestCase):

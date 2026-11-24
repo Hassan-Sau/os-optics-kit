@@ -75,6 +75,11 @@ def decide(verified: str, candidate: str | None, opener=urllib.request.urlopen) 
     return {"run": published, "version": candidate, "verified": verified, "message": message}
 
 
+def unverified_candidate(root: Path = ROOT) -> str | None:
+    """engine.candidate_version of baseline.json: a required engine that has not been verified yet."""
+    return json.loads((root / "baseline.json").read_text(encoding="utf-8"))["engine"].get("candidate_version")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--candidate", help="latest or an exact version instead of the verified engine")
@@ -100,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
             with args.summary.open("a", encoding="utf-8") as summary:
                 summary.write(result["message"] + "\n")
     print(json.dumps(result, separators=(",", ":")))
+    candidate = unverified_candidate()
+    if args.require_published and candidate:
+        print(f"baseline.json names an unverified candidate engine {candidate}; verify it and set "
+              "engine.verified_version before a release build", file=sys.stderr)
+        return 1
     if args.require_published and not result["run"]:
         print(f"os-optics {result['version']} must be on PyPI before a kit release that requires it is built; "
               "publish the engine release first", file=sys.stderr)

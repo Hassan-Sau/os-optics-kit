@@ -7,9 +7,32 @@ Every subcommand is a module of this package with ``main(argv) -> int``; it is i
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 
 from ._version import __version__
+
+
+def _engine_refusal(exc: BaseException) -> dict | None:
+    """A structured refusal when ``exc`` comes from a missing or unsupported engine, else None.
+
+    An engine older than the kit's requirement lacks APIs the kit calls; whatever that raises (``ImportError``,
+    ``AttributeError``, ...) becomes ENGINE_UNSUPPORTED naming the required range, the installed version and the
+    upgrade command, so no traceback reaches the user."""
+    from . import _engine
+
+    known = _engine.dependency_error(exc)
+    installed = _engine.engine_version()
+    if known is not None and known.get("code") != "ENGINE_UNSUPPORTED":
+        return known
+    if installed is None or _engine.satisfies(installed):
+        return known
+    requirement = f"{_engine.ENGINE_DISTRIBUTION}{_engine.ENGINE_REQUIREMENT}"
+    upgrade = f'python -m pip install --upgrade "{requirement}"'
+    return {"code": "ENGINE_UNSUPPORTED",
+            "message": f"this kit requires {requirement}; installed: {_engine.ENGINE_DISTRIBUTION} {installed}. "
+                       f"Upgrade with: {upgrade}",
+            "requirement": requirement, "installed": installed, "upgrade": upgrade}
 
 # subcommand: (module, one-line summary). Keep in step with skills.json (each tool has a skill of the same name).
 COMMANDS: dict[str, tuple[str, str]] = {
@@ -79,6 +102,12 @@ def main(argv: list[str] | None = None) -> int:
         if exc.code is None:
             return 0
         return exc.code if isinstance(exc.code, int) else 4
+    except Exception as exc:
+        refusal = _engine_refusal(exc)
+        if refusal is None:
+            raise
+        print(json.dumps({"error": refusal}), file=sys.stderr)
+        return 4
     finally:
         sys.argv[:1] = [program] if program is not None else []
     return int(result or 0)

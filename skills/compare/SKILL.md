@@ -3,7 +3,7 @@ name: compare
 description: Compare saved runs, or the samples of a sweep study, by target and observation-plane ID without rerunning; lists differing inputs, deltas to a reference run and, with a current Project, each run's freshness. Use it to explain what an edit changed.
 version: 0.2.0
 command: os-optics-kit compare
-requires: os-optics>=0.13,<0.14
+requires: os-optics>=0.14,<0.15
 kind: tool
 ---
 

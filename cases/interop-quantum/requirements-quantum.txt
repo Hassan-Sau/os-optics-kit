@@ -3,7 +3,7 @@
 # piquasso 8.0.1 declare < 3.15); verified with Python 3.14.7 and os-optics 0.13.0.
 # Licenses as reported upstream: perceval-quandela MIT; its required dependency exqalibur declares
 # CC BY-NC-ND 4.0 in its package metadata; piquasso Apache-2.0.
-os-optics>=0.13,<0.14
+os-optics>=0.14,<0.15
 os-optics-kit>=0.3,<0.4
 numpy==2.5.4
 scipy==1.18.1

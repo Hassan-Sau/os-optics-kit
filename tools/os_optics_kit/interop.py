@@ -1,6 +1,6 @@
 """Shared helpers for the external-tool (interop) cases.
 
-The engine requirement is the kit's (``_engine.ENGINE_REQUIREMENT``, os-optics >=0.13,<0.14). Each interop case
+The engine requirement is the kit's (``_engine.ENGINE_REQUIREMENT``, os-optics >=0.14,<0.15). Each interop case
 keeps its own third-party requirements file; nothing here imports a third-party solver or the engine.
 """
 
@@ -17,7 +17,7 @@ from . import _engine
 from ._engine import ENGINE_REQUIREMENT, engine_version, version_tuple  # noqa: F401 - part of this module's API
 from .result_summary import ArgumentParser, error_document, exit_status, json_cli_stdout  # noqa: F401
 
-#: the engine requirement as a distribution specifier, e.g. 'os-optics>=0.13,<0.14' (for reports and --help)
+#: the engine requirement as a distribution specifier, e.g. 'os-optics>=0.14,<0.15' (for reports and --help)
 ENGINE_SPEC = f"{_engine.ENGINE_DISTRIBUTION}{ENGINE_REQUIREMENT}"
 #: lower bound of the kit's engine requirement, e.g. (0, 13); derived from ENGINE_REQUIREMENT
 MINIMUM_ENGINE = _engine.minimum_version()

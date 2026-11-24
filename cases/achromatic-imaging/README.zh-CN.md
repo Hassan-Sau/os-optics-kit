@@ -46,7 +46,7 @@ PSF/MTF 需要有界孔径。无界模型返回 UNKNOWN 和 `PUPIL_NOT_BOUNDED`�
 ## 运行与变化
 
 ```bash
-python -m pip install "os-optics[protected]==0.13.0" "os-optics-kit[plot,render]"
+python -m pip install "os-optics[protected]==0.14.0" "os-optics-kit[plot,render]"
 os-optics-kit cases copy achromatic-imaging --dest .
 cd achromatic-imaging
 os-optics-kit cases verify achromatic-imaging

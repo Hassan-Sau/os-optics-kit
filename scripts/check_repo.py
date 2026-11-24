@@ -210,7 +210,9 @@ def in_pin_scope(name: str) -> bool:
 
 
 def check_pins(name: str, text: str, baseline: dict, problems: Problems) -> None:
-    engine = (baseline.get("engine") or {}).get("verified_version")
+    # While a candidate engine is being verified, install pins name the candidate (the kit requires it).
+    stated = baseline.get("engine") or {}
+    engine = stated.get("candidate_version") or stated.get("verified_version")
     kit = baseline.get("kit_version")
     for pattern, expected, label in ((ENGINE_PIN, engine, "os-optics"), (KIT_PIN, kit, "os-optics-kit")):
         for match in pattern.finditer(text):
@@ -372,8 +374,17 @@ def check_baseline(root: Path, problems: Problems) -> dict:
         problems.add("baseline", name, f"engine.requirement {engine.get('requirement')!r} differs from the "
                                        f"pyproject.toml os-optics dependency {specifiers}")
     verified = engine.get("verified_version")
+    candidate = engine.get("candidate_version")
     try:
-        if not isinstance(verified, str) or not satisfies(verified, requirement):
+        if candidate is not None:
+            # Transitional: the kit requires a candidate engine that has not been verified yet. The verified
+            # version stays the last one actually verified; a release build refuses while this is set.
+            if not isinstance(candidate, str) or not satisfies(candidate, requirement):
+                problems.add("baseline", name, f"engine.candidate_version {candidate!r} is outside {requirement}")
+            elif not isinstance(verified, str) or _version_tuple(verified) >= _version_tuple(candidate):
+                problems.add("baseline", name, f"engine.verified_version {verified!r} must precede "
+                                               f"engine.candidate_version {candidate!r}")
+        elif not isinstance(verified, str) or not satisfies(verified, requirement):
             problems.add("baseline", name, f"engine.verified_version {verified!r} is outside {requirement}")
     except ValueError as exc:
         problems.add("baseline", name, f"engine.requirement: {exc}")
