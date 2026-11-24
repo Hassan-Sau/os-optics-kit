@@ -9,7 +9,7 @@ Engine problems (the `os-optics` commands, simulation results, the optical catal
 
 ## Issues and pull requests
 
-Write issues and pull requests in English. An issue states:
+Write issues and pull requests in Chinese or English. An issue states:
 
 - **Remaining work**: what is still to be done, in a few sentences. An optional **Background** section can
   explain why.

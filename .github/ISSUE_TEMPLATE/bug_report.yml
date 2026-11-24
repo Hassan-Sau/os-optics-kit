@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Write in English. Problems in the engine itself (`os-optics` commands, simulation results,
+        Write in the language you prefer. Problems in the engine itself (`os-optics` commands, simulation results,
         the catalog) belong in the [os-optics issue tracker](https://github.com/JunLin615/os-optics/issues).
   - type: textarea
     id: summary
