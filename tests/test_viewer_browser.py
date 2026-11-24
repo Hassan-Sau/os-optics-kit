@@ -16,6 +16,8 @@ Verifies under the shipped strict Content-Security-Policy (no ``unsafe-eval``):
    retried, so the page reaches the valid latest run without a refresh.
 7. A viewer restarted on the same port (state numbering from 1 again) is followed by the open page,
    scene and ledger together, instead of being ignored as older than the previous process.
+8. A failed ``/api/snapshot`` read (HTTP 503) is retried on its own: once the API answers again the page
+   shows the latest run, clears the read error and is live again, with no refresh and no further write.
 
 Missing optional dependencies skip these checks locally unless
 ``OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER=1`` is set (as in CI); ordinary users of
@@ -29,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -186,19 +189,37 @@ def _fixture_b() -> dict:
 
 
 def _replace_dir_from_subprocess(src_dir: Path, dst_dir: Path) -> None:
-    code = (
-        "from pathlib import Path; import shutil, sys; "
-        "src, dst = Path(sys.argv[1]), Path(sys.argv[2]); "
-        "staging = dst.parent / (dst.name + '.staging'); "
-        "shutil.rmtree(staging, ignore_errors=True); "
-        "shutil.copytree(src, staging); "
-        "old = dst.parent / (dst.name + '.old'); "
-        "shutil.rmtree(old, ignore_errors=True); "
-        "dst.rename(old) if dst.exists() else None; "
-        "staging.rename(dst); "
-        "shutil.rmtree(old, ignore_errors=True)"
-    )
-    done = subprocess.run([sys.executable, "-c", code, str(src_dir), str(dst_dir)], capture_output=True, text=True, timeout=30)
+    # On Windows a directory cannot be renamed while the watcher has one of its files open, so the swap is retried
+    # briefly; it is an atomic replacement either way, and nothing a test asserts depends on which attempt succeeds.
+    code = """
+from pathlib import Path
+import shutil
+import sys
+import time
+
+
+def swap(a, b):
+    for attempt in range(100):
+        try:
+            return a.rename(b)
+        except PermissionError:
+            if attempt == 99:
+                raise
+            time.sleep(0.02)
+
+
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+staging = dst.parent / (dst.name + ".staging")
+shutil.rmtree(staging, ignore_errors=True)
+shutil.copytree(src, staging)
+old = dst.parent / (dst.name + ".old")
+shutil.rmtree(old, ignore_errors=True)
+if dst.exists():
+    swap(dst, old)
+swap(staging, dst)
+shutil.rmtree(old, ignore_errors=True)
+"""
+    done =subprocess.run([sys.executable, "-c", code, str(src_dir), str(dst_dir)], capture_output=True, text=True, timeout=30)
     if done.returncode != 0:
         raise RuntimeError(f"subprocess replace failed: {done.stderr}")
 
@@ -763,3 +784,56 @@ def test_viewer_restarted_on_same_port_is_followed_without_refresh(browser_env, 
                     assert obs_next["scene"]["project_hash"] == hash_b, obs_next
         finally:
             browser.close()
+
+
+def test_snapshot_api_failure_is_retried_until_it_recovers(browser_env, tmp_path):
+    """A failed /api/snapshot read (HTTP 503) must be retried on its own: once the API answers again the page shows
+    the latest run (scene and ledger), clears the read error and is live again, without a refresh or another write."""
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / "watched_api_503"
+    shutil.copytree(run_a, watched)
+
+    failing = threading.Event()
+    failed_reads: list[str] = []
+
+    def on_request(path: str):
+        if failing.is_set() and path.split("?", 1)[0] == "/api/snapshot":
+            failed_reads.append(path)
+            return 503, b"injected failure"
+        return None
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.05) as session:
+        session.load_initial()
+        session.start()
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=1.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+
+                        failing.set()
+                        _replace_dir_from_subprocess(run_b, watched)
+                        _wait_for_revision(session, 2)
+                        expect(page.locator("#banner-error")).to_contain_text("/api/snapshot", timeout=15000)
+                        obs_held = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs_held, hash_a=hash_a, hash_b=hash_b)
+                        assert obs_held["scene"]["project_hash"] == hash_a, obs_held
+
+                        # The API recovers; nothing is written any more, so no new event will arrive.
+                        failing.clear()
+                        final = session.state.envelope()["snapshot"]
+                        expect(page.locator("#app")).to_have_attribute("data-snapshot-id", final["snapshot_id"], timeout=20000)
+                        expect(page.locator("#banner-error")).to_be_hidden(timeout=10000)
+                        expect(page.locator("#badge-live")).not_to_have_class(re.compile(r"\berr\b"), timeout=10000)
+                        obs = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs, hash_a=hash_a, hash_b=hash_b)
+                        assert obs["scene"]["project_hash"] == hash_b, obs
+                        assert failed_reads, "the injected API failure was not exercised"
+                    finally:
+                        failing.clear()
+                        browser.close()

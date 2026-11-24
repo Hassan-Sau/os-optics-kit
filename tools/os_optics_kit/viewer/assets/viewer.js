@@ -20,6 +20,12 @@
   // The viewer process the page follows (server.instance_id of /api/snapshot) and the ones it has left behind.
   var serverInstanceId = null;
   var retiredServerInstances = {};
+  // /api/snapshot reads: the last one issued, the newest one answered, failures in a row and the pending retry.
+  var snapshotRequestSeq = 0;
+  var snapshotAnsweredSeq = 0;
+  var snapshotFailures = 0;
+  var snapshotRetryTimer = null;
+  var eventsOpen = false;
 
   var CHANNEL_COLORS = {
     DETECTED: "#0d8a5f",
@@ -1596,7 +1602,19 @@
     startStaging(snap);
   }
 
+  function scheduleSnapshotRetry() {
+    if (snapshotRetryTimer !== null) {
+      return;
+    }
+    var delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, Math.max(0, snapshotFailures - 1)));
+    snapshotRetryTimer = window.setTimeout(function () {
+      snapshotRetryTimer = null;
+      fetchSnapshot();
+    }, delay);
+  }
+
   function fetchSnapshot() {
+    var mySeq = ++snapshotRequestSeq;
     return fetch("/api/snapshot", { cache: "no-store" })
       .then(function (r) {
         if (!r.ok) {
@@ -1604,13 +1622,32 @@
         }
         return r.json();
       })
-      .then(handleEnvelope)
-      .catch(function (err) {
+      .then(function (envelope) {
+        snapshotAnsweredSeq = Math.max(snapshotAnsweredSeq, mySeq);
+        if (snapshotFailures > 0) {
+          // The API answers again: drop the read error and the disconnected badge before applying the answer.
+          snapshotFailures = 0;
+          if (liveState === "disconnected") {
+            liveState = typeof EventSource === "undefined" ? "polling" : (eventsOpen ? "live" : "reconnecting");
+            renderLiveBadge();
+          }
+          renderBannerError(latestStatusEnvelope);
+        }
+        handleEnvelope(envelope);
+      }, function (err) {
+        if (mySeq < snapshotAnsweredSeq) {
+          // A newer read already succeeded; this older failure says nothing about the API now.
+          return;
+        }
+        // Nothing else may ask again (no further file change, hence no event), so keep asking on a growing pause
+        // until the API answers; the verified frame and its panel stay as they are meanwhile.
+        snapshotFailures += 1;
         liveState = "disconnected";
         renderLiveBadge();
         var box = el("banner-error");
         box.className = "banner banner-error";
         box.textContent = "Failed to load /api/snapshot: " + err;
+        scheduleSnapshotRetry();
       });
   }
 
@@ -1623,6 +1660,7 @@
     }
     var es = new EventSource("/api/events");
     es.addEventListener("open", function () {
+      eventsOpen = true;
       liveState = "live";
       renderLiveBadge();
     });
@@ -1642,6 +1680,7 @@
       fetchSnapshot();
     });
     es.addEventListener("error", function () {
+      eventsOpen = false;
       liveState = "reconnecting";
       renderLiveBadge();
     });
