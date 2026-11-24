@@ -12,6 +12,14 @@
   var transitionToken = 0;
   var pendingPollTimer = null;
   var retryFetchTimer = null;
+  // Scene frames abandoned in a row without a commit (refused, failed to start or failed to load). Each fresh retry
+  // waits longer, up to RETRY_MAX_MS, so a failure that persists never spins; a commit resets the count.
+  var abandonedFrames = 0;
+  var RETRY_BASE_MS = 200;
+  var RETRY_MAX_MS = 5000;
+  // The viewer process the page follows (server.instance_id of /api/snapshot) and the ones it has left behind.
+  var serverInstanceId = null;
+  var retiredServerInstances = {};
 
   var CHANNEL_COLORS = {
     DETECTED: "#0d8a5f",
@@ -1334,10 +1342,11 @@
     if (retryFetchTimer !== null) {
       return;
     }
+    var delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, Math.max(0, abandonedFrames - 1)));
     retryFetchTimer = window.setTimeout(function () {
       retryFetchTimer = null;
       fetchSnapshot();
-    }, 200);
+    }, delay);
   }
 
   function pumpQueuedSnapshot() {
@@ -1398,6 +1407,7 @@
       activeFrameSlot = activeFrameSlot === "a" ? "b" : "a";
 
       stagingSnapshot = null;
+      abandonedFrames = 0;
       commitSnapshotPanel(snap);
 
       if (queuedSnapshot !== null && queuedSnapshot.snapshot_id !== displayedSnapshotId) {
@@ -1408,13 +1418,16 @@
       }
     }
 
-    function handleSuperseded() {
+    // Every outcome other than a commit ends here, so no outcome keeps the single in-flight slot: never swap to this
+    // frame; move on to the newer queued snapshot, or ask for the latest one again (after a growing pause while
+    // frames keep failing). The visible frame and its panel stay as they are meanwhile.
+    function abandonStaging() {
       if (myToken !== transitionToken) {
         return;
       }
       stopPendingPoll();
       stagingSnapshot = null;
-      // Never swap to a 409/superseded iframe; immediately advance to coalesced newer snapshot or refetch.
+      abandonedFrames += 1;
       if (queuedSnapshot !== null && queuedSnapshot.snapshot_id !== expectedSnapshotId) {
         pumpQueuedSnapshot();
       } else {
@@ -1423,20 +1436,36 @@
       }
     }
 
+    // Runs only after the frame's load event, when its page and every script in it have loaded and run.
     function inspectStaging() {
       if (myToken !== transitionToken) {
         stopPendingPoll();
         return;
       }
+      var win = null;
+      var doc = null;
       try {
-        var win = staging.contentWindow;
-        var doc = staging.contentDocument;
-        if (!win || !doc) {
+        win = staging.contentWindow;
+        doc = staging.contentDocument;
+      } catch (_e) {
+        doc = null;
+      }
+      if (!win || !doc) {
+        // A loaded frame whose document cannot be read is a browser error page: this scene never starts.
+        abandonStaging();
+        return;
+      }
+      try {
+        // HTTP 409 JSON body returned for the page of an evicted /engine-view/<snapshot_id>/
+        if (!doc.getElementById("stage") && doc.body && doc.body.textContent && doc.body.textContent.indexOf("SNAPSHOT_SUPERSEDED") !== -1) {
+          abandonStaging();
           return;
         }
-        // Detect HTTP 409 JSON error body returned directly for /engine-view/<superseded_id>/
-        if (!doc.getElementById("stage") && doc.body && doc.body.textContent && doc.body.textContent.indexOf("SNAPSHOT_SUPERSEDED") !== -1) {
-          handleSuperseded();
+        // engine-boot.js (the first script of every engine page) records a script or style that failed to load and an
+        // error raised while the engine started. Without its record this is not a working engine page at all.
+        var boot = win.__osOpticsKitBoot;
+        if (!boot || boot.failed) {
+          abandonStaging();
           return;
         }
         // Engine viewer sets window.__opensciViewer ONLY after view.json finishes loading and viewer.init() renders!
@@ -1444,7 +1473,7 @@
           var loadedDoc = win.__opensciViewer.doc;
           var loadedHash = loadedDoc && loadedDoc.identity && loadedDoc.identity.scene_content_hash;
           if (expectedSceneHash && loadedHash && loadedHash !== expectedSceneHash) {
-            handleSuperseded();
+            abandonStaging();
             return;
           }
           finishCommit();
@@ -1455,15 +1484,16 @@
         if (errNode) {
           var errText = errNode.textContent || "";
           if (errText.indexOf("409") !== -1 || errText.toLowerCase().indexOf("load") !== -1 || errText.indexOf("加载") !== -1) {
-            handleSuperseded();
+            abandonStaging();
             return;
           }
           // Non-superseded rendering error (e.g. WebGL unavailable): still commit panel coherently.
           finishCommit();
           return;
         }
+        // Otherwise the engine started and its scene is still loading: keep waiting, however long a valid load takes.
       } catch (_e) {
-        // still navigating
+        abandonStaging();
       }
     }
 
@@ -1485,7 +1515,7 @@
     };
 
     staging.onerror = function () {
-      handleSuperseded();
+      abandonStaging();
     };
 
     staging.src = url;
@@ -1494,6 +1524,26 @@
   function handleEnvelope(envelope) {
     if (!envelope || typeof envelope !== "object") {
       return;
+    }
+    var instance = (envelope.server && envelope.server.instance_id) || null;
+    if (instance !== null && instance !== serverInstanceId) {
+      if (retiredServerInstances[instance]) {
+        // A late response from a viewer process this page has already left behind.
+        return;
+      }
+      if (serverInstanceId !== null) {
+        // The viewer was restarted on the same address: its states are numbered from 1 again and its snapshot ids
+        // say nothing about the previous process's. Forget that ordering and any frame in flight, and stage the new
+        // server's snapshot even where its id matches the one shown; the shown frame stays until the swap.
+        retiredServerInstances[serverInstanceId] = true;
+        latestSeenStateSeq = -1;
+        stopPendingPoll();
+        transitionToken++;
+        stagingSnapshot = null;
+        queuedSnapshot = null;
+        displayedSnapshotId = null;
+      }
+      serverInstanceId = instance;
     }
     var seq = typeof envelope.state_seq === "number" ? envelope.state_seq : 0;
     // Strictly discard late / out-of-order responses superseded by a newer state_seq!

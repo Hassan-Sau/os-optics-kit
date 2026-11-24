@@ -12,8 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 import json
 import queue
+import socket
 import threading
 from typing import Any
+import uuid
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 import webbrowser
 
@@ -31,8 +33,12 @@ ASSET_MEDIA_TYPES = {
     ".txt": "text/plain; charset=utf-8",
     ".svg": "image/svg+xml",
 }
-KIT_ASSETS = ("index.html", "viewer.css", "viewer.js")
+KIT_ASSETS = ("index.html", "viewer.css", "viewer.js", "engine-boot.js")
+# The engine's viewer code is the same for every snapshot, so it is served from /engine-assets/ independently of the
+# bounded snapshot cache: evicting a run must never stop an engine-view page that is still starting from running.
+# Only the page under /engine-view/<snapshot_id>/ and its view.json are bound to a snapshot.
 ENGINE_ASSETS = ("viewer.css", "viewer.js", "three.bundle.js", "THREE_LICENSE.txt")
+ENGINE_ASSET_PREFIX = "/engine-assets/"
 
 COMMON_SECURITY_HEADERS = (
     ("Cache-Control", "no-store"),
@@ -65,15 +71,33 @@ def _engine_asset_bytes(name: str) -> bytes:
 
 
 def _engine_index_html() -> bytes:
+    """The engine's page for one snapshot: its code from ``/engine-assets/``, its scene from the relative ``view.json``.
+
+    ``/assets/engine-boot.js`` loads first and records a script or style that failed to load (or an error raised while
+    the engine started), so the host page can tell a failed start from a slow scene and never waits on it forever.
+    """
     html = _engine_asset_bytes("index.html").decode("utf-8")
-    html = html.replace("<!--STYLE-->", '<link rel="stylesheet" href="viewer.css">')
+    html = html.replace(
+        "<!--STYLE-->",
+        '<script src="/assets/engine-boot.js"></script>\n'
+        f'<link rel="stylesheet" href="{ENGINE_ASSET_PREFIX}viewer.css">',
+    )
     html = html.replace("<!--DOCUMENT-->", "")
-    html = html.replace("<!--SCRIPTS-->", '<script src="three.bundle.js"></script>\n<script src="viewer.js"></script>')
+    html = html.replace(
+        "<!--SCRIPTS-->",
+        f'<script src="{ENGINE_ASSET_PREFIX}three.bundle.js"></script>\n'
+        f'<script src="{ENGINE_ASSET_PREFIX}viewer.js"></script>',
+    )
     return html.encode("utf-8")
 
 
 def _json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+def _url_host(host: str) -> str:
+    """The host as written in a URL: an IPv6 literal such as ``::1`` goes in brackets."""
+    return f"[{host}]" if ":" in host else host
 
 
 def validate_loopback_host(host: str) -> str:
@@ -104,6 +128,11 @@ class _ViewerHTTPServer(ThreadingHTTPServer):
         self.host_label = host_label
         self.heartbeat_interval = heartbeat_interval
         self.engine_version_str = engine_version()
+        # Identifies this server process. A restarted viewer numbers its states from 1 again, so an open page uses this
+        # to tell a new server on the same port from a stale response of the one it was following.
+        self.instance_id = uuid.uuid4().hex
+        if ":" in server_address[0]:
+            self.address_family = socket.AF_INET6
         super().__init__(server_address, handler_cls)
 
     def server_metadata(self) -> dict[str, Any]:
@@ -111,7 +140,8 @@ class _ViewerHTTPServer(ThreadingHTTPServer):
         return {
             "host": self.host_label,
             "port": port,
-            "url": f"http://{self.host_label}:{port}/",
+            "url": f"http://{_url_host(self.host_label)}:{port}/",
+            "instance_id": self.instance_id,
             "read_only": True,
             "poll_interval_s": self.viewer_session.poll_interval,
             "kit_version": KIT_VERSION,
@@ -231,6 +261,10 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
+        # The stream has no length, so it ends only when the connection closes: once the session stops, the browser
+        # sees the end and reconnects (to a restarted viewer) instead of waiting on a socket held open for another
+        # request. Set after the headers, because sending "Connection: keep-alive" resets this flag.
+        self.close_connection = True
 
         state = self.server.viewer_session.state
         sub = state.subscribe()
@@ -286,6 +320,18 @@ class _ViewerHandler(BaseHTTPRequestHandler):
                 self._send_bytes(HTTPStatus.OK, _engine_asset_bytes("three.bundle.js"), _media_type(name), head=head)
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": {"code": "NOT_FOUND", "message": f"unknown asset: {name}"}}, head=head)
+            return
+
+        if path.startswith(ENGINE_ASSET_PREFIX):
+            name = path[len(ENGINE_ASSET_PREFIX):]
+            if name in ENGINE_ASSETS:
+                self._send_bytes(HTTPStatus.OK, _engine_asset_bytes(name), _media_type(name), head=head)
+                return
+            self._send_json(
+                HTTPStatus.NOT_FOUND,
+                {"error": {"code": "NOT_FOUND", "message": f"unknown engine asset: {name}"}},
+                head=head,
+            )
             return
 
         if path == "/api/health":
@@ -413,7 +459,8 @@ class _ViewerHandler(BaseHTTPRequestHandler):
                 raw_snap_id, asset = rest.split("/", 1)
                 req_snap_id = unquote(raw_snap_id)
                 asset = asset or "index.html"
-                if asset not in (*ENGINE_ASSETS, "index.html", "view.json"):
+                if asset not in ("index.html", "view.json"):
+                    # The engine's code is served under /engine-assets/, never under a snapshot.
                     self._send_json(
                         HTTPStatus.NOT_FOUND,
                         {"error": {"code": "NOT_FOUND", "message": f"unknown engine-view asset: {asset}"}},
@@ -434,15 +481,6 @@ class _ViewerHandler(BaseHTTPRequestHandler):
                     ("X-Viewer-Revision", str(built.snapshot["revision"])),
                     ("X-Viewer-Snapshot-Id", str(built.snapshot["snapshot_id"])),
                 )
-                if asset in ENGINE_ASSETS:
-                    self._send_bytes(
-                        HTTPStatus.OK,
-                        _engine_asset_bytes(asset),
-                        _media_type(asset),
-                        head=head,
-                        extra_headers=pinned_headers,
-                    )
-                    return
                 if asset == "index.html":
                     self._send_bytes(
                         HTTPStatus.OK,
@@ -455,7 +493,7 @@ class _ViewerHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, built.scene_document, head=head, extra_headers=pinned_headers)
                 return
 
-            # Unversioned asset paths under /engine-view/ are never served.
+            # Unversioned page, scene and asset paths under /engine-view/ are never served.
             if rest in (*ENGINE_ASSETS, "index.html", "view.json"):
                 self._send_json(
                     HTTPStatus.NOT_FOUND,
@@ -558,7 +596,7 @@ class LocalViewerServer:
 
     @property
     def url(self) -> str:
-        return f"http://{self.host}:{self.port}/"
+        return f"http://{_url_host(self.host)}:{self.port}/"
 
     def startup_info(self) -> dict[str, Any]:
         ev = self.session.state.event_payload()

@@ -10,6 +10,12 @@ Verifies under the shipped strict Content-Security-Policy (no ``unsafe-eval``):
    still renders a coherent first frame *during* the burst and converges to the final revision.
 4. Navigating to ``/engine-view/?rev=1`` redirects to the canonical snapshot-bound URL and
    renders rev-1's actual 2-beam WebGL document even after rev-2 (1 beam) is published.
+5. An iframe whose engine script is held on a barrier until its snapshot is evicted (cold and warm
+   start) does not stall the page: after release and a final valid B, scene and ledger reach B.
+6. A frame whose engine script or page fails to load (HTTP 503) releases the in-flight slot and is
+   retried, so the page reaches the valid latest run without a refresh.
+7. A viewer restarted on the same port (state numbering from 1 again) is followed by the open page,
+   scene and ledger together, instead of being ignored as older than the previous process.
 
 Missing optional dependencies skip these checks locally unless
 ``OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER=1`` is set (as in CI); ordinary users of
@@ -43,7 +49,12 @@ REQUIRE_BROWSER = os.environ.get("OS_OPTICS_KIT_REQUIRE_VIEWER_BROWSER") == "1"
 class _DelayingProxy:
     """Thread-per-request loopback HTTP/SSE proxy that injects delays without blocking Playwright."""
 
-    def __init__(self, upstream_host: str, upstream_port: int, on_request: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        upstream_host: str,
+        upstream_port: int,
+        on_request: Callable[[str], tuple[int, bytes] | None] | None = None,
+    ) -> None:
         self.upstream_host = upstream_host
         self.upstream_port = upstream_port
         self.on_request = on_request
@@ -69,8 +80,20 @@ class _DelayingProxy:
 
             def _forward(self, method: str) -> None:
                 if proxy.on_request is not None:
-                    proxy.on_request(self.path)
-                conn = http.client.HTTPConnection(proxy.upstream_host, proxy.upstream_port, timeout=30)
+                    override = proxy.on_request(self.path)
+                    if override is not None:
+                        # The hook answers this request itself (an injected failure), without forwarding it.
+                        status, body = override
+                        self.send_response(status)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        if method != "HEAD":
+                            self.wfile.write(body)
+                        self.wfile.flush()
+                        return
+                conn =http.client.HTTPConnection(proxy.upstream_host, proxy.upstream_port, timeout=30)
                 try:
                     fwd_headers = {
                         k: v
@@ -512,3 +535,231 @@ def test_canonical_engine_view_redirect_renders_exact_requested_revision(browser
                     assert doc_info["beam_count"] == 2
                 finally:
                     browser.close()
+
+
+def _is_engine_bootstrap_script(path: str) -> bool:
+    """The engine viewer script an engine-view iframe loads (never the host page's own /assets/viewer.js)."""
+    bare = path.split("?", 1)[0]
+    return bare.startswith("/engine-") and bare.endswith("/viewer.js")
+
+
+def _wait_for_revision(session: ViewerSession, revision: int, timeout: float = 15.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if session.state.envelope()["revision"] >= revision and session.state.event_payload()["status"] == "ok":
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"watcher never published revision {revision}: {session.state.event_payload()}")
+
+
+@pytest.mark.parametrize("warm", [False, True], ids=["cold-start", "warm-start"])
+def test_bootstrap_script_delayed_past_cache_eviction_still_reaches_latest(browser_env, tmp_path, warm):
+    """An iframe whose engine script is held until its snapshot is evicted must not stall the page.
+
+    The engine script request is held on a barrier while an external process publishes more valid runs than the
+    snapshot cache holds; it is released, a final valid B is published, and writing stops. Without a refresh, the
+    active WebGL scene and the visible power ledger must both reach B.
+    """
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / ("watched_warm" if warm else "watched_cold")
+    shutil.copytree(run_a, watched)
+
+    gate_armed = threading.Event()
+    gate_reached = threading.Event()
+    release_gate = threading.Event()
+    gated_paths: list[str] = []
+
+    if not warm:
+        gate_armed.set()
+
+    def on_request(path: str) -> None:
+        if gate_armed.is_set() and not gate_reached.is_set() and _is_engine_bootstrap_script(path):
+            gated_paths.append(path)
+            gate_reached.set()
+            release_gate.wait(timeout=60.0)
+        return None
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.05) as session:
+        session.load_initial()
+        session.start()
+        cache_depth = session.state._max_cached_snapshots
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        console_errors: list[str] = []
+                        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+
+                        revision = 1
+                        if warm:
+                            expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+                            obs_a = _observe_visible_state(page)
+                            _assert_coherent_a_or_b(obs_a, hash_a=hash_a, hash_b=hash_b)
+                            assert obs_a["scene"]["project_hash"] == hash_a
+                            gate_armed.set()
+                            _replace_dir_from_subprocess(run_b, watched)
+                            revision += 1
+                            _wait_for_revision(session, revision)
+
+                        assert gate_reached.wait(timeout=20.0), "the engine-view iframe never requested its engine script"
+                        gated_snapshot = session.state.envelope()["snapshot"]["snapshot_id"]
+
+                        # Publish more valid runs than the cache holds, each one observed by the watcher (a barrier,
+                        # not a sleep), so the gated iframe's own snapshot is evicted before its script is released.
+                        showing_b = warm
+                        for _ in range(cache_depth + 1):
+                            showing_b = not showing_b
+                            _replace_dir_from_subprocess(run_b if showing_b else run_a, watched)
+                            revision += 1
+                            _wait_for_revision(session, revision)
+                        if showing_b:
+                            # End the burst on A so the final write below is a real change to B.
+                            _replace_dir_from_subprocess(run_a, watched)
+                            revision += 1
+                            _wait_for_revision(session, revision)
+                        built, _cur_id, _cur_rev = session.state.get_cached_snapshot(snapshot_id=gated_snapshot)
+                        assert built is None, "the gated snapshot should have been evicted before release"
+                        if warm:
+                            # While held, the page keeps the verified previous frame (A) rather than another run's data.
+                            obs_held = _observe_visible_state(page)
+                            _assert_coherent_a_or_b(obs_held, hash_a=hash_a, hash_b=hash_b)
+                            assert obs_held["scene"]["project_hash"] == hash_a, obs_held
+
+                        release_gate.set()
+                        # A final valid B, then no more writes.
+                        _replace_dir_from_subprocess(run_b, watched)
+                        revision += 1
+                        _wait_for_revision(session, revision)
+                        final = session.state.envelope()["snapshot"]
+                        assert final["identity"]["project_hash"] == hash_b
+
+                        expect(page.locator("#app")).to_have_attribute("data-snapshot-id", final["snapshot_id"], timeout=30000)
+                        obs = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs, hash_a=hash_a, hash_b=hash_b)
+                        assert obs["scene"]["project_hash"] == hash_b, obs
+                        assert obs["scene"]["frame_snapshot_id"] == final["snapshot_id"], obs
+                        assert obs["app_revision"] == str(revision), obs
+                        assert gated_paths, "the bootstrap script was never gated"
+                        # The evicted scene is refused (409) by design; nothing else may fail.
+                        unexpected = [e for e in console_errors if "409" not in e]
+                        assert unexpected == [], f"unexpected browser console errors: {console_errors}"
+                    finally:
+                        release_gate.set()
+                        browser.close()
+
+
+@pytest.mark.parametrize("failure", ["engine-script", "page"], ids=["engine-script-503", "engine-page-503"])
+def test_failed_engine_bootstrap_is_abandoned_and_retried(browser_env, tmp_path, failure):
+    """A scene frame whose engine script (or page) fails to load must release the single in-flight slot.
+
+    The page keeps the verified previous frame (A) while it retries, then shows the valid latest run (B) with its
+    ledger, without a refresh and without another write.
+    """
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / f"watched_failed_{failure}"
+    shutil.copytree(run_a, watched)
+
+    armed = threading.Event()
+    failed_paths: list[str] = []
+    lock = threading.Lock()
+
+    def on_request(path: str):
+        if not armed.is_set():
+            return None
+        bare = path.split("?", 1)[0]
+        hit = _is_engine_bootstrap_script(path) if failure == "engine-script" else (
+            bare.startswith("/engine-view/rev-2-") and bare.endswith("/")
+        )
+        with lock:
+            if hit and not failed_paths:
+                failed_paths.append(path)
+                return 503, b"injected failure"
+        return None
+
+    with ViewerSession(resolve_target(watched), poll_interval=0.05) as session:
+        session.load_initial()
+        session.start()
+        with LocalViewerServer(session, host="127.0.0.1", port=0, heartbeat_interval=2.0) as server:
+            with _DelayingProxy(server.host, server.port, on_request=on_request) as proxy:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 1280, "height": 840})
+                        page.goto(f"{proxy.url}?lang=en", wait_until="domcontentloaded")
+                        expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+
+                        armed.set()
+                        _replace_dir_from_subprocess(run_b, watched)
+                        _wait_for_revision(session, 2)
+                        final = session.state.envelope()["snapshot"]
+
+                        expect(page.locator("#app")).to_have_attribute("data-snapshot-id", final["snapshot_id"], timeout=30000)
+                        obs = _observe_visible_state(page)
+                        _assert_coherent_a_or_b(obs, hash_a=hash_a, hash_b=hash_b)
+                        assert obs["scene"]["project_hash"] == hash_b, obs
+                        assert obs["scene"]["frame_snapshot_id"] == final["snapshot_id"], obs
+                        with lock:
+                            assert len(failed_paths) == 1, f"the injected failure was not exercised: {failed_paths}"
+                    finally:
+                        browser.close()
+
+
+def test_viewer_restarted_on_same_port_is_followed_without_refresh(browser_env, tmp_path):
+    """A viewer restarted on the same address numbers its states from 1 again: the open page must follow the new
+    process (scene and ledger) instead of discarding its envelopes as older than the previous process's."""
+    import socket
+
+    from playwright.sync_api import expect, sync_playwright
+
+    browser_path, run_a, run_b, hash_a, hash_b = browser_env
+    watched = tmp_path / "watched_restart"
+    shutil.copytree(run_a, watched)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1280, "height": 840})
+            with ViewerSession(resolve_target(watched), poll_interval=0.05) as session:
+                session.load_initial()
+                session.start()
+                with LocalViewerServer(session, host="127.0.0.1", port=port, heartbeat_interval=1.0) as server:
+                    page.goto(f"{server.url}?lang=en", wait_until="domcontentloaded")
+                    expect(page.locator("#app")).to_have_attribute("data-revision", "1", timeout=20000)
+                    # Advance the first process to B at rev 3, so its state_seq is ahead of a fresh process's.
+                    for revision, src in ((2, run_b), (3, run_a), (4, run_b)):
+                        _replace_dir_from_subprocess(src, watched)
+                        _wait_for_revision(session, revision)
+                    expect(page.locator("#app")).to_have_attribute("data-revision", "4", timeout=20000)
+                    obs_old = _observe_visible_state(page)
+                    assert obs_old["scene"]["project_hash"] == hash_b, obs_old
+
+            # A new viewer process on the same port, now watching A again (rev 1, state_seq 1).
+            _replace_dir_from_subprocess(run_a, watched)
+            with ViewerSession(resolve_target(watched), poll_interval=0.05) as session:
+                new_snap = session.load_initial().snapshot
+                session.start()
+                with LocalViewerServer(session, host="127.0.0.1", port=port, heartbeat_interval=1.0):
+                    expect(page.locator("#app")).to_have_attribute("data-snapshot-id", new_snap["snapshot_id"], timeout=30000)
+                    obs_new = _observe_visible_state(page)
+                    _assert_coherent_a_or_b(obs_new, hash_a=hash_a, hash_b=hash_b)
+                    assert obs_new["scene"]["project_hash"] == hash_a, obs_new
+                    assert obs_new["app_revision"] == "1", obs_new
+                    # Later edits on the new process are followed too.
+                    _replace_dir_from_subprocess(run_b, watched)
+                    _wait_for_revision(session, 2)
+                    expect(page.locator("#app")).to_have_attribute("data-revision", "2", timeout=20000)
+                    obs_next = _observe_visible_state(page)
+                    _assert_coherent_a_or_b(obs_next, hash_a=hash_a, hash_b=hash_b)
+                    assert obs_next["scene"]["project_hash"] == hash_b, obs_next
+        finally:
+            browser.close()

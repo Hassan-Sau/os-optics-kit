@@ -367,6 +367,18 @@ def _rotate_vec(q: tuple[float, float, float, float], v: tuple[float, float, flo
     )
 
 
+def _plane_frame(position: Any, quaternion: Any) -> dict[str, list[float]]:
+    """A plane pose resolved in the design frame, as the engine reports a computed plane (``ObservationPlaneFrame``):
+    ``origin_mm`` and the unit axes ``u_axis``, ``v_axis`` and ``normal`` (the pose's local x, y and z)."""
+    quat = _normalize_quaternion(quaternion)
+    return {
+        "origin_mm": [float(position[0]), float(position[1]), float(position[2])],
+        "u_axis": list(_rotate_vec(quat, (1.0, 0.0, 0.0))),
+        "v_axis": list(_rotate_vec(quat, (0.0, 1.0, 0.0))),
+        "normal": list(_rotate_vec(quat, (0.0, 0.0, 1.0))),
+    }
+
+
 def _cylinder_mesh(
     radius: float,
     z_min: float,
@@ -814,8 +826,12 @@ def _build_layout_parts_from_engine(
     applied_document: dict[str, Any],
     *,
     palette: dict[str, Any],
-) -> list[Any] | None:
-    """Build exact nominal/catalog ``ViewPart`` meshes via ``os_optics.local.json_api.project_layout`` (zero tracing)."""
+) -> tuple[list[Any], dict[str, dict[str, list[float]]]] | None:
+    """Build exact nominal/catalog ``ViewPart`` meshes via ``os_optics.local.json_api.project_layout`` (zero tracing).
+
+    Also returns each observation plane's pose as the engine resolved it in the design frame (an attached plane composed
+    with its device's pose in the applied configuration), keyed by ``observation_id``.
+    """
     from os_optics.local import json_api
     from os_optics.optical_view import parse_glb
     from os_optics.viewer.model import ViewPart
@@ -847,6 +863,11 @@ def _build_layout_parts_from_engine(
         for p in (layout.get("observation_planes") or [])
         if isinstance(p, dict) and p.get("observation_id")
     }
+    plane_frames: dict[str, dict[str, list[float]]] = {}
+    for obs_id, plane in planes_by_id.items():
+        plane_pose = plane.get("pose") or {}
+        if isinstance(plane_pose.get("position_mm"), (list, tuple)) and len(plane_pose["position_mm"]) == 3:
+            plane_frames[str(obs_id)] = _plane_frame(plane_pose["position_mm"], plane_pose.get("quaternion_wxyz"))
 
     parts: list[Any] = []
     for node in gltf.get("nodes") or []:
@@ -934,7 +955,7 @@ def _build_layout_parts_from_engine(
                     facts=facts,
                 )
             )
-    return parts
+    return parts, plane_frames
 
 
 def _build_project_preview_scene(
@@ -944,22 +965,29 @@ def _build_project_preview_scene(
     title: str,
     note_code: str,
     note_text: str,
-) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, dict[str, list[float]]]]:
     """Build a geometry-only ``ViewerScene`` from a configuration-applied Project document (zero ray tracing).
 
     Prefers the engine's nominal/catalog layout via ``os_optics.local.json_api.project_layout``.
     When a Project cannot be lowered (e.g. invalid Project or unavailable catalog), falls back
     to explicit ``design_geometry`` where stated and marks any placeholder/unavailable dimensions
     explicitly as ``schematic: True`` (``geometry_source: "schematic"``).
+
+    Also returns the design-frame pose of every observation plane it placed (see ``_plane_frame``), keyed by
+    ``observation_id``: the one pose that both the drawn plane and the snapshot's quantities report. A plane attached to
+    a device the Project does not declare has no design-frame pose; it is drawn as a schematic placeholder and left out.
     """
     import numpy as np
     from os_optics.viewer.model import OPTICAL_VIEW, ViewPart, ViewerScene, scene_summary, view_document
     from os_optics.viewer.palette import class_table
 
     palette = class_table(OPTICAL_VIEW)
-    parts = _build_layout_parts_from_engine(applied_document, palette=palette)
+    plane_frames: dict[str, dict[str, list[float]]] = {}
+    engine_layout = _build_layout_parts_from_engine(applied_document, palette=palette)
 
-    if parts is None:
+    if engine_layout is not None:
+        parts, plane_frames = engine_layout
+    else:
         parts = []
         models = {m.get("model_id"): m for m in (applied_document.get("optical_models") or []) if isinstance(m, dict)}
         target_obs_ids = {t.get("observation_id") for t in (applied_document.get("targets") or []) if isinstance(t, dict)}
@@ -1055,27 +1083,42 @@ def _build_project_preview_scene(
             local_pos = (float(pos_raw[0]), float(pos_raw[1]), float(pos_raw[2]))
             local_quat = _normalize_quaternion(pose.get("quaternion_wxyz"))
             device_id = obs.get("device_instance_id")
+            pose_resolved = True
             if device_id and device_id in component_poses:
                 dev_pos, dev_quat = component_poses[device_id]
                 rot_local = _rotate_vec(dev_quat, local_pos)
                 pos = (dev_pos[0] + rot_local[0], dev_pos[1] + rot_local[1], dev_pos[2] + rot_local[2])
                 quat = _quat_mul(dev_quat, local_quat)
             else:
+                # Attached to an undeclared device, the local pose has no design-frame meaning: drawn as a placeholder.
+                pose_resolved = not device_id
                 pos, quat = local_pos, local_quat
+            if pose_resolved:
+                plane_frames[obs_id] = _plane_frame(pos, quat)
 
             aperture = obs.get("aperture") or {}
             shape = str(aperture.get("shape") or "circle").lower()
+            # The active area is centred at center_offset_mm (u, v) in the plane, not necessarily at the plane origin.
+            offset_raw = aperture.get("center_offset_mm") or [0.0, 0.0]
+            pair = isinstance(offset_raw, (list, tuple)) and len(offset_raw) == 2
+            offset_u = _finite_float(offset_raw[0]) if pair else None
+            offset_v = _finite_float(offset_raw[1]) if pair else None
+            offset_ok = offset_u is not None and offset_v is not None
+            if offset_u is None or offset_v is None:
+                offset_u = offset_v = 0.0
+            offset = _rotate_vec(quat, (offset_u, offset_v, 0.0))
+            area_centre = (pos[0] + offset[0], pos[1] + offset[1], pos[2] + offset[2])
             if shape == "rectangle":
-                has_dims = _finite_float(aperture.get("half_width_x_mm") or aperture.get("half_width_u_mm")) is not None and _finite_float(
-                    aperture.get("half_height_y_mm") or aperture.get("half_width_v_mm")
-                ) is not None
-                hx = _float_or(aperture.get("half_width_x_mm") or aperture.get("half_width_u_mm"), 10.0)
-                hy = _float_or(aperture.get("half_height_y_mm") or aperture.get("half_width_v_mm"), 10.0)
-                mesh = _box_mesh(hx, hy, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
+                half_u = _finite_float(aperture.get("half_width_mm"))
+                half_v = _finite_float(aperture.get("half_height_mm"))
+                has_dims = half_u is not None and half_v is not None
+                hx = half_u if half_u is not None else 10.0
+                hy = half_v if half_v is not None else 10.0
+                mesh = _box_mesh(hx, hy, -0.2, 0.2, area_centre, quat, _rgb3(style.rgb), float(style.alpha))
             else:
                 has_dims = _finite_float(aperture.get("radius_mm")) is not None
                 radius = _float_or(aperture.get("radius_mm"), 12.5)
-                mesh = _cylinder_mesh(radius, -0.2, 0.2, pos, quat, _rgb3(style.rgb), float(style.alpha))
+                mesh = _cylinder_mesh(radius, -0.2, 0.2, area_centre, quat, _rgb3(style.rgb), float(style.alpha))
 
             target_ids = [
                 t.get("target_id")
@@ -1089,8 +1132,8 @@ def _build_project_preview_scene(
                 "position_mm": [round(pos[0], 6), round(pos[1], 6), round(pos[2], 6)],
                 "footprints": [],
                 "geometry_preview_only": True,
-                "geometry_source": "project_design_geometry" if has_dims else "schematic",
-                "schematic": not has_dims,
+                "geometry_source": "project_design_geometry" if has_dims and pose_resolved and offset_ok else "schematic",
+                "schematic": not (has_dims and pose_resolved and offset_ok),
                 "view_placeholder": False,
             }
             parts.append(ViewPart(
@@ -1128,7 +1171,7 @@ def _build_project_preview_scene(
         },
         notes=({"code": note_code, "text": note_text},),
     )
-    return scene, view_document(scene), scene_summary(scene)
+    return scene, view_document(scene), scene_summary(scene), plane_frames
 
 
 def _count_drawable_rays(viewer_scene: Any) -> int:
@@ -1383,11 +1426,24 @@ def _uncomputed_targets(document: dict[str, Any], status_label: str) -> tuple[li
     return targets, summary
 
 
-def _uncomputed_quantities(document: dict[str, Any], status_label: str) -> list[dict[str, Any]]:
+def _uncomputed_quantities(
+    document: dict[str, Any],
+    status_label: str,
+    plane_frames: dict[str, dict[str, list[float]]],
+) -> list[dict[str, Any]]:
+    """Observation rows without results, their planes in the same frame as a computed run's planes.
+
+    ``plane`` mirrors the engine's ``ObservationPlaneFrame``: ``origin_mm`` and the axes are the design-frame pose the
+    preview scene drew (``plane_frames``, after the selected configuration; null where it cannot be resolved),
+    ``pose_frame`` and ``device_id`` say how the Project attached the plane, and ``declared_pose`` is the pose exactly as
+    the Project writes it, in ``pose_frame`` coordinates.
+    """
     quantities: list[dict[str, Any]] = []
     for obs in document.get("observations") or []:
         if not isinstance(obs, dict):
             continue
+        frame = plane_frames.get(str(obs.get("observation_id")))
+        device_id = obs.get("device_instance_id")
         quantities.append({
             "observation_id": obs.get("observation_id"),
             "status": status_label,
@@ -1403,10 +1459,15 @@ def _uncomputed_quantities(document: dict[str, Any], status_label: str) -> list[
             "power_by_wavelength": [],
             "issue_codes": [],
             "plane": {
-                "origin_mm": (obs.get("pose") or {}).get("position_mm"),
+                "origin_mm": frame["origin_mm"] if frame else None,
+                "u_axis": frame["u_axis"] if frame else None,
+                "v_axis": frame["v_axis"] if frame else None,
+                "normal": frame["normal"] if frame else None,
+                "pose_frame": "DEVICE_LOCAL" if device_id else "DESIGN",
+                "device_id": device_id,
+                "declared_pose": obs.get("pose"),
                 "aperture": obs.get("aperture"),
                 "absorbing": bool(obs.get("absorbing", False)),
-                "device_id": obs.get("device_instance_id"),
                 "medium": obs.get("medium"),
             },
         })
@@ -1780,7 +1841,7 @@ def _build_preview_or_stale_snapshot(
         )
 
     snapshot_id = f"rev-{revision}-{fingerprint[:12]}"
-    _scene, scene_doc, scene_sum = _build_project_preview_scene(
+    _scene, scene_doc, scene_sum, plane_frames = _build_project_preview_scene(
         applied_document,
         project_hash=project_hash,
         title=title,
@@ -1799,7 +1860,7 @@ def _build_preview_or_stale_snapshot(
         ray_data_mode=None,
     )
     targets, target_summary = _uncomputed_targets(applied_document, status_label)
-    quantities = _uncomputed_quantities(applied_document, status_label)
+    quantities = _uncomputed_quantities(applied_document, status_label, plane_frames)
 
     notices: list[dict[str, str]] = [
         {

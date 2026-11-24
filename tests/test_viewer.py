@@ -712,6 +712,36 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
             self.assertEqual(snap_stale["freshness"]["state"], "HISTORICAL")
             self.assertFalse(snap_stale["power_ledger"]["available"])
 
+    def test_every_accepted_loopback_host_serves_and_each_server_has_its_own_instance(self):
+        """``--host`` accepts 127.0.0.1, localhost and ::1; each must actually serve, with a URL that works. Each server
+        process carries its own ``instance_id`` so an open page can tell a restarted viewer from the one it followed."""
+        import socket
+
+        try:
+            with socket.socket(socket.AF_INET6) as probe:
+                probe.bind(("::1", 0))
+            hosts = ("127.0.0.1", "localhost", "::1")
+        except OSError:
+            hosts = ("127.0.0.1", "localhost")
+        with TempDir() as tmp:
+            run_dir = _run_project(_multichannel_project(), tmp / "run")
+            instances = set()
+            for host in hosts:
+                with self.subTest(host=host):
+                    with ViewerSession(resolve_target(run_dir), poll_interval=5.0) as session:
+                        session.load_initial()
+                        with LocalViewerServer(session, host=host, port=0) as server:
+                            if host == "::1":
+                                self.assertEqual(server.url, f"http://[::1]:{server.port}/")
+                            status, health, _ = _http_get_status_json(f"{server.url}api/health")
+                            self.assertEqual(status, 200)
+                            self.assertTrue(health["ok"])
+                            _st, envelope, _h = _http_get_status_json(f"{server.url}api/snapshot")
+                            self.assertEqual(envelope["server"]["url"], server.url)
+                            self.assertRegex(envelope["server"]["instance_id"], r"^[0-9a-f]{32}$")
+                            instances.add(envelope["server"]["instance_id"])
+            self.assertEqual(len(instances), len(hosts))
+
     def test_cli_subprocess_startup_live_api_and_clean_shutdown(self):
         with TempDir() as tmp:
             run_dir = _run_project(_multichannel_project(), tmp / "cli_run")
@@ -935,11 +965,38 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
                     snap_latest = session.state.envelope()["snapshot"]
                     self.assertEqual(snap_latest["revision"], 5)
 
+                    # The engine's code is not bound to a snapshot: with A and B evicted it is still served, so an
+                    # engine page that is still starting after its snapshot was evicted can run and report the
+                    # refused scene instead of stalling.
+                    st_page, page_html, _ = _http_get_bytes(f"{server.url}engine-view/{snap_latest['snapshot_id']}/")
+                    self.assertEqual(st_page, 200)
+                    for ref in (b'src="/assets/engine-boot.js"', b'href="/engine-assets/viewer.css"',
+                                b'src="/engine-assets/three.bundle.js"', b'src="/engine-assets/viewer.js"'):
+                        self.assertIn(ref, page_html)
+                    self.assertLess(page_html.index(b"engine-boot.js"), page_html.index(b"/engine-assets/"))
+                    for name, ctype in (("viewer.js", "text/javascript"), ("three.bundle.js", "text/javascript"),
+                                        ("viewer.css", "text/css"), ("THREE_LICENSE.txt", "text/plain")):
+                        with self.subTest(engine_asset=name):
+                            st_asset, body_asset, hdr_asset = _http_get_bytes(f"{server.url}engine-assets/{name}")
+                            self.assertEqual(st_asset, 200)
+                            self.assertTrue(hdr_asset["content-type"].startswith(ctype))
+                            self.assertEqual(hdr_asset["cache-control"], "no-store")
+                            self.assertNotIn("x-viewer-snapshot-id", hdr_asset)
+                            self.assertGreater(len(body_asset), 0)
+                    st_boot, _boot_body, hdr_boot = _http_get_bytes(f"{server.url}assets/engine-boot.js")
+                    self.assertEqual(st_boot, 200)
+                    self.assertTrue(hdr_boot["content-type"].startswith("text/javascript"))
+                    for missing in (f"{server.url}engine-assets/index.html", f"{server.url}engine-assets/view.json",
+                                    f"{server.url}engine-view/{snap_latest['snapshot_id']}/viewer.js"):
+                        with self.subTest(missing=missing):
+                            st_m, body_m, _ = _http_get_status_json(missing)
+                            self.assertEqual(st_m, 404)
+                            self.assertEqual(body_m["error"]["code"], "NOT_FOUND")
+
                     # Requesting evicted A MUST return HTTP 409 SNAPSHOT_SUPERSEDED (never latest bytes!).
                     for url in (
                         f"{server.url}engine-view/{snap_a_id}/view.json",
                         f"{server.url}engine-view/{snap_a_id}/",
-                        f"{server.url}engine-view/{snap_a_id}/viewer.js",
                         f"{server.url}engine-view/?rev=1",
                         f"{server.url}engine-view/?snapshot_id={snap_a_id}",
                         f"{server.url}api/scene-document?snapshot_id={snap_a_id}",
@@ -1308,6 +1365,273 @@ class ViewerLiveFollowAndResilienceTests(unittest.TestCase):
             self.assertTrue(snap_bare["scene"]["has_schematic_geometry"])
             self.assertIn("BARE_LENS", snap_bare["scene"]["schematic_part_ids"])
             self.assertIn("SCHEMATIC_GEOMETRY_USED", {n["code"] for n in snap_bare["notices"]})
+
+
+def _quat_wxyz_mul(a: list[float], b: list[float]) -> list[float]:
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return [
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+    ]
+
+
+def _quat_wxyz_rotate(q: list[float], v: list[float]) -> list[float]:
+    w, x, y, z = q
+    conj = [w, -x, -y, -z]
+    return _quat_wxyz_mul(_quat_wxyz_mul(q, [0.0, *v]), conj)[1:]
+
+
+def _axis_angle_quat(axis: tuple[float, float, float], degrees: float) -> list[float]:
+    import math
+
+    half = math.radians(degrees) / 2.0
+    norm = math.sqrt(sum(c * c for c in axis))
+    return [math.cos(half), *(math.sin(half) * c / norm for c in axis)]
+
+
+def _attached_plane_project(det_t_position_mm: list[float]) -> dict:
+    """The detector-measurements case (no catalog parts) with its ``signal`` plane attached to a detector ``DET_T``:
+    offset and turned in the detector's frame, and a configuration that translates AND rotates the detector. The
+    ``reference`` plane stays unattached (design frame) as the control.
+    """
+    doc = _detector_base()
+    signal = next(o for o in doc["observations"] if o["observation_id"] == "signal")
+    det_pose = json.loads(json.dumps(signal["pose"]))
+    doc["components"].append({
+        "instance_id": "DET_T",
+        "optical_role": "detector",
+        "custom_part": {"custom_part_key": "user-detector", "description": "User-supplied detector."},
+        "nominal_pose": det_pose,
+        "selected_parameters": [],
+        "retained_dofs": [],
+    })
+    signal["device_instance_id"] = "DET_T"
+    signal["pose"] = {"position_mm": [1.5, -2.0, 0.75], "quaternion_wxyz": _axis_angle_quat((0.0, 0.0, 1.0), 25.0)}
+    moved = {
+        "position_mm": list(det_t_position_mm),
+        "quaternion_wxyz": _quat_wxyz_mul(_axis_angle_quat((1.0, 0.0, 0.0), 15.0), det_pose["quaternion_wxyz"]),
+    }
+    doc["configurations"] = [{
+        "configuration_id": "moved",
+        "label": "Detector moved and turned",
+        "component_poses": [{"instance_id": "DET_T", "nominal_pose": moved}],
+    }]
+    return doc
+
+
+def _scene_plane_geometry(scene_document: dict, part_id: str) -> tuple[list[float], list[tuple[float, ...]]]:
+    """Where a plane is actually drawn, from the view document's base64 float32 vertex positions: the bounding-box centre
+    of its vertices (a disc or thin slab centred on the plane origin) and the vertices themselves."""
+    import base64
+    import struct
+
+    part = next(p for p in scene_document["parts"] if p["id"] == part_id)
+    points = []
+    for mesh in part["meshes"]:
+        raw = base64.b64decode(mesh["positions"])
+        values = struct.unpack(f"<{len(raw) // 4}f", raw)
+        points.extend(values[i:i + 3] for i in range(0, len(values), 3))
+    centre = [(min(p[k] for p in points) + max(p[k] for p in points)) / 2.0 for k in range(3)]
+    return centre, points
+
+
+@requires_engine
+class ViewerObservationPlaneFrameTests(unittest.TestCase):
+    """Every mode reports an observation plane where the engine resolves it and the 3D scene draws it: the design frame,
+    after the selected configuration, an attached plane composed with its device's pose."""
+
+    @classmethod
+    def setUpClass(cls):
+        quiet_environment()
+
+    def _expected_frames(self, det_t_position_mm: list[float]) -> dict[str, dict[str, list[float]]]:
+        """Reference poses computed here, independently of the viewer: device pose composed with the local plane pose."""
+        doc = _attached_plane_project(det_t_position_mm)
+        moved = doc["configurations"][0]["component_poses"][0]["nominal_pose"]
+        frames = {}
+        for obs in doc["observations"]:
+            local_q = obs["pose"]["quaternion_wxyz"]
+            local_p = obs["pose"]["position_mm"]
+            if obs["observation_id"] == "signal":
+                q = _quat_wxyz_mul(moved["quaternion_wxyz"], local_q)
+                offset = _quat_wxyz_rotate(moved["quaternion_wxyz"], local_p)
+                origin = [moved["position_mm"][k] + offset[k] for k in range(3)]
+            elif obs["observation_id"] == "reference":
+                q, origin = local_q, list(local_p)
+            else:
+                continue
+            frames[obs["observation_id"]] = {
+                "origin_mm": origin,
+                "u_axis": _quat_wxyz_rotate(q, [1.0, 0.0, 0.0]),
+                "v_axis": _quat_wxyz_rotate(q, [0.0, 1.0, 0.0]),
+                "normal": _quat_wxyz_rotate(q, [0.0, 0.0, 1.0]),
+            }
+        return frames
+
+    def _assert_vec(self, actual, expected, label: str, places: int = 6) -> None:
+        self.assertIsNotNone(actual, label)
+        for k in range(3):
+            self.assertAlmostEqual(float(actual[k]), float(expected[k]), places=places, msg=f"{label}: {actual} != {expected}")
+
+    def _assert_planes(self, snap: dict, scene_document: dict, expected: dict, label: str) -> None:
+        planes = {q["observation_id"]: q["plane"] for q in snap["quantities"]}
+        for obs_id, frame in expected.items():
+            plane = planes[obs_id]
+            for key in ("origin_mm", "u_axis", "v_axis", "normal"):
+                self._assert_vec(plane[key], frame[key], f"{label} {obs_id} snapshot {key}")
+            centre, points = _scene_plane_geometry(scene_document, obs_id)
+            self._assert_vec(centre, frame["origin_mm"], f"{label} {obs_id} drawn centre", places=3)
+            # Every drawn vertex lies in the expected plane (within a thin slab's half thickness).
+            off_plane = max(abs(sum((p[k] - frame["origin_mm"][k]) * frame["normal"][k] for k in range(3))) for p in points)
+            self.assertLess(off_plane, 0.25, f"{label} {obs_id} drawn outside the expected plane")
+        det = planes["signal"]
+        self.assertEqual(det["pose_frame"], "DEVICE_LOCAL", label)
+        self.assertEqual(det["device_id"], "DET_T", label)
+        ctrl = planes["reference"]
+        self.assertEqual(ctrl["pose_frame"], "DESIGN", label)
+        self.assertIsNone(ctrl["device_id"], label)
+
+    def _assert_withheld(self, snap: dict, label: str) -> None:
+        self.assertFalse(snap["is_computed_result"], label)
+        self.assertEqual(snap["scene"]["beam_count"], 0, label)
+        self.assertEqual(snap["scene"]["drawable_ray_count"], 0, label)
+        self.assertFalse(snap["power_ledger"]["available"], label)
+        for q in snap["quantities"]:
+            self.assertIsNone(q["total_power_W"], label)
+            self.assertEqual(q["arrivals"], [], label)
+            self.assertEqual(q["quantity_state"], "UNCOMPUTED", label)
+            # The local pose stays available, labelled as what the Project wrote, in pose_frame coordinates.
+            self.assertIn("declared_pose", q["plane"], label)
+        det = next(q for q in snap["quantities"] if q["observation_id"] == "signal")
+        self.assertEqual(det["plane"]["declared_pose"]["position_mm"], [1.5, -2.0, 0.75], label)
+
+    def test_attached_plane_reports_resolved_design_pose_in_every_mode(self):
+        from os_optics.local import json_api
+        from os_optics.local.configurations import run_configured_project
+        from os_optics.results import load_run
+        from os_optics_kit.viewer.snapshot import _apply_configuration
+
+        with TempDir() as tmp:
+            project = tmp / "project.json"
+            first, second = [120.0, 4.0, 47.0], [130.0, -6.0, 52.5]
+            project.write_text(json.dumps(_attached_plane_project(first)), encoding="utf-8")
+            expected_first = self._expected_frames(first)
+
+            # The engine's own resolution of the selected configuration agrees with the reference composed here.
+            applied = _apply_configuration(json.loads(project.read_text(encoding="utf-8")), "moved")
+            layout_planes = {p["observation_id"]: p for p in json_api.project_layout(applied)["layout"]["observation_planes"]}
+            for obs_id, frame in expected_first.items():
+                self._assert_vec(layout_planes[obs_id]["pose"]["position_mm"], frame["origin_mm"], f"engine layout {obs_id}")
+
+            # 1) Project only: geometry preview, in process, over HTTP and from the --once CLI.
+            spec = resolve_target(project, configuration="moved")
+            built = build_snapshot(spec)
+            self.assertEqual(built.snapshot["result_mode"], "geometry_preview")
+            self._assert_planes(built.snapshot, built.scene_document, expected_first, "project-only")
+            self._assert_withheld(built.snapshot, "project-only")
+            with ViewerSession(spec, poll_interval=5.0) as session:
+                session.load_initial()
+                with LocalViewerServer(session, host="127.0.0.1", port=0) as server:
+                    _st, envelope, _h = _http_get_status_json(f"{server.url}api/snapshot")
+                    snap_id = envelope["snapshot"]["snapshot_id"]
+                    _st, view_doc, _h = _http_get_status_json(f"{server.url}engine-view/{snap_id}/view.json")
+                    self._assert_planes(envelope["snapshot"], view_doc, expected_first, "project-only HTTP")
+            done = subprocess.run([sys.executable, *KIT, "view", str(project), "--configuration", "moved", "--once"],
+                                  capture_output=True, text=True, timeout=180)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            once = json.loads(done.stdout)["snapshot"]
+            planes_once = {q["observation_id"]: q["plane"] for q in once["quantities"]}
+            for obs_id, frame in expected_first.items():
+                self._assert_vec(planes_once[obs_id]["origin_mm"], frame["origin_mm"], f"--once {obs_id}")
+
+            # 2) Matching run: the engine's traced planes, the scene and the snapshot all agree with the reference.
+            run_root = tmp / "run"
+            run_configured_project(json.loads(project.read_text(encoding="utf-8")), output_dir=run_root)
+            computed = build_snapshot(resolve_target(project, run=run_root, configuration="moved"))
+            self.assertEqual(computed.snapshot["result_mode"], "computed_run")
+            run_dir = Path(computed.snapshot["source"]["run_dir"])
+            traced = {m["observation_id"]: m["plane"] for m in load_run(run_dir, verify=True).monitors()}
+            for obs_id, frame in expected_first.items():
+                for key in ("origin_mm", "u_axis", "v_axis", "normal"):
+                    self._assert_vec(traced[obs_id][key], frame[key], f"engine traced {obs_id} {key}")
+            computed_planes = {q["observation_id"]: q["plane"] for q in computed.snapshot["quantities"]}
+            for obs_id, frame in expected_first.items():
+                self._assert_vec(computed_planes[obs_id]["origin_mm"], frame["origin_mm"], f"matching-run {obs_id}")
+                self.assertEqual(computed_planes[obs_id]["pose_frame"], traced[obs_id]["pose_frame"])
+
+            # 3) Historical: the Project moves the detector again without a rerun.
+            project.write_text(json.dumps(_attached_plane_project(second)), encoding="utf-8")
+            stale = build_snapshot(resolve_target(project, run=run_root, configuration="moved"))
+            self.assertEqual(stale.snapshot["result_mode"], "stale_run")
+            expected_second = self._expected_frames(second)
+            self._assert_planes(stale.snapshot, stale.scene_document, expected_second, "historical")
+            self._assert_withheld(stale.snapshot, "historical")
+
+    def test_offset_and_rectangular_active_areas_drawn_where_the_engine_draws_them(self):
+        """A plane's active area is centred at ``center_offset_mm`` in the plane; the fallback builder (no engine layout)
+        draws a circular and a rectangular active area at the same place and size as the engine, as declared geometry."""
+        from unittest import mock
+
+        from os_optics.local import json_api
+
+        position = [120.0, 4.0, 47.0]
+        expected = self._expected_frames(position)["signal"]
+        for shape, aperture in (
+            ("circle", {"shape": "circle", "radius_mm": 2.5, "center_offset_mm": [1.0, -0.5], "obstruction_radius_mm": 0.0}),
+            ("rectangle", {"shape": "rectangle", "half_width_mm": 3.0, "half_height_mm": 1.5, "center_offset_mm": [-0.8, 0.6]}),
+        ):
+            with self.subTest(shape=shape), TempDir() as tmp:
+                doc = _attached_plane_project(position)
+                next(o for o in doc["observations"] if o["observation_id"] == "signal")["aperture"] = aperture
+                project = tmp / "project.json"
+                project.write_text(json.dumps(doc), encoding="utf-8")
+                engine = build_snapshot(resolve_target(project, configuration="moved"))
+                with mock.patch.object(json_api, "project_layout", side_effect=RuntimeError("layout unavailable")):
+                    fallback = build_snapshot(resolve_target(project, configuration="moved"))
+                ou, ov = aperture["center_offset_mm"]
+                area_centre = [expected["origin_mm"][k] + ou * expected["u_axis"][k] + ov * expected["v_axis"][k]
+                               for k in range(3)]
+                for label, built in (("engine", engine), ("fallback", fallback)):
+                    centre, points = _scene_plane_geometry(built.scene_document, "signal")
+                    self._assert_vec(centre, area_centre, f"{shape} {label} drawn active-area centre", places=3)
+                    extent_u = max(abs(sum((p[k] - area_centre[k]) * expected["u_axis"][k] for k in range(3))) for p in points)
+                    want_u = aperture.get("radius_mm", aperture.get("half_width_mm"))
+                    self.assertAlmostEqual(extent_u, want_u, places=3, msg=f"{shape} {label} drawn half extent along u")
+                    plane = next(q["plane"] for q in built.snapshot["quantities"] if q["observation_id"] == "signal")
+                    self._assert_vec(plane["origin_mm"], expected["origin_mm"], f"{shape} {label} plane origin")
+                self.assertNotIn("signal", fallback.snapshot["scene"]["schematic_part_ids"], shape)
+
+    def test_layout_fallback_uses_the_same_resolved_pose(self):
+        """Where the engine cannot lower the Project's layout (e.g. catalog geometry unavailable), the fallback builder
+        composes the same pose; a plane attached to an undeclared device has none and is labelled schematic."""
+        from unittest import mock
+
+        from os_optics.local import json_api
+
+        with TempDir() as tmp:
+            project = tmp / "project.json"
+            position = [120.0, 4.0, 47.0]
+            project.write_text(json.dumps(_attached_plane_project(position)), encoding="utf-8")
+            with mock.patch.object(json_api, "project_layout", side_effect=RuntimeError("layout unavailable")):
+                built = build_snapshot(resolve_target(project, configuration="moved"))
+            self._assert_planes(built.snapshot, built.scene_document, self._expected_frames(position), "fallback")
+            self._assert_withheld(built.snapshot, "fallback")
+
+            dangling = _attached_plane_project(position)
+            next(o for o in dangling["observations"] if o["observation_id"] == "signal")[
+                "device_instance_id"] = "NO_SUCH_DEVICE"
+            project.write_text(json.dumps(dangling), encoding="utf-8")
+            built = build_snapshot(resolve_target(project, configuration="moved"))
+            row = next(q for q in built.snapshot["quantities"] if q["observation_id"] == "signal")
+            self.assertIsNone(row["plane"]["origin_mm"])
+            self.assertEqual(row["plane"]["pose_frame"], "DEVICE_LOCAL")
+            self.assertEqual(row["plane"]["device_id"], "NO_SUCH_DEVICE")
+            self.assertIn("signal", built.snapshot["scene"]["schematic_part_ids"])
+            ctrl = next(q for q in built.snapshot["quantities"] if q["observation_id"] == "reference")
+            self._assert_vec(ctrl["plane"]["origin_mm"], [0.0, 100.0, 50.0], "dangling control")
 
 
 @unittest.skipUnless(catalog_available(), "no catalog release is installed")
