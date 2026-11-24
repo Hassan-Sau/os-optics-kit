@@ -5,7 +5,7 @@ getting-started walkthrough is available in
 [English](https://github.com/JunLin615/os-optics/blob/main/docs/en/getting-started.md) and
 [Simplified Chinese](https://github.com/JunLin615/os-optics/blob/main/docs/zh-CN/getting-started.md).
 These recipes use os-optics 0.13 with os-optics-kit 0.4; the quoted results come from
-os-optics 0.13.0 and catalog release `2026-10-28.1`.
+os-optics 0.14.0 and catalog release `2026-11-24.1`.
 The same edits by ID, with unit conversion, a change record and retry safety, are
 available without writing Python through `os-optics-kit edit`
 ([workflow recipes](workflow-recipes.md#edit-a-project-by-id)).
@@ -88,7 +88,7 @@ validity in `issues` and `model_scope_issues`, the saved inputs in
 `run-adapted/project.json` and each target's assessment in `targets`. The original pinned
 catalog references and original run remain unchanged.
 
-On catalog `2026-10-28.1`, the combined edits above produce a waist radius near
+On catalog `2026-11-24.1`, the combined edits above produce a waist radius near
 `1.1149 mm`: the `1.8–2.2 mm` interval is **not met**, so the recipe and saved
 summary exit with code `1`. This is a completed simulation with a failing design,
 not a command error. Another catalog release can give another number.

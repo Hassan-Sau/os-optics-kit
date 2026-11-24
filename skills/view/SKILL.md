@@ -49,4 +49,4 @@ Strictly read-only (GET/HEAD on loopback only). Never edits inputs, never combin
 
 ## Version
 
-0.1.0 (os-optics-kit 0.4.0): first version, verified with os-optics 0.13.0.
+0.1.0 (os-optics-kit 0.4.0): first version, verified with os-optics 0.14.0.

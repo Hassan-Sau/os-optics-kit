@@ -4,7 +4,7 @@
 
 Two catalog plano-convex lenses (f = 50 mm and 100 mm, N-BK7, 12.7 mm diameter) expand a 780 nm Gaussian beam with a
 1 mm waist radius twice. The target `expanded_waist` asks for an output waist radius of 1.99612 mm ± 1 %, a measure
-of collimation. The components pin catalog release 2026-10-28.1.
+of collimation. The components pin catalog release 2026-11-24.1.
 
 ![3D view: the source SRC, the catalog lenses L1 and L2 and the plane `output` with the traced beam](images/iso.png)
 
@@ -41,5 +41,5 @@ The study files in `studies/` change the design by ID with `os-optics-kit edit` 
 | Move L2 by the best shift, +0.54 mm | `final.json` | 1.99645 mm | PASS |
 
 The beam radius at the output plane (`output_beam_radius`, added by the swap) stays within 1 % throughout: the
-waist radius reacts to collimation, the radius at one plane barely does. Verified with os-optics 0.13.0 and catalog
+waist radius reacts to collimation, the radius at one plane barely does. Verified with os-optics 0.14.0 and catalog
 2026-10-28.1; run status PASS.

@@ -46,4 +46,4 @@ metadata), piquasso Apache-2.0.
 | 0.25 ps photons in the 1 mm Mach-Zehnder | refused: `SINGLE_FREQUENCY_MODEL_INVALID` |
 
 The export's per-path group delay makes the window's 0.163 ps group-delay mismatch visible. Verified with
-os-optics 0.13.0 on Python 3.14.7 (perceval-quandela 1.3.1, piquasso 8.0.1).
+os-optics 0.14.0 on Python 3.14.7 (perceval-quandela 1.3.1, piquasso 8.0.1).

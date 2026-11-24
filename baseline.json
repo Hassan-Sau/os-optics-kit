@@ -1,17 +1,19 @@
 {
   "schema": "os-optics-kit.baseline",
   "schema_version": 1,
-  "kit_version": "0.4.0",
+  "kit_version": "0.5.0",
   "engine": {
     "distribution": "os-optics",
     "requirement": ">=0.14,<0.15",
-    "verified_version": "0.13.0",
-    "candidate_version": "0.14.0"
+    "verified_version": "0.14.0"
   },
   "catalog": {
-    "version": "2026-10-28.1",
-    "schema_version": "3.2",
-    "sha256": "7d7f5f0a6fa1db7ce32503a6a1d86c5bdcd167035782b47b73c2ac00fc1acf30"
+    "version": "2026-11-24.1",
+    "schema_version": "3.6",
+    "sha256": "c305e34f9cfe3dc2c946f881402aaa8c79337d44aa556c0a07c73ebeb173b32a"
   },
-  "python": ["3.11", "3.14"]
+  "python": [
+    "3.11",
+    "3.14"
+  ]
 }

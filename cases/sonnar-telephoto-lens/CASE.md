@@ -53,7 +53,7 @@ Both bound the arriving beam's ray-footprint RMS.
 
 ## Baseline
 
-os-optics 0.13.0, catalog-free: status `WARNING`, outcome `PARTIAL`. The untraced-light probe
+os-optics 0.14.0, catalog-free: status `WARNING`, outcome `PARTIAL`. The untraced-light probe
 stopped on its path budget; it is a separate model from the imaging quantities, which are all
 KNOWN, and the power ledger balances (`conserved true`, residual 2.1e-16 W).
 `os-optics-kit cases verify sonnar-telephoto-lens` repeats the run and compares it.

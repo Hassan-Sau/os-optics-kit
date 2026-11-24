@@ -70,4 +70,4 @@ os-optics-kit present build talk/presentation.json --set theme.language=zh-CN
 
 0.2.1 (os-optics-kit 0.4.0): compare page: crowded panels.
 0.2.0 (os-optics-kit 0.4.0): routes plain system views to the engine.
-0.1.0: first version, verified with os-optics 0.13.0.
+0.1.0: first version, verified with os-optics 0.14.0.

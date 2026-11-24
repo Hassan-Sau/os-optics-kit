@@ -29,7 +29,7 @@ python workflow.py --out out/default --redraw-only
 ```
 
 The external workflow requires Python 3.12+ with the pinned dependencies. From a
-checkout, run in this case directory. Each calculation uses a new output directory. The default took about 3 s on Python 3.14.8, os-optics 0.13.0;
+checkout, run in this case directory. Each calculation uses a new output directory. The default took about 3 s on Python 3.14.8, os-optics 0.14.0;
 no catalog download is needed. Open the generated `preview.png`.
 
 ## Optical model and handoff

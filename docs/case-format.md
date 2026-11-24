@@ -262,7 +262,7 @@ Catalog cases run on the release named in `baseline.json`. CI fetches that relea
 and checks its digest before verifying:
 
 ```bash
-os-optics catalog sync --release 2026-10-28.1
+os-optics catalog sync --release 2026-11-24.1
 os-optics catalog status        # active.sha256 must equal catalog.sha256 in baseline.json
 os-optics-kit cases verify --all
 ```

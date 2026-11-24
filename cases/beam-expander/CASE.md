@@ -17,7 +17,7 @@ license: MIT
 ## What it shows
 
 `project.json` is the engine's reference design `os-optics project example --kind beam_expander`, pinned to catalog
-release 2026-10-28.1. The target `expanded_waist` (output waist radius, a collimation measure) asks for
+release 2026-11-24.1. The target `expanded_waist` (output waist radius, a collimation measure) asks for
 1.99612 mm ± 1 %. The studies edit the design by ID: swapping L2 for the 100.3 mm lens breaks collimation
 (`expanded_waist` 1.4407 mm, UNMET; `output_beam_radius` stays MET); a twelve-sample sweep of the L2 position finds
 +0.54 mm (1.99645 mm, 5 of 12 samples PASS); applying it passes.
@@ -45,7 +45,7 @@ os-optics-kit report l2-sweep --project final.json --plots l2-sweep/plots --chan
 
 ## Baseline
 
-os-optics 0.13.0, catalog 2026-10-28.1: run status PASS (`expected.json`).
+os-optics 0.14.0, catalog 2026-11-24.1: run status PASS (`expected.json`).
 `os-optics-kit cases verify beam-expander` repeats the run and compares it.
 
 ## Files

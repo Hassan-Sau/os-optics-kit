@@ -48,7 +48,7 @@ compute budget gives a PARTIAL run with every target INDETERMINATE.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`).
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`).
 `os-optics-kit cases verify expansion-focus` repeats the run and compares it.
 
 ## Files

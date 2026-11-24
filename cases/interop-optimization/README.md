@@ -41,5 +41,5 @@ python optimize_expander.py --out opt-strict --max-divergence-rad 1e-9
 | Engine vs reference total Sobol indices (L1, L2, waist) | 2e-14 | 1e-6 |
 
 `evaluations.jsonl` keeps every evaluation with its inputs, status and run identity. A requirement no design can
-meet (`--max-divergence-rad 1e-9`) ends with NO_FEASIBLE_RESULT, exit code 2. Verified with os-optics 0.13.0 on
+meet (`--max-divergence-rad 1e-9`) ends with NO_FEASIBLE_RESULT, exit code 2. Verified with os-optics 0.14.0 on
 Python 3.14.7 (SciPy 1.18.1, Optuna 5.0.0, SALib 1.6.0).

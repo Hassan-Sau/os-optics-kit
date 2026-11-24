@@ -42,4 +42,4 @@ python workflow.py --out wf
 SYNTHETIC）在五个面上拟合位置，把 1 mrad 的镜面倾斜还原为 1.997 ± 0.018 mrad 的指向（期望 2 mrad）。带固定种子的公差研究
 （`os-optics-kit tolerance studies/tolerance_alignment.json --out tolerance`）在 100 个样本中有 64 个通过。
 
-已用 os-optics 0.13.0 验证；运行状态 PASS。
+已用 os-optics 0.14.0 验证；运行状态 PASS。

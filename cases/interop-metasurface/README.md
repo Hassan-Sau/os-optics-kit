@@ -44,4 +44,4 @@ python step1_unit_cells.py --out ms
 | Held-out test cases (wavelengths, 25 µm beam, 1.5°) | all inside the stated errors |
 | 450 nm, 5°, 8°, 20°, an unvalidated metric | OUT_OF_MODEL_SCOPE, target INDETERMINATE |
 
-Verified with os-optics 0.13.0 on Python 3.14.7 (grcwa 0.1.2, numpy 2.5.4, scipy 1.18.1).
+Verified with os-optics 0.14.0 on Python 3.14.7 (grcwa 0.1.2, numpy 2.5.4, scipy 1.18.1).

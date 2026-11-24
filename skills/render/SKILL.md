@@ -70,4 +70,4 @@ Uses the os-optics viewer's camera hook: a missing hook reports `PAGE_UNEXPECTED
 ## Version
 
 0.2.0 (os-optics-kit 0.4.0): routes case images and system views to the engine.
-0.1.0 (os-optics-kit 0.2.0): first version, verified with os-optics 0.13.0.
+0.1.0 (os-optics-kit 0.2.0): first version, verified with os-optics 0.14.0.

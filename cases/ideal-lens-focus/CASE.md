@@ -42,7 +42,7 @@ The last command tightens the bound to 1 µm: status FAIL, exit code 1.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS, every target MET (`expected.json`).
+os-optics 0.14.0, no catalog: run status PASS, every target MET (`expected.json`).
 `os-optics-kit cases verify ideal-lens-focus` repeats the run and compares it.
 
 ## Files

@@ -44,7 +44,7 @@ python run_quantum.py q --inputs quantum_inputs.json
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`). The quantum side was verified on Python 3.14.7 with
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`). The quantum side was verified on Python 3.14.7 with
 the pinned versions in `requirements-quantum.txt`.
 
 ## Files

@@ -15,8 +15,8 @@ Sweeps, sensitivity and tolerance studies can run in parallel worker processes a
 python -m pip install "os-optics[protected]" "os-optics-kit[plot]"
 ```
 
-os-optics-kit 0.4.x works with os-optics 0.13; the numbers below come from os-optics 0.13.0 and, for catalog
-designs, catalog release `2026-10-28.1`. Each section copies a case with `os-optics-kit cases copy NAME --dest .`
+os-optics-kit 0.5.0 works with os-optics 0.13; the numbers below come from os-optics 0.14.0 and, for catalog
+designs, catalog release `2026-11-24.1`. Each section copies a case with `os-optics-kit cases copy NAME --dest .`
 and runs its commands inside the case directory. Sections 1–3 use catalog components and need
 `os-optics catalog sync`; sections 4 and 5 use catalog-free ideal elements. Read each new run's own identities and
 assessments: catalog contents and result identities can differ when the engine or catalog changes.

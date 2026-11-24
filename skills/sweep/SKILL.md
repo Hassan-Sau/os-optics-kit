@@ -70,4 +70,4 @@ os-optics-kit sweep sweep.json --out study
 
 ## Version
 
-0.3.0 (os-optics-kit 0.4.0), verified with os-optics 0.13.0 and catalog release 2026-10-28.1.
+0.3.0 (os-optics-kit 0.4.0), verified with os-optics 0.14.0 and catalog release 2026-11-24.1.

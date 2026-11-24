@@ -1,7 +1,7 @@
 {
   "schema": "os-optics-kit.skills",
   "schema_version": 1,
-  "kit_version": "0.4.0",
+  "kit_version": "0.5.0",
   "token_estimate": "ceil(characters/4)",
   "budgets": {
     "SKILL.md": 900,
@@ -18,7 +18,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/candidates/SKILL.md",
       "tokens": 552,
-      "sha256": "7733fff108daf5a5070774781d38e2751dc88b095e1aa75615b74daa5a3dde6e"
+      "sha256": "15c41179467b619252376f7d8c1b079a7e7f27f4da5450ad24e3afeee96abd8d"
     },
     {
       "name": "compare",
@@ -29,7 +29,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/compare/SKILL.md",
       "tokens": 595,
-      "sha256": "0f139a35c0ada0600906d6f0d4f59224a8a9f644e3fff886a038da482aa0cf9b"
+      "sha256": "94234e62d674a9a88d5422961f6f174664d3f84c7c466025b99c66cf0d9d3585"
     },
     {
       "name": "contrib-case",
@@ -62,7 +62,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/edit/SKILL.md",
       "tokens": 665,
-      "sha256": "2ffcbef281eae5bbb116cabd6f9f96b9b9d368ca857576958eaeab2571a6fe56"
+      "sha256": "9fc9bb07ccca7ee0010a52d8d30a08de96648bac6e8bbe76bdab2a06528b333a"
     },
     {
       "name": "fans",
@@ -106,7 +106,7 @@
       "requires": "os-optics>=0.14,<0.15; os-optics-kit[plot]",
       "path": "skills/plot/SKILL.md",
       "tokens": 725,
-      "sha256": "2aa4673fbf9bdd789ac3ea75532a9600ab71ae3b000b807c7137ea3ea8668e1a"
+      "sha256": "66681399022b8e902e14200ba2e81ccf77eec3a8203e9d9735a691762b36c55b"
     },
     {
       "name": "present",
@@ -117,7 +117,7 @@
       "requires": "os-optics>=0.14,<0.15; os-optics-kit[plot]; os-optics-kit[render] for views and animations; os-optics-kit[media] for MP4",
       "path": "skills/present/SKILL.md",
       "tokens": 900,
-      "sha256": "978823f8d0bcd5a1af94fbdd4308487a15feac15ebfe2be2917ef3de83be2804"
+      "sha256": "e50d82e48ba6d8fd4a6fa7e60adfb66779a625e7651cdffefd3fbfbfff2d0b30"
     },
     {
       "name": "render",
@@ -128,7 +128,7 @@
       "requires": "os-optics>=0.14,<0.15; os-optics-kit[render]",
       "path": "skills/render/SKILL.md",
       "tokens": 880,
-      "sha256": "bed0dca240f11065711596bb8cb0080800b45cb2607181b0a8254241487d1c41"
+      "sha256": "93260c223181ac615028258d094459f571f488e8024ac313485f58976c4fc0d3"
     },
     {
       "name": "report",
@@ -139,7 +139,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/report/SKILL.md",
       "tokens": 529,
-      "sha256": "f1fb77bbdfcb7509c5da17f07aac65f18f05a99008756d76077f9768b74a121e"
+      "sha256": "75153736a64b04b96bda8abd5fd9fb45bca49f374ccef2672cbba43d93163f08"
     },
     {
       "name": "run-case",
@@ -150,7 +150,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/run-case/SKILL.md",
       "tokens": 807,
-      "sha256": "99bd5dbdd1d1bf48d6ca93026f45c7d29310f427f175838151be7e69e1a53dda"
+      "sha256": "ee08bf604c631a93204a4c6b406abb449cd61ed29c20a5119c518504d5b7ddd1"
     },
     {
       "name": "sensitivity",
@@ -161,7 +161,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/sensitivity/SKILL.md",
       "tokens": 800,
-      "sha256": "a1f24e86448436dbc92ad235a4c4eccd39cb07327d510f551400a4c9e6f57a8b"
+      "sha256": "02d8b41139603d9d9c406d1c7f7d53034b16d9611b2c5716f8c02663c36bb80a"
     },
     {
       "name": "sfr",
@@ -183,7 +183,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/study/SKILL.md",
       "tokens": 899,
-      "sha256": "770521a1dd44e9a875bde17d90d9e43923fa1801e03ef1f45eda8a4de0fb1fdc"
+      "sha256": "8f0422283b27057bdf4427353c5bb7c083af7985874e18de71559eb2103eed9f"
     },
     {
       "name": "summary",
@@ -194,7 +194,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/summary/SKILL.md",
       "tokens": 633,
-      "sha256": "946d916f289fb44416a56aab5282307dd49800dc14ff72ac0fc684e4c8b75761"
+      "sha256": "d1ec8fce1701d7281ce2c3359c02c0324b0577b7d89f35aca636ef81252ffcea"
     },
     {
       "name": "sweep",
@@ -205,7 +205,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/sweep/SKILL.md",
       "tokens": 763,
-      "sha256": "2732e6c4c75a6b510fc84bd65a688c31a703947a72d2e9eb7ae45d80ad10cc0d"
+      "sha256": "fe9ba6d42e9c208af6a855f8838a20654aa1ba802881d410225b52bcb0ee6ab3"
     },
     {
       "name": "tolerance",
@@ -216,7 +216,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/tolerance/SKILL.md",
       "tokens": 787,
-      "sha256": "52b81fa4c7b063d7862e71edbcc63dc1b1598d6d74ed96e1d291b1e8566a5b0c"
+      "sha256": "99833b5eb2bcfd8c39b4dd2318c4474cf87dcdc3f223074655dc929fbb16a222"
     },
     {
       "name": "view",
@@ -227,7 +227,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/view/SKILL.md",
       "tokens": 608,
-      "sha256": "ba17b63fcc3df192ba81ab43c92f0c6f11cd5322ac29bc08a6f6c7788f0d89da"
+      "sha256": "e4e33d33c3b059606c1b923f71dc4f403469e0ab5d36a0bd8fd5932fc65fb07c"
     }
   ]
 }

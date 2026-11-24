@@ -59,6 +59,6 @@ After a `sweep` into `study`: `os-optics-kit plot sweep study --y target:spot_ra
 ## Version
 
 0.4.0 (os-optics-kit 0.4.0): routes system views to the engine.
-0.3.0 (os-optics-kit 0.3.0): presentation themes (`--theme`, `--set`), verified with os-optics 0.13.0.
-0.2.0 (os-optics-kit 0.2.0), verified with os-optics 0.13.0, matplotlib 3.11 and catalog release
+0.3.0 (os-optics-kit 0.3.0): presentation themes (`--theme`, `--set`), verified with os-optics 0.14.0.
+0.2.0 (os-optics-kit 0.2.0), verified with os-optics 0.14.0, matplotlib 3.11 and catalog release
 2026-10-28.1.

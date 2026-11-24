@@ -51,7 +51,7 @@ Diffractio needs numpy < 2: install `requirements-diffractio.txt` in a second en
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status WARNING (`expected.json`). External side verified on Python 3.14.7
+os-optics 0.14.0, no catalog: run status WARNING (`expected.json`). External side verified on Python 3.14.7
 (LightPipes, prysm, POPPY) and 3.12.14 (Diffractio) with the pinned requirements.
 
 ## Files

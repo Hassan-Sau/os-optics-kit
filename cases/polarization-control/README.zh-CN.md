@@ -39,4 +39,4 @@ python workflow.py --out wf
 在 1064 与 1100 nm 处目标读数为 PASS，但波片仅在 1000–1060 nm 内有表征，因此运行超出模型
 （`MODEL_WAVELENGTH_OUTSIDE_BAND`）。
 
-已用 os-optics 0.13.0 验证；运行状态 PASS。
+已用 os-optics 0.14.0 验证；运行状态 PASS。

@@ -142,7 +142,7 @@ its run) runs nothing until its `reset()`: resume with a new scheduler, or with 
 
 A worker costs its start-up once (spawn and Engine import). The table is one run per worker count of
 `python scripts/bench_study.py --workers 1,2,4 --samples 48` on a Windows desktop with 12 logical CPUs and
-os-optics 0.13.0:
+os-optics 0.14.0:
 
 | Design (48 samples) | Workers | Command s | Execution s | Samples/s | Speed-up | Worker start-up s | Peak memory MiB | Same results |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

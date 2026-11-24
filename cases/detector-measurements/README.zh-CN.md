@@ -45,4 +45,4 @@ os-optics-kit measurements data/reference_drift.csv --x time_s --signal signal_V
 `processed.csv` 中；两项分析因排除行而报告 WARNING，RMSE 目标为 PASS。`data/README.zh-CN.md` 给出数据的构造公式与
 来源说明。
 
-已用 os-optics 0.13.0 验证；运行状态 PASS。
+已用 os-optics 0.14.0 验证；运行状态 PASS。

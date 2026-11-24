@@ -4,6 +4,36 @@ Releases of os-optics-kit, newest first. Each release states the os-optics range
 version and catalog release it was verified with (`baseline.json`). A release heading is the version on PyPI and
 the tag `vX.Y.Z`; `python scripts/check_repo.py` requires a section for the version in `baseline.json`.
 
+## 0.5.0
+
+Requires `os-optics>=0.14,<0.15`; verified with os-optics 0.14.0 and catalog release 2026-11-24.1
+(schema 3.6). The engine is required: the kit no longer runs on 0.13, and a CLI started under an older engine
+refuses with the range, the installed version and the upgrade command instead of a traceback.
+
+### Added
+
+- `fans`: transverse and longitudinal aberration and per-ray OPD across the pupil per field point and wavelength,
+  with the engine's spot radius and wavefront RMS beside them (`tools/os_optics_kit/ray_fans.py`).
+- `field`: field curvature (tangential and sagittal focus, astigmatism) and distortion against EFL tan(theta) per
+  field and wavelength, from the engine's published ray data and the run's source poses.
+- Tolerance compensation: an optional caller-declared compensation inside a tolerance study (`students` refocus, then
+  mirror alignment), with nominal, as-built and compensated stages, a structured reason when a solve fails, and a
+  `WORSE_THAN_AS_BUILT` guard.
+- Evaluation adapter on the engine's `EvaluationSession` (`os_optics_kit.study.evaluation_adapter`): variables with
+  bounds and scales, objectives with aggregation, constraints with margins, fixed-length residuals and structured
+  invalid-candidate reasons; MTF is accepted as a constraint only.
+- `scripts/verify_local.py`: one command that verifies the kit against an engine wheel on every Python version of
+  `baseline.json`, with an optional catalog file, and prints one summary.
+- CI: an early gate resolves the engine requirement with a dry-run install; the required engine check always runs and,
+  while the engine is not installable, reports `ENGINE_CANDIDATE_NOT_PUBLISHED` and skips its heavy steps visibly.
+
+### Changed
+
+- The engine requirement is `os-optics>=0.14,<0.15`; `baseline.json` records the verified engine 0.14.0 and catalog
+  2026-11-24.1 (schema 3.6).
+- `skills/fans` and `skills/field` document the two new analyses; `docs/en/catalog-3.6-conventions.md` (and its
+  Chinese pair) records the catalog 3.6 conventions for prescriptions.
+
 ## 0.4.0
 
 Requires `os-optics>=0.13,<0.14`; verified with os-optics 0.13.0 and catalog release 2026-10-28.1.

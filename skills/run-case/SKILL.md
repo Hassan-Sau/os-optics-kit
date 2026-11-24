@@ -63,4 +63,4 @@ rerun, and read the new assessments; the case's expected.json no longer applies 
 ## Version
 
 0.3.0 (os-optics-kit 0.4.0): classification filters and vocabulary.
-0.2.0 (os-optics-kit 0.2.0): cases verified with os-optics 0.13.0, catalog 2026-10-28.1.
+0.2.0 (os-optics-kit 0.2.0): cases verified with os-optics 0.14.0, catalog 2026-11-24.1.

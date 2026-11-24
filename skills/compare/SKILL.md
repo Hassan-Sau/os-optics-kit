@@ -58,4 +58,4 @@ os-optics-kit compare run run-moved --labels base,moved --project moved.json --o
 
 ## Version
 
-0.2.0 (os-optics-kit 0.2.0), verified with os-optics 0.13.0 and catalog release 2026-10-28.1.
+0.2.0 (os-optics-kit 0.2.0), verified with os-optics 0.14.0 and catalog release 2026-11-24.1.
