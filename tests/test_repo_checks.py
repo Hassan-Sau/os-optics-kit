@@ -409,7 +409,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_ci_verifies_cases_on_one_path_once_per_tree(self):
         engine = self.job("ci.yml", "engine")
-        self.assertIn("name: Engine checks (published os-optics)", engine)
+        self.assertIn("name: Engine checks (os-optics candidate)", engine)
         self.assertIn("python scripts/check_alignment.py --out run-alignment --skip cases-verify", engine)
         self.assertEqual(engine.count("check_alignment.py"), 1)
         self.assertIn("    permissions:\n      contents: read\n", engine)
@@ -435,7 +435,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("name: ${{ steps.record.outputs.name }}", upload)
         self.assertIn("scripts/changed_cases.py --event", self.step(engine, "Cases to verify"))
         # The token permission and the alignment check's cases-verify stay where they belong.
-        for job in ("setup", "ruff", "mypy", "tests", "repository", "package", "dco"):
+        for job in ("setup", "engine-gate", "engine-skipped", "ruff", "mypy", "tests", "repository", "package", "dco"):
             with self.subTest(job=job):
                 self.assertNotIn("actions: read", self.job("ci.yml", job))
         # The scheduled runs keep verifying every case through the default check cases-verify.
@@ -446,7 +446,8 @@ class WorkflowTests(unittest.TestCase):
         text = self.workflows()["ci.yml"]
         for name in ("Read baseline", "Lint (ruff)", "Types (mypy)", "Unit tests (Python ${{ matrix.python }}, no engine)",
                      "Repository, skills and cases", "Build and install the package", "DCO sign-off",
-                     "Engine checks (published os-optics)"):
+                     "Engine candidate gate",
+                     "Engine checks (os-optics candidate)"):
             with self.subTest(name=name):
                 self.assertIn(f"    name: {name}\n", text)
         repository = self.job("ci.yml", "repository")
