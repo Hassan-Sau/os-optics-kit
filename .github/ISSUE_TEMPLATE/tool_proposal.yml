@@ -27,6 +27,20 @@ body:
     attributes:
       label: Dependencies
       description: Engine features it relies on and any third-party packages.
+  - type: input
+    id: where
+    attributes:
+      label: Where the work lives
+      description: The tool, skill or presentation path, for example `tools/os_optics_kit/<module>.py` and `skills/<name>/SKILL.md`.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: >-
+        How to check the work is done: a given input and its expected output, a command and its result, or a test
+        that fails before and passes after.
+    validations:
+      required: true
   - type: dropdown
     id: contribution
     attributes:
