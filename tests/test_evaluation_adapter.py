@@ -116,6 +116,10 @@ def test_mtf_target_metric_is_refused_as_objective_and_accepted_as_constraint():
     p = ea.Problem(project=project, variables=[VAR], objectives=[ea.Objective("s", {"target": "spot"})],
                    constraints=[ea.Constraint("m", {"target": "mtf20"}, minimum=0.5)])
     assert p.residual_names == ["objective:s", "constraint:m"]
+    # counter-example: a metric name without "mtf" is an ordinary objective
+    plain = {"targets": [{"target_id": "strehl", "metric": "strehl_ratio"}]}
+    assert ea.Problem(project=plain, variables=[VAR], objectives=[ea.Objective("s", {"target": "strehl"})])
+    assert not ea.is_mtf_metric("spot_rms_mm") and ea.is_mtf_metric("MTF_sagittal")
 
 
 class NotEvaluatedSession(FakeSession):
@@ -185,6 +189,8 @@ def test_engine_imaging_and_non_imaging_problems_share_one_interface():
         assert "targets_not_evaluated" in scope
     mtf = ea.Adapter(image, session=session).evaluate({"image_shift": 0.0}).constraints[0]
     assert 0.5 < mtf["value"] < 1.0 and mtf["margin"] > 0 and mtf["state"] == "KNOWN"
+    # the MTF20 constraint result itself states its basis
+    assert mtf["value_basis"] is not None or mtf["basis_note"]
     reading = ea.Adapter(image, session=session)._readings(
         session.evaluate(_case("achromatic-imaging"), outputs=image.outputs(), targets=image.target_ids()))["mtf:mtf20"]
     assert reading["value_basis"] is not None or "imaging curve" in reading["basis_note"]

@@ -19,7 +19,7 @@ Engine's scope in every result: ``requested``, ``executed``, ``not_computed[]`` 
 ``value_basis``.
 
 MTF is refused as an objective in both forms: an ``{"mtf": ...}`` source, and a ``{"target": ID}`` whose declared
-metric is of the MTF family (a metric name containing ``mtf``).
+metric is of the MTF family: detected by the metric name containing ``mtf`` (case-insensitive), nothing else.
 
 :meth:`Adapter.evaluate` never raises for a candidate and never drops one: it returns a :class:`CandidateResult` whose
 ``residuals`` always has ``len(objectives) + len(constraints)`` entries: ``sqrt(weight) * (value - goal) / scale`` per
@@ -444,7 +444,8 @@ class Adapter:
             residuals.append(math.sqrt(o.weight) * error)
             result.objectives.append({"name": o.name, "source": o.source, "value": reading["value"], "goal": o.goal,
                                       "scaled_error": error, "state": reading["state"],
-                                      "value_basis": reading.get("value_basis")})
+                                      "value_basis": reading.get("value_basis"),
+                                       "basis_note": reading.get("basis_note")})
         feasible = True
         for c in problem.constraints:
             reading = self._reading(readings, c.name, c.source)
@@ -454,7 +455,8 @@ class Adapter:
             result.constraints.append({"name": c.name, "source": c.source, "value": reading["value"],
                                        "minimum": c.minimum, "maximum": c.maximum, "margin": margin,
                                        "satisfied": margin >= 0, "state": reading["state"],
-                                       "value_basis": reading.get("value_basis")})
+                                       "value_basis": reading.get("value_basis"),
+                                       "basis_note": reading.get("basis_note")})
         result.objective = aggregate(errors, weights, problem.aggregation)
         result.residuals = residuals
         result.residual_objective = float(sum(r * r for r in residuals))
