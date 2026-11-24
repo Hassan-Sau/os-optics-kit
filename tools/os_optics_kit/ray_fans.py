@@ -156,7 +156,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zones", type=int)
     parser.add_argument("--imaging", type=Path, help="a 'results imaging' document for the engine's spot radius")
     parser.add_argument("--out", type=Path)
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:  # --help returns 0; a usage error is a JSON error with exit 4
+        if exc.code in (0, None):
+            return 0
+        print(json.dumps({"error": {"code": "BAD_ARGUMENT", "message": "invalid arguments"}}), file=sys.stderr)
+        return 4
     try:
         imaging = json.loads(args.imaging.read_text(encoding="utf-8")) if args.imaging else None
         document = build(args.run, args.monitor, args.paths, args.zones, imaging)
