@@ -45,6 +45,12 @@ than ``branch_jump_mm`` from the predictor (another branch), is retried through 
 ``anchor_tolerance_mm`` of that anchor's (else BRANCH_MISMATCH). Travel and clearance are checked on the solved
 positions, never imposed on them: a violation is reported with the unclipped position.
 
+The requested sampling is the ``efl_mm`` list; its range runs from the smallest to the largest requested focal
+length. An anchor may lie outside that range: it still seeds the continuation and takes part in the branch check,
+and it is solved, written and evaluated like a sample, but it is reported apart, under ``anchors_outside_range``
+(sample ids ``a001``...), and never enters the counts, the coverage, the step statistics, the worst values or the
+status. An anchor inside the range is a sample like the requested ones.
+
 Every solved sample becomes a named configuration of DIR/project.json, the base Project with the moving groups'
 poses per configuration (anchors keep their configuration id; base targets naming other configurations are
 dropped and listed). The reported EFL, focus error and clearances are then read from the Engine's paraxial analysis
@@ -54,11 +60,13 @@ constraint is violated; FAIL when a tolerance or the branch check is not met; UN
 (the reason code says why: NOT_CONVERGED, SINGULAR_JACOBIAN, BRANCH_JUMP, AFOCAL, ENGINE_REFUSED, NO_SEED).
 
 Writes DIR/project.json (Engine-normalized), DIR/trajectory.json (every sample with requested and achieved values,
-positions, focus error, clearances, status and reasons; coverage and resolution; basis and Engine identity),
-DIR/trajectory.csv and DIR/report.md. --study also runs every configuration as a sweep study in DIR/study
+positions, focus error, clearances, status and reasons; the anchors outside the requested range apart; coverage and
+resolution of the requested sampling; basis and Engine identity), DIR/trajectory.csv (the samples of the requested
+range) and DIR/report.md. --study also runs every configuration as a sweep study in DIR/study
 (``os-optics-kit sweep`` machinery, parameter efl_mm; an unsolved sample is a refused sample) for compare, plot,
-report and present. Stdout: one compact JSON document. Exit 0 every sample PASS, 1 a sample is not PASS,
-4 refused spec or input, 130 cancelled study.
+report and present; the anchors outside the requested range are not part of it. Stdout: one compact JSON document.
+Exit 0 every sample of the requested range PASS, 1 one of them is not PASS, 4 refused spec or input, 130 cancelled
+study.
 """
 
 from __future__ import annotations
@@ -618,7 +626,9 @@ def generated_project(base, model, samples):
         if sample["configuration_id"] is None:
             continue
         poses = model.poses(sample["solved_positions_mm"])
-        label = f"EFL {sample['efl_requested_mm']:g} mm" + (f" ({sample['label']})" if sample["label"] else "")
+        notes = [n for n in (sample["label"], None if sample.get("in_requested_range", True)
+                             else "anchor outside the requested range") if n]
+        label = f"EFL {sample['efl_requested_mm']:g} mm" + (f" ({'; '.join(notes)})" if notes else "")
         configurations.append({"configuration_id": sample["configuration_id"], "label": label[:200],
                                "component_poses": [{"instance_id": k, "nominal_pose": v}
                                                    for k, v in sorted(poses.items())]})
@@ -719,9 +729,20 @@ def _configured(document, configuration_id):
     return configured_project(document, configuration_id).payload()
 
 
+def in_requested_range(efl, efls):
+    """Whether ``efl`` lies within the requested range [min(efls), max(efls)] (to 1e-9 relative)."""
+    low, high = min(efls), max(efls)
+    slack = 1e-9 * max(1.0, abs(low), abs(high))
+    return low - slack <= efl <= high + slack
+
+
 def coverage(samples, efls):
-    """Sampling resolution and the share of the requested range between adjacent PASS samples."""
-    ordered = sorted(samples, key=lambda s: s["efl_requested_mm"])
+    """Sampling resolution and the share of the requested range between adjacent PASS samples.
+
+    Only the samples inside the requested range [min(efls), max(efls)] count: an anchor outside it neither extends
+    an interval nor enters the step statistics."""
+    ordered = sorted((s for s in samples if in_requested_range(s["efl_requested_mm"], efls)),
+                     key=lambda s: s["efl_requested_mm"])
     low, high = min(efls), max(efls)
     span = high - low
     steps = [b["efl_requested_mm"] - a["efl_requested_mm"] for a, b in zip(ordered, ordered[1:])]
@@ -755,7 +776,8 @@ def coverage(samples, efls):
             "pass_intervals_mm": intervals, "not_pass_runs": gaps,
             "covered_fraction": (covered / span) if span > 0 else (1.0 if ordered and ordered[0]["status"] == "PASS"
                                                                    else 0.0),
-            "basis": "share of the requested EFL range lying between two adjacent PASS samples"}
+            "basis": "share of the requested EFL range lying between two adjacent PASS samples of that range; "
+                     "anchors outside the range are not counted"}
 
 
 # --------------------------------------------------------------------------------------------- study
@@ -833,6 +855,17 @@ def _sci(value):
     return "-" if value is None else f"{value:.2e}"
 
 
+def _report_row(s, moving):
+    positions = s.get("positions_mm") or (dict(zip(moving, s["solved_positions_mm"]))
+                                          if s.get("solved_positions_mm") else {})
+    return (f"| {s['sample_id']} | {s['configuration_id'] or '-'} | {s['status']} | {s['efl_requested_mm']:g} | "
+            f"{_fmt(s.get('efl_achieved_mm'), 6)} | {_sci(s.get('efl_error_mm'))} | "
+            + " | ".join(_fmt(positions.get(g)) for g in moving)
+            + f" | {_sci(s.get('focus_error_mm'))} | {_fmt(s.get('min_clearance_mm'), 3)} | "
+            f"{' / '.join(s.get('min_clearance_between') or []) or '-'} | "
+            f"{'; '.join(reason_label(r) for r in s['reasons']) or '-'} |")
+
+
 def report_markdown(trajectory):
     moving = trajectory["moving_groups"]
     tol = trajectory["spec"]["tolerances"]
@@ -861,24 +894,23 @@ def report_markdown(trajectory):
         "| --- | --- | --- | ---: | ---: | ---: | " + " | ".join("---:" for _ in moving)
         + " | ---: | ---: | --- | --- |",
     ]
-    for s in trajectory["samples"]:
-        positions = s.get("positions_mm") or (dict(zip(moving, s["solved_positions_mm"]))
-                                              if s.get("solved_positions_mm") else {})
-        lines.append(
-            f"| {s['sample_id']} | {s['configuration_id'] or '-'} | {s['status']} | {s['efl_requested_mm']:g} | "
-            f"{_fmt(s.get('efl_achieved_mm'), 6)} | {_sci(s.get('efl_error_mm'))} | "
-            + " | ".join(_fmt(positions.get(g)) for g in moving)
-            + f" | {_sci(s.get('focus_error_mm'))} | {_fmt(s.get('min_clearance_mm'), 3)} | "
-            f"{' / '.join(s.get('min_clearance_between') or []) or '-'} | "
-            f"{'; '.join(reason_label(r) for r in s['reasons']) or '-'} |")
+    header = lines[-2:]
+    lines += [_report_row(s, moving) for s in trajectory["samples"]]
+    outside = trajectory.get("anchors_outside_range") or []
+    if outside:
+        low, high = cov["requested_range_mm"]
+        lines += ["", "## Anchors outside the requested range", "",
+                  f"These anchors lie outside {low:g}-{high:g} mm. They seeded the continuation and took part in the "
+                  "branch check; each is solved and evaluated like a sample, and none is part of the counts, the "
+                  "coverage or the status above.", "", *header, *[_report_row(s, moving) for s in outside]]
     lines += ["", "## Anchors", "",
-              "| Anchor | EFL (mm) | Declared (mm) | Solved (mm) | Shift (mm) | Branch check |",
-              "| --- | ---: | --- | --- | ---: | --- |"]
+              "| Anchor | EFL (mm) | Sample | Declared (mm) | Solved (mm) | Shift (mm) | Branch check |",
+              "| --- | ---: | --- | --- | --- | ---: | --- |"]
     for anchor in trajectory["anchors"]:
         check = anchor.get("branch_check")
         verdict = "-" if check is None else (
             f"{'OK' if check['ok'] else 'MISMATCH'} ({_sci(check['deviation_mm'])} mm)")
-        lines.append(f"| {anchor['label'] or '-'} | {anchor['efl_mm']:g} | "
+        lines.append(f"| {anchor['label'] or '-'} | {anchor['efl_mm']:g} | {anchor.get('sample_id') or '-'} | "
                      f"{', '.join(_fmt(v) for v in anchor['declared_mm'] or [])} | "
                      f"{', '.join(_fmt(v) for v in anchor['solved_mm'] or []) or '-'} | {_sci(anchor['shift_mm'])} | "
                      f"{verdict} |")
@@ -927,10 +959,13 @@ def run_zoom(spec, out, *, base, base_path=None, overwrite=False, study=False, w
                                            normalized["solver"])
     anchors_by_efl = {a["efl_mm"]: (a, r) for a, r in zip(normalized["anchors"], anchor_results)}
     used = {a["configuration_id"].lower() for a in normalized["anchors"] if a["configuration_id"]}
-    samples = []
-    for index, efl in enumerate(sorted(results), start=1):
+    every = []  # the samples of the requested range and the anchors outside it, in EFL order
+    counters = {True: 0, False: 0}
+    for efl in sorted(results):
         result = results[efl]
         anchor = anchors_by_efl.get(efl)
+        inside = in_requested_range(efl, normalized["efl_mm"])
+        counters[inside] += 1
         reasons = []
         if not result["ok"]:
             reasons.append({"code": result["code"], "message": result["message"],
@@ -943,9 +978,10 @@ def run_zoom(spec, out, *, base, base_path=None, overwrite=False, study=False, w
         if result["ok"]:
             cid = anchor[0]["configuration_id"] if anchor and anchor[0]["configuration_id"] else None
             cid = cid or configuration_id(efl, used)
-        samples.append({
-            "sample_id": f"z{index:03d}", "configuration_id": cid,
+        every.append({
+            "sample_id": f"{'z' if inside else 'a'}{counters[inside]:03d}", "configuration_id": cid,
             "label": (anchor[0]["label"] if anchor else None), "anchor": anchor is not None,
+            "in_requested_range": inside,
             "efl_requested_mm": efl, "status": None, "reasons": reasons,
             "solved_positions_mm": result["positions"] if result["ok"] else None,
             "seed": result.get("seed"), "substeps": result.get("substeps", 0),
@@ -954,20 +990,27 @@ def run_zoom(spec, out, *, base, base_path=None, overwrite=False, study=False, w
             "efl_achieved_mm": None, "efl_error_mm": None, "focus_position_mm": None, "focus_error_mm": None,
             "positions_mm": None, "clearances": None, "min_clearance_mm": None, "min_clearance_between": None,
             "study_sample_id": None, "study_outcome": None})
-    document, dropped = generated_project(base, model, samples)
+    document, dropped = generated_project(base, model, every)
     checked = wc.check(document)
     if not checked.get("ok"):
         raise wc.WorkflowError("PROJECT_REFUSED", "the Engine refused the generated Project",
                                problems=(checked.get("error") or {}).get("problems"))
     document = checked["project"]
-    evaluate_samples(document, model, normalized, samples)
+    evaluate_samples(document, model, normalized, every)
     wc.write_text_atomic(out / "project.json", _normalized_text(document))
+    samples = [s for s in every if s["in_requested_range"]]
+    outside = [s for s in every if not s["in_requested_range"]]
+    by_efl = {s["efl_requested_mm"]: s for s in every}
     counts = {status: sum(1 for s in samples if s["status"] == status) for status in STATUSES}
     anchor_records = []
     for anchor, result in zip(normalized["anchors"], anchor_results):
         solved = result["positions"] if result["ok"] else None
+        sample = by_efl.get(anchor["efl_mm"])
         anchor_records.append({
             "efl_mm": anchor["efl_mm"], "label": anchor["label"], "configuration_id": anchor["configuration_id"],
+            "in_requested_range": in_requested_range(anchor["efl_mm"], normalized["efl_mm"]),
+            "sample_id": None if sample is None else sample["sample_id"],
+            "status": None if sample is None else sample["status"],
             "source": anchor["source"], "declared_mm": anchor["declared_mm"], "solved_mm": solved,
             "shift_mm": None if solved is None else max(abs(a - b) for a, b in zip(solved, anchor["declared_mm"])),
             "converged": result["ok"], "failure": None if result["ok"] else result["code"],
@@ -984,11 +1027,11 @@ def run_zoom(spec, out, *, base, base_path=None, overwrite=False, study=False, w
                          "document_sha256": wc.canonical_digest(base)},
         "project": {"file": "project.json", "project_hash": checked.get("project_hash"),
                     "engine_input_hash": checked.get("engine_input_hash"),
-                    "configurations": sum(1 for s in samples if s["configuration_id"])},
+                    "configurations": sum(1 for s in every if s["configuration_id"])},
         "dropped_targets": dropped,
         "counts": counts, "coverage": coverage(samples, normalized["efl_mm"]),
         "worst": _worst(samples),
-        "anchors": anchor_records, "samples": samples, "basis": BASIS,
+        "anchors": anchor_records, "samples": samples, "anchors_outside_range": outside, "basis": BASIS,
         "solver": {"method": "damped Newton on the two moving-group positions; model: Engine paraxial analysis; "
                              "central-difference Jacobian; continuation over EFL from the anchors with a secant "
                              "predictor, step halving and a branch-jump check",
@@ -1038,7 +1081,8 @@ def compact(trajectory, limit=6):
             "coverage": {k: trajectory["coverage"][k] for k in ("requested_range_mm", "samples", "max_step_mm",
                                                                  "covered_fraction", "pass_intervals_mm")},
             "worst": trajectory["worst"],
-            "anchors": [{k: a[k] for k in ("label", "efl_mm", "shift_mm", "converged")} |
+            "anchors": [{k: a.get(k) for k in ("label", "efl_mm", "shift_mm", "converged", "in_requested_range",
+                                               "sample_id", "status")} |
                         {"branch_ok": None if a["branch_check"] is None else a["branch_check"]["ok"]}
                         for a in trajectory["anchors"]],
             "not_pass": not_pass[:limit], "not_pass_omitted": max(0, len(not_pass) - limit),

@@ -303,10 +303,132 @@ class CaseSpecTests(unittest.TestCase):
             self.assertEqual(code, 0, stderr)
             self.assertEqual(summary["counts"]["PASS"], 29)
             self.assertEqual([a["label"] for a in summary["anchors"]], ["wide", "mid", "tele"])
+            # every anchor lies in 35-105 mm: the full range is reported as before, nothing apart
+            self.assertEqual(summary["coverage"], {"requested_range_mm": [35.0, 105.0], "samples": 29,
+                                                   "max_step_mm": 2.5, "covered_fraction": 1.0,
+                                                   "pass_intervals_mm": [[35.0, 105.0]]})
+            self.assertEqual([(a["in_requested_range"], a["sample_id"]) for a in summary["anchors"]],
+                             [(True, "z001"), (True, "z015"), (True, "z029")])
+            self.assertEqual(summary["configurations"], 29)
+            trajectory = json.loads((tmp / "zoom" / "trajectory.json").read_text(encoding="utf-8"))
+            self.assertEqual(trajectory["anchors_outside_range"], [])
+            self.assertEqual(len(trajectory["samples"]), 29)
             code, summary, stderr = _zoom(CASE / "studies" / "zoom_constrained.json", tmp / "constrained",
                                           CASE / "project.json")
             self.assertEqual(code, 1, stderr)
             self.assertEqual(summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 6, "UNSOLVED": 0})
+            self.assertEqual(summary["coverage"]["pass_intervals_mm"], [[30.0, 100.0]])
+            self.assertAlmostEqual(summary["coverage"]["covered_fraction"], 0.7)
+            self.assertEqual(summary["configurations"], 21)
+
+
+def _case_spec(**changes):
+    """The case's zoom spec (anchors 35 / 70 / 105 mm) with changes."""
+    spec = json.loads((CASE / "studies" / "zoom.json").read_text(encoding="utf-8"))
+    spec.update(changes)
+    return spec
+
+
+@requires_engine
+class RequestedRangeTests(unittest.TestCase):
+    """An anchor outside the requested range seeds the solve and is reported apart from the requested samples."""
+
+    def run_case(self, tmp, spec, extra=()):
+        path = tmp / "spec.json"
+        path.write_text(json.dumps(spec), encoding="utf-8")
+        code, summary, stderr = _zoom(path, tmp / "out", CASE / "project.json", extra)
+        trajectory = json.loads((tmp / "out" / "trajectory.json").read_text(encoding="utf-8"))
+        return code, summary, stderr, trajectory
+
+    def test_shortened_range_is_scoped_to_the_requested_samples(self):
+        with TempDir() as tmp:
+            code, summary, stderr, trajectory = self.run_case(
+                tmp, _case_spec(efl_mm={"start": 35, "stop": 70, "step": 5}), ("--study",))
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(summary["status"], "PASS")
+            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0})
+            self.assertEqual(summary["coverage"], {"requested_range_mm": [35.0, 70.0], "samples": 8,
+                                                   "max_step_mm": 5.0, "covered_fraction": 1.0,
+                                                   "pass_intervals_mm": [[35.0, 70.0]]})
+            self.assertEqual(trajectory["coverage"]["min_step_mm"], 5.0)
+            self.assertEqual(trajectory["coverage"]["not_pass_runs"], [])
+            self.assertEqual([s["efl_requested_mm"] for s in trajectory["samples"]],
+                             [35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0])
+            self.assertTrue(all(s["in_requested_range"] for s in trajectory["samples"]))
+            # the 105 mm anchor: solved, evaluated and written, reported apart
+            (tele,) = trajectory["anchors_outside_range"]
+            self.assertEqual((tele["sample_id"], tele["configuration_id"], tele["efl_requested_mm"], tele["status"]),
+                             ("a001", "tele", 105.0, "PASS"))
+            self.assertFalse(tele["in_requested_range"])
+            rx2, rx3 = reference_positions(105.0)
+            self.assertAlmostEqual(tele["positions_mm"]["variator"], rx2, delta=1e-5)
+            self.assertAlmostEqual(tele["positions_mm"]["compensator"], rx3, delta=1e-5)
+            anchors = {a["label"]: a for a in trajectory["anchors"]}
+            self.assertEqual((anchors["tele"]["in_requested_range"], anchors["tele"]["sample_id"]), (False, "a001"))
+            self.assertTrue(anchors["tele"]["branch_check"]["ok"])  # the march 70 -> 105 still checks the branch
+            self.assertEqual((anchors["mid"]["in_requested_range"], anchors["mid"]["sample_id"]), (True, "z008"))
+            self.assertEqual({a["label"]: a["in_requested_range"] for a in summary["anchors"]},
+                             {"wide": True, "mid": True, "tele": False})
+            self.assertEqual(trajectory["worst"]["efl_error_mm"]["sample_id"][0], "z")
+            # the Project holds the anchor's configuration, marked; the table and the study hold the requested samples
+            document = json.loads((tmp / "out" / "project.json").read_text(encoding="utf-8"))
+            labels = {c["configuration_id"]: c["label"] for c in document["configurations"]}
+            self.assertEqual(len(labels), 9)
+            self.assertEqual(summary["configurations"], 9)
+            self.assertIn("outside the requested range", labels["tele"])
+            self.assertNotIn("outside", labels["mid"])
+            rows = list(csv.DictReader(io.StringIO((tmp / "out" / "trajectory.csv").read_text(encoding="utf-8"))))
+            self.assertEqual([float(r["efl_requested_mm"]) for r in rows], [35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0,
+                                                                            70.0])
+            report = (tmp / "out" / "report.md").read_text(encoding="utf-8")
+            self.assertIn("## Anchors outside the requested range", report)
+            self.assertIn("| a001 | tele | PASS | 105 |", report)
+            self.assertIn("PASS intervals (mm): 35-70.", report)
+            self.assertEqual(summary["study"]["counts"]["by_outcome"]["PASS"], 8)
+            table = list(csv.DictReader(io.StringIO(
+                (tmp / "out" / "study" / "table.csv").read_text(encoding="utf-8"))))
+            self.assertEqual([float(r["param:efl_mm"]) for r in table], [35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0,
+                                                                         70.0])
+
+    def test_an_outside_anchor_does_not_decide_the_status(self):
+        spec = _case_spec(efl_mm={"start": 35, "stop": 70, "step": 5})
+        spec["groups"][2]["travel_mm"] = [100, 130]  # the 105 mm anchor needs the compensator at 132.36 mm
+        with TempDir() as tmp:
+            code, summary, stderr, trajectory = self.run_case(tmp, spec)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(summary["status"], "PASS")
+            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0})
+            self.assertEqual(summary["not_pass"], [])
+            (tele,) = trajectory["anchors_outside_range"]
+            self.assertEqual(tele["status"], "INFEASIBLE")
+            self.assertEqual([(r["code"], r["group_id"]) for r in tele["reasons"]], [("TRAVEL_EXCEEDED", "compensator")])
+            self.assertEqual({a["label"]: a["status"] for a in summary["anchors"]},
+                             {"wide": "PASS", "mid": "PASS", "tele": "INFEASIBLE"})
+
+    def test_constrained_range_with_a_gap(self):
+        # 35-70 mm with the compensator held at >= 123.25 mm: near its reversal (123.17 mm at 55 mm) it leaves its
+        # travel at 50 and 55 mm (reference 123.223 and 123.174 mm), and the 105 mm anchor (132.36 mm) leaves it too
+        spec = _case_spec(efl_mm={"start": 35, "stop": 70, "step": 5})
+        spec["groups"][2]["travel_mm"] = [123.25, 130]
+        for efl in (45.0, 60.0):
+            self.assertGreater(reference_positions(efl)[1], 123.25)
+        for efl in (50.0, 55.0):
+            self.assertLess(reference_positions(efl)[1], 123.25)
+        with TempDir() as tmp:
+            code, summary, stderr, trajectory = self.run_case(tmp, spec)
+            self.assertEqual(code, 1, stderr)
+            self.assertEqual(summary["status"], "FAIL")
+            self.assertEqual(summary["counts"], {"PASS": 6, "FAIL": 0, "INFEASIBLE": 2, "UNSOLVED": 0})
+            cov = trajectory["coverage"]
+            self.assertEqual(cov["requested_range_mm"], [35.0, 70.0])
+            self.assertEqual(cov["pass_intervals_mm"], [[35.0, 45.0], [60.0, 70.0]])
+            self.assertAlmostEqual(cov["covered_fraction"], 20.0 / 35.0)
+            self.assertEqual([(r["first_mm"], r["last_mm"], r["samples"], r["statuses"]) for r in cov["not_pass_runs"]],
+                             [(50.0, 55.0, 2, ["INFEASIBLE"])])
+            self.assertEqual((cov["samples"], cov["min_step_mm"], cov["max_step_mm"]), (8, 5.0, 5.0))
+            self.assertEqual([n["efl_requested_mm"] for n in summary["not_pass"]], [50.0, 55.0])
+            (tele,) = trajectory["anchors_outside_range"]
+            self.assertEqual((tele["efl_requested_mm"], tele["status"]), (105.0, "INFEASIBLE"))
 
 
 if __name__ == "__main__":
