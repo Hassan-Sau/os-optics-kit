@@ -337,6 +337,46 @@ def solver_base(base):
     return document
 
 
+def _covers_axis(offset_mm: float, reach_mm: float | None) -> bool:
+    """An element or plane whose origin lies ``offset_mm`` off the axis meets the axis when its aperture reaches that
+    far; when the reach is not known it counts as meeting it (a refusal rather than a result the Project does not hold)."""
+    return offset_mm <= AXIS_TOLERANCE_MM or reach_mm is None or offset_mm < reach_mm
+
+
+def _component_reach(base: dict, component: dict) -> float | None:
+    """The largest aperture radius a component's native optical model states (clear or edge radius), or None."""
+    model_id = component.get("optical_model_id")
+    for entry in base.get("optical_models") or []:
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            model = entry.get("model") or {}
+            radii = [float(model[k]) for k in ("edge_radius_mm", "clear_radius_mm", "radius_mm")
+                     if isinstance(model.get(k), (int, float, str)) and _is_number(model[k])]
+            return max(radii) if radii else None
+    return None
+
+
+def _plane_reach(plane: dict) -> float | None:
+    """How far from its origin an observation plane's aperture reaches (circle radius plus centre offset, or the
+    half-diagonal of a rectangle), or None when the aperture is not stated."""
+    aperture = plane.get("aperture")
+    if not isinstance(aperture, dict):
+        return None
+    shift = math.hypot(*[float(v) for v in (aperture.get("center_offset_mm") or [0.0, 0.0])][:2])
+    if _is_number(aperture.get("radius_mm")):
+        return float(aperture["radius_mm"]) + shift
+    width, height = aperture.get("half_width_mm"), aperture.get("half_height_mm")
+    if width is not None and height is not None and _is_number(width) and _is_number(height):
+        return math.hypot(float(width), float(height)) + shift
+    return None
+
+
+def _is_number(value) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
 class EngineModel:
     """The Engine's paraxial analysis of the base Project with the two moving groups placed along the axis."""
 
@@ -373,7 +413,8 @@ class EngineModel:
     def check_image_plane(self, base, reply):
         """Refuse an ``image_plane.position_mm`` that misses the Project's own image-side observation.
 
-        The exported Project keeps the base Project's observations: when one lies on the axis behind the last group
+        The exported Project keeps the base Project's observations: when one whose aperture reaches the axis (or whose
+        aperture is not stated) lies behind the last group
         (at the base positions), it is the plane the Project's runs and targets measure on, so the focus the study holds
         must lie on it (IMAGE_PLANE_MISMATCH otherwise)."""
         if self.normalized["image_plane"]["observation_id"] is not None:
@@ -384,7 +425,7 @@ class EngineModel:
             if not isinstance(plane, dict) or plane.get("device_instance_id"):
                 continue
             point = [float(v) for v in ((plane.get("pose") or {}).get("position_mm") or [])]
-            if len(point) != 3 or _off_axis(point, self.origin, self.axis) > AXIS_TOLERANCE_MM:
+            if len(point) != 3 or not _covers_axis(_off_axis(point, self.origin, self.axis), _plane_reach(plane)):
                 continue
             s = _dot(point, self.axis)
             if s > last:
@@ -403,7 +444,9 @@ class EngineModel:
 
         The solve and the read-back analyse the groups' components; the exported Project holds every component, so
         an element the groups leave out would change the EFL and the focus of the exported Project unseen. An element
-        is on the path when the Engine's paraxial analysis accepts it on the axis together with the groups."""
+        is on the path when the Engine's paraxial analysis accepts it on the axis together with the groups, or when its
+        aperture (the native model's clear or edge radius) reaches the axis; an element whose aperture is not stated
+        counts as on the path."""
         grouped = set(self.components)
         along = {e["instance_id"]: _dot(e["entrance_vertex_mm"], self.axis) for e in reversed(reply["elements"])}
         extra = []
@@ -421,7 +464,7 @@ class EngineModel:
             order = sorted([*along.items(), (iid, s)], key=lambda item: item[1])
             on_axis = self._paraxial(self.base, [i for i, _ in order]).get("ok")
             off = _off_axis([float(v) for v in element["entrance_vertex_mm"]], self.origin, self.axis)
-            if on_axis or off <= AXIS_TOLERANCE_MM:
+            if on_axis or _covers_axis(off, _component_reach(self.base, component)):
                 extra.append((iid, s))
         if not extra:
             return

@@ -143,6 +143,7 @@ unsolved sample is a refused sample), so the study tools apply: `--workers`, `--
 - Two moving groups, one straight axis (no mirrors), an object at infinity.
 - One solution branch, followed from the anchors. Past a fold of the zoom equation the samples are `UNSOLVED`;
   where two anchors disagree, the samples their marches reach are `UNVERIFIED`.
-- The groups are the whole path: an element on the axis before the image plane that is in no group is refused, and
-  an element off the axis (which the paraxial analysis cannot take) is not looked at.
+- The groups are the whole path: an element before the image plane that is in no group is refused when its aperture
+  (the native model's clear or edge radius) reaches the axis or is not stated; an element whose aperture stays clear
+  of the axis is not looked at. The image plane is checked the same way against the Project's observations.
 - Clearance is axial: vertex positions plus the declared envelopes.

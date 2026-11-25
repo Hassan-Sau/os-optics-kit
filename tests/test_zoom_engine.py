@@ -493,6 +493,21 @@ class ExportedProjectTests(unittest.TestCase):
             self.assertIn("38.8889 mm", error["message"])
             self.assertFalse((tmp / "out" / "trajectory.json").exists())
 
+    def test_a_lens_or_image_plane_slightly_off_the_axis_still_counts(self):
+        # an aperture that still reaches the axis is on the path, however small the lateral offset
+        for where in ([160.0, 0.001, 0.0], [160.0, 0.5, 0.0]):
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}),
+                                                _with_extra_lens(where))
+                self.assertEqual((code, error["code"]), (4, "UNGROUPED_PATH_ELEMENT"), where)
+        for lateral in (0.001, 0.5):
+            project = json.loads((CASE / "project.json").read_text("utf-8"))
+            project["observations"][0]["pose"]["position_mm"] = [200.0, lateral, 0.0]
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(image_plane={"position_mm": [205.0, 0.0, 0.0]}),
+                                                project)
+                self.assertEqual((code, error["code"]), (4, "IMAGE_PLANE_MISMATCH"), lateral)
+
     def test_lenses_off_the_path_are_not_refused(self):
         for where in ([260.0, 0.0, 0.0], [160.0, 40.0, 0.0]):  # behind the image plane; 40 mm beside the axis
             with TempDir() as tmp:
