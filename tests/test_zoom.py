@@ -178,6 +178,45 @@ class ContinuationTests(unittest.TestCase):
         self.assertGreater(check["deviation_mm"], 10.0)
         self.assertAlmostEqual(results[50.0]["positions"][0], upper, delta=1e-6)  # the anchor's own solve stands
 
+    def test_samples_where_continuity_is_lost_are_unverified(self):
+        # anchors at 45 mm (branch x0 < 40) and 50 mm (branch x0 > 40): the march from 45 arrives on its own branch
+        # at 50 mm, 20 mm from the 50 mm anchor's solution. Nothing between, below or above them is verified.
+        lower = 40.0 - math.sqrt(10.0 * 15.0)
+        upper = 40.0 + math.sqrt(10.0 * 10.0)
+        efls = [40.0, 42.5, 45.0, 47.5, 50.0, 52.5, 55.0]
+        results, anchors = zs.continuation(fold_model, efls, _anchors({45.0: (lower, 200.0), 50.0: (upper, 200.0)}),
+                                           200.0, SOLVER)
+        self.assertTrue(all(results[e]["ok"] for e in efls))
+        self.assertLess(results[47.5]["positions"][0], 40.0)   # marched from 45 mm, on that anchor's branch
+        self.assertGreater(results[52.5]["positions"][0], 40.0)  # marched from 50 mm, on the other branch
+        for efl in (40.0, 42.5, 47.5, 52.5, 55.0):
+            lost = results[efl]["continuity"]
+            self.assertEqual(lost["code"], "CONTINUITY_UNVERIFIED")
+            self.assertEqual((lost["between_anchors"], lost["between_efl_mm"]), (["45.0", "50.0"], [45.0, 50.0]))
+            self.assertTrue(lost["arrival_ok"])
+            self.assertGreater(lost["deviation_mm"], 10.0)
+            self.assertIn("anchor 45.0 (45 mm)", lost["message"])
+        self.assertIn("marched from anchor 45.0 only", results[40.0]["continuity"]["message"])
+        self.assertIn("marched from anchor 50.0 only", results[55.0]["continuity"]["message"])
+        for efl in (45.0, 50.0):  # the anchors' own solves: the 50 mm one carries BRANCH_MISMATCH instead
+            self.assertNotIn("continuity", results[efl])
+        self.assertFalse(anchors[1]["branch_check"]["ok"])
+
+    def test_intervals_between_agreeing_anchors_keep_their_status(self):
+        # 35 and 70 mm agree on the zoom branch; the 105 mm anchor is the other branch's solution at 105 mm
+        efls = zs.sample_efls({"start": 30, "stop": 120, "step": 5})
+        table = {35.0: ANCHORS[35.0], 70.0: ANCHORS[70.0], 105.0: (0.07947033827624736, 27.6390730919834)}
+        results, anchors = zs.continuation(thin_lens_zoom, efls, _anchors(table), IMAGE, SOLVER)
+        self.assertTrue(anchors[1]["branch_check"]["ok"])
+        self.assertFalse(anchors[2]["branch_check"]["ok"])
+        verified = [e for e in efls if e <= 70.0]
+        self.assertTrue(all(results[e]["ok"] and "continuity" not in results[e] for e in verified), verified)
+        unverified = [e for e in efls if 70.0 < e < 105.0 or e > 105.0]
+        for efl in unverified:
+            self.assertEqual(results[efl]["continuity"]["between_efl_mm"], [70.0, 105.0], efl)
+        self.assertNotIn("continuity", results[105.0])
+        self.assertLess(results[110.0]["positions"][1], 60.0)  # the march above 105 mm follows the other branch
+
     def test_no_converging_anchor_leaves_every_sample_unsolved(self):
         results, anchors = zs.continuation(fold_model, [70.0, 75.0], _anchors({70.0: (30.0, 200.0)}), 200.0, SOLVER)
         self.assertFalse(anchors[0]["ok"])
@@ -220,6 +259,12 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(zs.sample_status(True, reasons), "FAIL")
         self.assertEqual(zs.sample_status(True, []), "PASS")
         self.assertEqual(zs.sample_status(False, [{"code": "NOT_CONVERGED"}]), "UNSOLVED")
+        lost = {"code": "CONTINUITY_UNVERIFIED", "between_anchors": ["mid", "tele"]}
+        self.assertEqual(zs.sample_status(True, [lost]), "UNVERIFIED")
+        self.assertEqual(zs.sample_status(True, [lost, *reasons]), "FAIL")
+        self.assertEqual(zs.sample_status(True, [lost, {"code": "TRAVEL_EXCEEDED"}]), "INFEASIBLE")
+        self.assertEqual(zs.reason_label(lost), "CONTINUITY_UNVERIFIED mid/tele")
+        self.assertEqual(zs.STATUSES[-1], "UNVERIFIED")
 
     def test_coverage_counts_only_spans_between_pass_samples(self):
         statuses = {20.0: "INFEASIBLE", 25.0: "PASS", 30.0: "PASS", 35.0: "UNSOLVED", 40.0: "PASS", 45.0: "PASS",
@@ -278,9 +323,10 @@ class ClassificationTests(unittest.TestCase):
             "status": "PASS", "moving_groups": ["variator", "compensator"],
             "spec": {"wavelength_nm": 633.0, "tolerances": {"efl_mm": 0.01, "focus_mm": 0.005},
                      "clearance": {"min_mm": 1.0}},
-            "counts": {"PASS": 2, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0},
+            "counts": {"PASS": 2, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0, "UNVERIFIED": 0},
             "coverage": zs.coverage(samples + outside, [35.0, 40.0]), "worst": None,
             "image_plane": {"position_along_axis_mm": 200.0}, "anchors": [anchor], "samples": samples,
+            "continuity": {"verified": True, "breaks": [], "basis": "b"},
             "anchors_outside_range": outside, "basis": {}, "identity": {"engine_version": "0.14.0",
                                                                         "engine_build_id": "b"},
             "solver": {"method": "m"}, "project": {"configurations": 3}, "dropped_targets": [], "study": None,

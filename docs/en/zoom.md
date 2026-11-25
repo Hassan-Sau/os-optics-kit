@@ -44,8 +44,8 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 
 | Key | Meaning |
 | --- | --- |
-| `groups` | Every element of the path in the order light meets them. A group moves rigidly along the optical axis; exactly two groups move. `travel_mm` is a moving group's allowed range, `envelope_mm` the axial extent of its mount before its first and after its last vertex. |
-| `image_plane` | An observation plane of the Project (fixed in the design frame) or a point. It must lie on the optical axis. |
+| `groups` | Every optical element on the axis before the image plane, in the order light meets them (an element in no group is refused, `UNGROUPED_PATH_ELEMENT`: the solve would leave it out while the written Project holds it). A group moves rigidly along the optical axis; exactly two groups move. `travel_mm` is a moving group's allowed range, `envelope_mm` the axial extent of its mount before its first and after its last vertex. |
+| `image_plane` | An observation plane of the Project (fixed in the design frame) or a point. It must lie on the optical axis. A point must coincide with the Project's observation behind the last group when there is one (`IMAGE_PLANE_MISMATCH` otherwise: the written Project's runs and targets measure on that plane). |
 | `efl_mm` | The requested focal lengths: `{start, stop, step}` (stop included) or `{values}`. |
 | `anchors` | Known solutions: the positions of the moving groups at a focal length, given directly or read from a configuration of the base Project (`{efl_mm, configuration_id}`). They seed the solver and check its branch, and may lie outside the requested range. |
 | `tolerances` | Acceptance of each sample: \|EFL error\| and \|focus error\| in mm. |
@@ -73,7 +73,12 @@ The focal lengths are visited by continuation:
 4. a step whose solve does not converge, or whose solution lies more than `branch_jump_mm` from the predictor
    (another branch of the zoom equation), is retried through a half step, up to `max_refinements` halvings;
 5. where a march reaches the next anchor's focal length, its solution must lie within `anchor_tolerance_mm` of
-   that anchor's own solution, otherwise the anchor is reported `BRANCH_MISMATCH`.
+   that anchor's own solution, otherwise the anchor is reported `BRANCH_MISMATCH`;
+6. continuity is then lost between those two anchors: the samples between them are `UNVERIFIED`, and so are the
+   samples marched outward (below the first anchor, above the last) from an end anchor whose only check failed. An
+   interval between two anchors that agree keeps its status. `continuity` in `trajectory.json` (and the stdout
+   summary and `report.md`) names each break: both anchors, their focal lengths, the deviation and the samples left
+   unverified.
 
 The compensator may reverse direction along the way; in the example it does near 53.7 mm. Travel and clearance are
 not imposed on the solve: they are checked afterwards, so a position outside its travel is reported as it was
@@ -98,6 +103,7 @@ engine's paraxial analysis of `DIR/project.json`, one configuration at a time:
 | `PASS` | both tolerances met, travel and clearance hold |
 | `INFEASIBLE` | solved, but a group leaves its travel (`TRAVEL_EXCEEDED`) or a gap is below the minimum (`CLEARANCE_VIOLATED`) |
 | `FAIL` | solved, but a tolerance is missed (`EFL_OUT_OF_TOLERANCE`, `FOCUS_OUT_OF_TOLERANCE`) or the branch check failed (`BRANCH_MISMATCH`) |
+| `UNVERIFIED` | solved and within its tolerances, travel and clearance, but where continuity was lost (`CONTINUITY_UNVERIFIED`, naming the two anchors): no anchor agreement confirms its branch |
 | `UNSOLVED` | no solution: `NOT_CONVERGED`, `SINGULAR_JACOBIAN` (a fold), `BRANCH_JUMP`, `AFOCAL`, `ENGINE_REFUSED`, or `NO_SEED` when no anchor converged |
 
 The requested range runs from the smallest to the largest requested focal length. An anchor inside it is a
@@ -135,5 +141,8 @@ unsolved sample is a refused sample), so the study tools apply: `--workers`, `--
 
 - The solve is paraxial; aberrations of the solved configurations show in their traced runs.
 - Two moving groups, one straight axis (no mirrors), an object at infinity.
-- One solution branch, followed from the anchors. Past a fold of the zoom equation the samples are `UNSOLVED`.
+- One solution branch, followed from the anchors. Past a fold of the zoom equation the samples are `UNSOLVED`;
+  where two anchors disagree, the samples their marches reach are `UNVERIFIED`.
+- The groups are the whole path: an element on the axis before the image plane that is in no group is refused, and
+  an element off the axis (which the paraxial analysis cannot take) is not looked at.
 - Clearance is axial: vertex positions plus the declared envelopes.
