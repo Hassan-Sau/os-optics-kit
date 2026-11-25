@@ -22,7 +22,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary",
@@ -70,7 +70,7 @@
         "studies/tolerance_imaging.json",
         "workflow.py"
       ],
-      "project_sha256": "550295a34c371b2a95bac180eddaa6870ee8772044a3313cfb77634352948069"
+      "project_sha256": "bec07d2425d7b4228e31978212980eed6c773ef34b7ae99deef12166e1659aa6"
     },
     {
       "name": "aspheric-lens",
@@ -90,7 +90,7 @@
         "sources": 9,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary"
@@ -148,7 +148,7 @@
         "studies/aspheric.csv",
         "studies/spherical-control.csv"
       ],
-      "project_sha256": "582e3640681a7bb3db4d4a60a4e3b314e4b8f655ee872765d6e5a2750f6df851"
+      "project_sha256": "3a21f17579691051de13eeb4ea3a1d46ac45bb89e40f5a41ee043be2d97c22c8"
     },
     {
       "name": "beam-expander",
@@ -167,7 +167,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": "2026-10-28.1",
       "tools": [
         "candidates",
@@ -208,7 +208,7 @@
         "studies/beam_expander_move_l2.json",
         "studies/beam_expander_swap_l2.json"
       ],
-      "project_sha256": "6aac4d2bbf4ca24ddc039b919a78d15d4df4ab84288e6b47cee840f42926744f"
+      "project_sha256": "472a97da48d165902bc582c9f75f028b34d8e416069c1d71582c9bdcc1318f1b"
     },
     {
       "name": "bounded-aberration-correction",
@@ -228,7 +228,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "present"
@@ -263,7 +263,7 @@
         "requirements-aberration.txt",
         "workflow.py"
       ],
-      "project_sha256": "655777ea54666127863d3431660ac16cd7df5c70bd99b2193c968a4bb80611f3"
+      "project_sha256": "aad5b00ec78801618d78529801cfecb25b3e501c40f1f89877510f74c8958ae9"
     },
     {
       "name": "cylindrical-light-sheet",
@@ -283,7 +283,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary",
@@ -319,7 +319,7 @@
         "requirements-light-sheet.txt",
         "workflow.py"
       ],
-      "project_sha256": "872d4ded8208d216be1e8c76c1f8a4e4986c5c55a40c960a14090d0d3c8cadcd"
+      "project_sha256": "53369ad2b9e0e1a9598fb712ea07a08b8aefba41e12f81f63849cb4bd732e0c2"
     },
     {
       "name": "detector-measurements",
@@ -338,7 +338,7 @@
         "sources": 1,
         "branches": 1
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "measurements"
@@ -375,7 +375,7 @@
         "images/top.png",
         "project.json"
       ],
-      "project_sha256": "bbd4fade9d56c1c7b9cc0d1458c841aff66672004d27d28f9e31b3fda47cbd6a"
+      "project_sha256": "6e994324258538a2870721d770707c0ff08ad815f7f312e7e805283f7bf351c2"
     },
     {
       "name": "expansion-focus",
@@ -461,7 +461,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary",
@@ -501,7 +501,7 @@
         "project.json",
         "workflow.py"
       ],
-      "project_sha256": "5b0c027d46031f62efbebd9c4804e82f25bcd5dc883bc917275781695855eea5"
+      "project_sha256": "974e970e2c985db9290a8f1b3b982ee9305f4169fbbe9d1c95db4a908c47202d"
     },
     {
       "name": "ideal-lens-focus",
@@ -520,7 +520,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary"
@@ -553,7 +553,7 @@
         "images/section.png",
         "project.json"
       ],
-      "project_sha256": "401a949796b11b477d4cf4f2821610a1b5613eb359d72e3f214786fbdb39b0fd"
+      "project_sha256": "ec0e567f9baf0b7794a40b3a33c9dcc6b012ae65ab2ae8ae82a9584f1fd4587c"
     },
     {
       "name": "interop-diffraction",
@@ -573,7 +573,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [],
       "tags": [
@@ -606,7 +606,7 @@
         "requirements-diffraction.txt",
         "tem00_field.py"
       ],
-      "project_sha256": "7d8410e09e085bc50f9047ef18a201d517c9c9bbff7fea0136dfd82817241e3e"
+      "project_sha256": "388449db3a144be8db849fd8852e69c5493395f5dabc851e56c071db6de560ae"
     },
     {
       "name": "interop-metasurface",
@@ -626,7 +626,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [],
       "tags": [
@@ -664,7 +664,7 @@
         "step3_fit_model.py",
         "step4_engine_check.py"
       ],
-      "project_sha256": "638e01aae3b8127708318a0df185da7b83f6e71c24f23fd2dd9f3a28ac486b05"
+      "project_sha256": "96c43f15118c87616450da31fc89649f4d389364a9f50cef679dd88e8f07c7b1"
     },
     {
       "name": "interop-optimization",
@@ -683,7 +683,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [],
       "tags": [
@@ -719,7 +719,7 @@
         "project.json",
         "requirements-optimization.txt"
       ],
-      "project_sha256": "ffad5b2b86fd25280838899a4e92528d09e379e54f9e3ee02fb84f49614a14d9"
+      "project_sha256": "19c8bd348039163d1df4abd8b0f3b221c9b03ae8939cb3e822c1140cfaf79a7c"
     },
     {
       "name": "interop-quantum",
@@ -739,7 +739,7 @@
         "sources": 2,
         "branches": 1
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [],
       "tags": [
@@ -778,7 +778,7 @@
         "requirements-quantum.txt",
         "run_quantum.py"
       ],
-      "project_sha256": "87cc76b4b9428d83c606cd2c5f82a14692f3c86364d4b999731542efa4ed8303"
+      "project_sha256": "bdcb9a41d6511ba37206dd342523a3cd424e77a51e50da1436611792e5467464"
     },
     {
       "name": "midwave-infrared-imager",
@@ -798,7 +798,7 @@
         "sources": 9,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "summary"
@@ -853,7 +853,7 @@
         "prescription.csv",
         "project.json"
       ],
-      "project_sha256": "ce8142ad2b2da5a3b0b4d50d7e7dad28be04c2f107aea10361d47ec8321ae67a"
+      "project_sha256": "cc975aaaa6e6818727008a72631fc82f3d18792f65f80a53ad12140df9218ca4"
     },
     {
       "name": "mirror-alignment",
@@ -872,7 +872,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "measurements",
@@ -937,7 +937,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "present"
@@ -973,7 +973,7 @@
         "requirements-flat-top.txt",
         "workflow.py"
       ],
-      "project_sha256": "2541855982cb68a98cc77c089500dfcfecf6199b2acba6492eb1bf053b448131"
+      "project_sha256": "f4a17cc529eb87e30f9dde329fdcd73144538db03d6ebb70c100092d73eddee4"
     },
     {
       "name": "polarization-control",
@@ -992,7 +992,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "edit",
@@ -1050,7 +1050,7 @@
         "sources": 3,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [],
       "tags": [
@@ -1095,7 +1095,7 @@
         "prescription.csv",
         "project.json"
       ],
-      "project_sha256": "431b260d9f2eb7f5debc0a5273509eba113c02df8067435c85cad3439d604e0a"
+      "project_sha256": "36f23f512d5e0240327f3e299263df4a632c60ee33292052622b0f8bb0dcda85"
     },
     {
       "name": "three-group-zoom",

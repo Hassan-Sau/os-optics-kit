@@ -6,7 +6,7 @@ class: free-space
 domain: beam-steering
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: measurements, edit, sweep, compare, plot, report, sensitivity, tolerance
@@ -47,7 +47,7 @@ The tolerance study passes 64 of 100 seeded samples.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`).
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`).
 `os-optics-kit cases verify mirror-alignment` repeats the run and compares it.
 
 ## Files

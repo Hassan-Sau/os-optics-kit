@@ -42,6 +42,9 @@ GLASS = {"sellmeier": {"b": [str(b) for b in N_BK7_SELLMEIER["b"]], "c_um2": [st
          "valid_band_nm": ["400", "1000"], "material_id": "N-BK7-DECLARED"}
 DELAY_SCAN_MM = tuple(round(-0.3 + 0.05 * i, 2) for i in range(13))
 MZI_THICKNESSES_MM = (0.0, 1.0, 1.0003)
+# The medium the networks were verified in: vacuum (air at zero pressure). Without an environment os-optics 0.14
+# propagates in standard air, which changes every path's optical length.
+ENVIRONMENT = {"pressure_pa": "0"}
 
 
 class Layout:
@@ -49,7 +52,7 @@ class Layout:
 
     def __init__(self):
         self.document = {"schema": "opensci.project", "project_schema_version": "2.0", "design_intent": "OPTICAL_SYSTEM",
-                         "optical_models": [], "components": [], "observations": []}
+                         "environment": dict(ENVIRONMENT), "optical_models": [], "components": [], "observations": []}
 
     def source(self, instance_id, wavelength_nm, position, direction):
         # Local +X = design +Z, so polarization angle 0 is vertical (the network's V mode).

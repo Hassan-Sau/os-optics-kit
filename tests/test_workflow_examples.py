@@ -473,8 +473,18 @@ class CatalogBeamExpanderDemoTests(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.__exit__(None, None, None)
 
-    def test_case_project_passes(self):
-        self.assertEqual(self.base.get("validation_status") or self.base["engine_status"], "PASS")
+    def test_case_project_meets_its_target(self):
+        """os-optics 0.14.0, catalog 2026-10-28.1: the target is MET and the requirement outcome PASS; the run status
+        is UNKNOWN because the catalog states no bulk absorption for the lenses' N-BK7 at 780 nm
+        (BULK_LOSS_NOT_ESTABLISHED), so the power at the output plane is not known (os-optics 0.13 assumed lossless
+        glass and reported PASS)."""
+        self.assertEqual(self.base.get("validation_status") or self.base["engine_status"], "UNKNOWN")
+        self.assertEqual([(t["target_id"], t["assessment"], t["status"]) for t in self.base["targets"]],
+                         [("expanded_waist", "MET", "PASS")])
+        from os_optics.results import load_run
+
+        issues = load_run(self.dir / "base-run").describe()["issues"]
+        self.assertIn("BULK_LOSS_NOT_ESTABLISHED", {i["code"] for i in issues})
         self.assertTrue((self.dir / "base-run" / "project.json").is_file())
 
     def test_bounded_candidate_query_lists_the_swapped_lens(self):
@@ -505,33 +515,35 @@ class CatalogBeamExpanderDemoTests(unittest.TestCase):
         self.assertEqual((code, out["run"]["outcome"]), (0, "PASS"), err)
         self.assertEqual(out["run"]["targets"][0]["value"], rows[6]["target:expanded_waist"])
 
-    def test_return_analysis_budget_partial_run_is_not_a_pass(self):
-        """os-optics 0.13: a run whose return-light analysis reaches max_return_analysis_work is PARTIAL
-        (RETURN_ANALYSIS_BUDGET) while its targets are MET: the calculation did not complete, so the class is
-        UNKNOWN and the exit code 3, as under the Engine's requirements exit contract; the targets stay MET and the
-        execution with the exhausted budget is stated beside the class; a sweep constraint on the execution or on
-        the class marks such a sample infeasible."""
+    def test_budget_partial_run_is_not_a_pass(self):
+        """A run whose trace budget runs out is PARTIAL while its targets are MET: the calculation did not
+        complete, so the class is UNKNOWN and the exit code 3, as under the Engine's requirements exit contract; the
+        targets stay MET and the execution with the exhausted budget is stated beside the class; a sweep constraint
+        on the execution or on the class marks such a sample infeasible. Recorded with os-optics 0.14.0: five trace
+        steps let the main beam reach the plane (expanded_waist MET) and stop the rest of the trace. (On os-optics
+        0.13 a max_return_analysis_work of 1 did this; os-optics 0.14 runs no return-light analysis for this design,
+        and an exhausted return-analysis budget no longer makes a run PARTIAL.)"""
         from os_optics_kit import result_summary
 
         with TempDir() as d:
             edits = wc.write_json(d / "budget.json", {"ops": [
-                {"op": "set_compute_budget", "compute_budget": {"max_return_analysis_work": 1}}]})
+                {"op": "set_compute_budget", "compute_budget": {"max_trace_steps": 5}}]})
             code, out, err = invoke(ep.main, [str(self.dir / "base-run" / "project.json"), "--edits", str(edits),
                                               "--out", str(d / "limited.json"), "--run", str(d / "limited-run")])
             self.assertEqual((code, out["status"], out["run"]["outcome"]), (3, "UNKNOWN", "UNKNOWN"), err)
             self.assertEqual(out["run"]["execution"]["outcome"], "PARTIAL")
-            self.assertIn("max_return_analysis_work", out["run"]["execution"]["budgets"]["exhausted"])
+            self.assertIn("max_trace_steps", out["run"]["execution"]["budgets"]["exhausted"])
             self.assertEqual({t["assessment"] for t in out["run"]["targets"]}, {"MET"})
             code, summary, err = invoke(result_summary.main, [str(d / "limited-run")])
             self.assertEqual((code, summary["status"], summary["requirement_outcome"]), (3, "UNKNOWN", "UNKNOWN"), err)
-            self.assertIn("RETURN_ANALYSIS_BUDGET", {issue["code"] for issue in summary["issues"]})
+            self.assertIn("MAX_PATHS", {issue["code"] for issue in summary["issues"]})
             from os_optics_kit.study import aggregate as agg
 
             _summary, fields = wc.read_saved_run(d / "limited-run")
             record = {**fields, "error": None, "selected_targets": None}
             row = agg.row_from_record("s0000", {}, [], record, d)
             self.assertEqual((row["outcome"], row["execution_outcome"]), ("UNKNOWN", "PARTIAL"))
-            self.assertIn("max_return_analysis_work", row["budgets_exhausted"])
+            self.assertIn("max_trace_steps", row["budgets_exhausted"])
             self.assertEqual(agg.counts([row])["by_execution"], {"PARTIAL": 1})
             self.assertEqual(sp.constraint_failures({**row, "feasible": None}, [{"execution": ["COMPLETED"]}]),
                              ["execution in ['COMPLETED']"])

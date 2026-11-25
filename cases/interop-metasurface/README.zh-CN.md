@@ -41,4 +41,5 @@ python step1_unit_cells.py --out ms
 | 留出的测试情形（波长、25 µm 光束、1.5°） | 全部在声明误差之内 |
 | 450 nm、5°、8°、20°、未验证的指标 | OUT_OF_MODEL_SCOPE，目标 INDETERMINATE |
 
-已在 Python 3.14.7 上用 os-optics 0.13.0 验证（grcwa 0.1.2、numpy 2.5.4、scipy 1.18.1）。
+步骤 1–4 曾在 Python 3.14.7 与 os-optics 0.13.0 下运行（grcwa 0.1.2、numpy 2.5.4、scipy 1.18.1）。引擎运行已用
+os-optics 0.14.0 验证，光路处于真空中（`environment.pressure_pa` 为 0），数值相同。

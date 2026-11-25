@@ -46,4 +46,4 @@ variant (`--synthetic-measurements`, rows labelled SYNTHETIC) fits positions on 
 mirror tilt as 1.997 ± 0.018 mrad of pointing (expected 2 mrad). The seeded tolerance study
 (`os-optics-kit tolerance studies/tolerance_alignment.json --out tolerance`) passes 64 of 100 samples.
 
-Verified with os-optics 0.13.0; run status PASS.
+Verified with os-optics 0.14.0 in standard air; run status PASS, the same values as in vacuum.

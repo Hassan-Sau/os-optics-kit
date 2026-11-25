@@ -3,7 +3,8 @@
 [English](README.md) · [智能体案例说明](CASE.md)
 
 两片目录中的平凸透镜（f = 50 mm 与 100 mm，N-BK7，直径 12.7 mm）把波长 780 nm、束腰半径 1 mm 的高斯光束扩束两倍。
-目标 `expanded_waist` 要求输出束腰半径为 1.99612 mm ± 1 %，用于衡量准直程度。元件固定在目录版本 2026-10-28.1。
+目标 `expanded_waist` 要求输出束腰半径为 1.99612 mm ± 1 %，用于衡量准直程度。元件固定在目录版本 2026-10-28.1。设计声明在真空中（`environment.pressure_pa` 为 0），即其设计时的介质；在 os-optics 0.14
+默认的标准空气中，束腰为 1.9476 mm，达不到目标。
 
 ![三维视图：光源 SRC、目录透镜 L1 与 L2、`output` 面与追迹光束](images/iso.png)
 
@@ -38,4 +39,5 @@ os-optics results targets run
 | 按最佳位移 +0.54 mm 移动 L2 | `final.json` | 1.99645 mm | PASS |
 
 输出面上的光束半径（换镜时新增的 `output_beam_radius`）始终在 1 % 以内：束腰半径对准直敏感，单个面上的半径几乎不变。
-已用 os-optics 0.13.0 与目录 2026-10-28.1 验证；运行状态 PASS。
+已用 os-optics 0.14.0 与目录 2026-10-28.1 验证；运行状态为 UNKNOWN，原因仅是目录未给出 N-BK7 的体吸收
+（`BULK_LOSS_NOT_ESTABLISHED`），输出功率未知；束腰目标为 MET。

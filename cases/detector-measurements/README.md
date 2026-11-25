@@ -49,4 +49,4 @@ non-positive dark-subtracted reference are excluded and listed in `processed.csv
 the exclusions and PASS for the RMSE targets. `data/README.md` gives the formulas behind the data and their
 attribution.
 
-Verified with os-optics 0.13.0; run status PASS.
+Verified with os-optics 0.14.0, in vacuum (`environment.pressure_pa` 0); run status PASS.

@@ -38,6 +38,9 @@ PLUS_X = [0.7071067811865476, 0.0, 0.7071067811865476, 0.0]  # local +Z along de
 WAVELENGTH_NM, WAIST_MM, POWER_W = 532.0, 1.0, 0.001
 PUPIL_X, STOP_X, LENS_X, FOCAL_MM = 99.0, 100.0, 101.0, 200.0
 ENCIRCLED_RADIUS_MM = 0.05
+# The medium the design was verified in: vacuum (air at zero pressure). Without an environment os-optics 0.14
+# propagates in standard air.
+ENVIRONMENT = {"pressure_pa": "0"}
 HANDOFF_SCHEMA = "opensci-interop-example/diffraction-handoff/1"
 
 
@@ -53,6 +56,7 @@ def project_document(stop_radius_mm):
 
     return {
         "schema": "opensci.project", "project_schema_version": "2.0", "design_intent": "OPTICAL_SYSTEM",
+        "environment": dict(ENVIRONMENT),
         "optical_models": [
             {"model_id": "stop", "model": {"model_kind": "APERTURE_STOP", "model_version": "1", "status": "SPECIFIED",
                                            "opening_radius_mm": decimal_text(stop_radius_mm), "edge_radius_mm": "12.7"}},

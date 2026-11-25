@@ -6,7 +6,7 @@ class: lens
 domain: imaging, dispersion, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: summary, compare, sensitivity, tolerance, report, present
@@ -42,7 +42,9 @@ Separate derived uniform-pupil checks: RMS ≤2 µm, 50% energy radius ≤5 µm,
 
 ## Baseline
 
-Engine 0.13.0, no catalog; PASS, five native targets MET. Uniform-pupil RMS radii 0.869/0.421/0.614 µm;
+os-optics 0.14.0, no catalog: PASS, five native targets MET; the Project states vacuum and lossless glass, as on 0.13.0
+(`environment.pressure_pa` 0, `absorption_coefficient_per_mm` 0). Values below and `data/snapshot.json` are the
+0.13.0 workflow run; 0.14.0 gives the same native values. Uniform-pupil RMS radii 0.869/0.421/0.614 µm;
 geometric best-focus span 0.04462 mm. The +0.15 mm defocused comparison keeps unmet derived checks.
 Sensitivity uses four stated perturbation scales; tolerance uses 16 draws, seed 20261111.
 

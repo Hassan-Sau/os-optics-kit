@@ -41,4 +41,4 @@ parameters) agree with Jones calculus and Malus' law.
 At 1064 and 1100 nm the targets read PASS, but the plate is characterized for 1000–1060 nm only, so the run is out
 of model (`MODEL_WAVELENGTH_OUTSIDE_BAND`).
 
-Verified with os-optics 0.13.0; run status PASS.
+Verified with os-optics 0.14.0 in standard air; run status PASS, the same values as in vacuum.

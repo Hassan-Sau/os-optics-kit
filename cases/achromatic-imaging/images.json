@@ -9,7 +9,7 @@
         "--size",
         "960x540"
       ],
-      "sha256": "151f006df6e2ada171640be263daa10084399d7b400b273b1777223ad6626b8e",
+      "sha256": "211f0a2c1e4f50127fb4b01109445c4b94babc78f214078aab7c72bee74e2b97",
       "view": "iso"
     },
     {
@@ -22,17 +22,17 @@
         "--size",
         "1200x420"
       ],
-      "sha256": "e32758969474218208c9a795ceab5ec434a0e9217659d6eeebf6b19bb6888954",
+      "sha256": "b2bd7c5eb4d0c98e8c17d0875b75ec2287522a15eaf27762786fd388e7bf91da",
       "view": "section"
     }
   ],
-  "project_sha256": "550295a34c371b2a95bac180eddaa6870ee8772044a3313cfb77634352948069",
+  "project_sha256": "bec07d2425d7b4228e31978212980eed6c773ef34b7ae99deef12166e1659aa6",
   "run": {
     "catalog": null,
-    "engine": "0.13.0",
-    "engine_input_hash": "abc78f90ddf266a8c9161954b532016cf083f706e733a81be20f267cf716f2f2",
-    "project_hash": "67cca73eeb575ee9e8e131c3fb3de5dfc8aabf6177def4b814ec037f865c8010",
-    "scene_content_hash": "ae0390a7a0fe51b2715ee63d098484f99f95a56d91d5774593dae6999c52e4ee"
+    "engine": "0.14.0",
+    "engine_input_hash": "e15929a2c0af51bac6dfb4a8201accc415ba257538f0ea635317f960ff985794",
+    "project_hash": "9849218a74142712c7a9af89d66d7730d183d9f4ee07ed5be4298370d3a3d55e",
+    "scene_content_hash": "db10494a7c81fe9147f70be3a842caf90fb58629dda2334cd78ebf051c2a6c37"
   },
   "schema": "os-optics-kit.case-images",
   "schema_version": 1

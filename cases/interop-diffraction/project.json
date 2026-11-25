@@ -85,6 +85,11 @@
     }
   ],
   "design_intent": "OPTICAL_SYSTEM",
+  "environment": {
+    "air_model": "EDLEN_1953_OPTICSTUDIO",
+    "pressure_pa": "0",
+    "temperature_c": "20"
+  },
   "materials": [],
   "observations": [
     {

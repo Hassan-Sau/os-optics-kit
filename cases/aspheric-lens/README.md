@@ -57,6 +57,12 @@ S10 to R = −794 mm. The aspheric version keeps every radius between −96 mm a
 
 ## Reading the engine's verdict
 
+Verified with os-optics 0.14.0: every target and imaging quantity equals its os-optics 0.13.0 value. The Project
+states vacuum (`environment.pressure_pa` 0) and lossless glass (`absorption_coefficient_per_mm` 0), the medium and
+glass of that first record; os-optics 0.14 would otherwise use standard air and leave the power through the glass
+unknown. The execution is COMPLETED: os-optics 0.14 no longer lets the untraced-light probe, which still runs out
+of its path budget (`max_paths`), make the run PARTIAL.
+
 The run status is **FAIL** and `in_model_scope` is **false**, and neither is a statement about the
 optics. The engine files two findings:
 
@@ -71,9 +77,9 @@ What the engine does still report is the imaging chain:
 `results imaging` returns 14 quantities for each of the nine sources, and **110 of the 126 are
 KNOWN** — image-space NA, ray spot, wavefront RMS and PV, Strehl ratio, tangential and sagittal
 diffraction MTF with its limit, and the 50 % / 80 % encircled radii. The 16 it declines are the
-`geometric_mtf_*` pair of eight fields, with the reason `GEOMETRIC_REGIME_NOT_MET`: *"the wavefront
-error (0.0797 waves RMS) is below 1.0 wave: diffraction sets the MTF here, and the diffraction MTF is
-the one to read"*. That is the same boundary the [mid-wave infrared case](../midwave-infrared-imager/README.md)
+`geometric_mtf_*` pair of eight fields, with the reason `GEOMETRIC_REGIME_NOT_MET`: *"diffraction sets
+the MTF here: read mtf_tangential"* (the wavefront error, 0.0797 waves RMS, is below one wave). That is the same
+boundary the [mid-wave infrared case](../midwave-infrared-imager/README.md)
 shows from the other side: a lens good enough to be diffraction limited has no meaningful ray-based
 MTF.
 
