@@ -45,7 +45,8 @@ workers x threads stay within the logical CPUs; more workers than CPUs are refus
 command obtains the catalog release each Project pins, so a study that runs serially also runs with workers.
 `--time-limit-s` and `--max-memory-mib` bound every evaluation: the Engine's run monitor reads them at its
 checkpoints (each phase change and inside long phases) and stops the run there; a worker still busy five seconds
-after its time limit is terminated. Either way the sample is recorded `CANCELLED` with error code `RUN_STOPPED` and
+after its time limit is terminated (for a compensated tolerance sample, which makes up to
+`compensation.max_evaluations + 2` Engine runs, after that many time limits). Either way the sample is recorded `CANCELLED` with error code `RUN_STOPPED` and
 the cause (`TIME_LIMIT`, `MEMORY_LIMIT`) as problem code. The serial scheduler has no other preemption.
 
 ## Interrupt, inspect and resume
@@ -70,11 +71,13 @@ Every sample record carries a job `state` next to its requirement outcome: `COMP
 result or refused the design), `REFUSED` (the planner could not build the sample), `FAILED`, `CANCELLED` (a limit
 or a cancellation stopped it) or `NOT_RUN`, and the `evaluator` that produced it. A resume keeps every record whose
 request is unchanged, that completed and that the same evaluator produced; it reads back a run directory that
-finished without its record, and runs the rest. `journal.jsonl` records which samples were reused and which ran.
+finished without its record (the default evaluator only: another evaluator's record holds more than its run, so
+such a sample runs again), and runs the rest. `journal.jsonl` records which samples were reused and which ran.
 An evaluator is identified by its `module:function` name. A function passed from Python that has no such name (a
 lambda, a nested function) has no identity: a resume runs its samples again, and `study status` says so in
 `resume_note`.
-A request is identified by the SHA-256 of its Project, selected targets, requested outputs and seed: rerunning a
+A request is identified by the SHA-256 of its Project, selected targets, requested outputs and seed (and, for a
+compensated tolerance sample, the objective, compensators and solver settings of its compensation): rerunning a
 tool with `--resume` and a changed spec runs exactly the samples whose request changed (a kept record takes the
 labels of the new plan), and a larger tolerance `--samples` with the same seed keeps the samples already run.
 The shipped tools draw every random value while planning (tolerance: from its spec `seed`, into each sample's
