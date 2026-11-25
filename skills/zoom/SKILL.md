@@ -25,9 +25,9 @@ kind: tool
 `os-optics-kit zoom SPEC.json --out DIR [--base P.json] [--overwrite] [--study [--workers N]]`. Spec keys (mm):
 
 - `base_project` (relative to the spec), `wavelength_nm`;
-- `groups`: every element in light order, `{group_id, components, moving, travel_mm [min, max], envelope_mm
-  [before, after]}`; exactly two move;
-- `image_plane`: `{observation_id}` or `{position_mm}`;
+- `groups`: every element on the axis before the image, in light order, `{group_id, components, moving,
+  travel_mm [min, max], envelope_mm [before, after]}`; exactly two move;
+- `image_plane`: `{observation_id}` or `{position_mm}` (on the observation behind the last group, if any);
 - `efl_mm`: `{start, stop, step}` or `{values}`;
 - `anchors`: known solutions, `{efl_mm, configuration_id}` (positions from that configuration of the base) or
   `{efl_mm, positions_mm: {group: mm}}`; a `configuration_id` also names the configuration written;
@@ -39,12 +39,12 @@ kind: tool
 `trajectory.json`, `trajectory.csv` and a Markdown report of the same table; with `--study`, `DIR/study` (a sweep
 study, parameter `efl_mm`, for `compare`, `plot sweep`, `report`, `present`). Per sample: requested and achieved EFL, positions, focus error
 (rear focal point minus image plane along the axis), clearances, `status` (`PASS`, `FAIL`, `INFEASIBLE`,
-`UNSOLVED`) and `reasons` (`TRAVEL_EXCEEDED`, `CLEARANCE_VIOLATED`, `EFL_OUT_OF_TOLERANCE`,
-`FOCUS_OUT_OF_TOLERANCE`, `BRANCH_MISMATCH`, solver codes). Stdout: compact JSON with counts, coverage
+`UNSOLVED`, `UNVERIFIED`) and `reasons` (`TRAVEL_EXCEEDED`, `CLEARANCE_VIOLATED`, `EFL_OUT_OF_TOLERANCE`,
+`FOCUS_OUT_OF_TOLERANCE`, `BRANCH_MISMATCH`, `CONTINUITY_UNVERIFIED`, solver codes). Stdout: compact JSON with counts, coverage
 (`covered_fraction`, `pass_intervals_mm`), worst values, anchors and the samples that are not PASS, all over the
-requested samples; an anchor outside the requested range seeds the solve and is reported apart under
-`anchors_outside_range`. Exit 0 all PASS,
-1 otherwise, 4 refused (`SPEC_INVALID`, `UNKNOWN_ID`, `OUTPUT_EXISTS`, `AXIS_FOLDED`, `IMAGE_PLANE_OFF_AXIS`).
+requested samples, `continuity` breaks; an anchor outside the requested range is reported apart under
+`anchors_outside_range`. Exit 0 all PASS, 1 otherwise, 4 refused (`SPEC_INVALID`, `UNKNOWN_ID`, `OUTPUT_EXISTS`,
+`AXIS_FOLDED`, `IMAGE_PLANE_OFF_AXIS`, `IMAGE_PLANE_MISMATCH`, `UNGROUPED_PATH_ELEMENT`).
 
 ## Minimal example
 
@@ -61,7 +61,7 @@ os-optics-kit zoom studies/zoom_constrained.json --out constrained
 - Paraxial: object at infinity, image of the rear focal point; aberrations are not part of the solve (run the
   configurations, `--study`, for traced beams).
 - Travel and clearance are checked, never imposed: violations are reported with the solved position.
-- One solution branch, followed from the anchors; a sample past a fold is UNSOLVED.
+- One branch, followed from the anchors: past a fold UNSOLVED; between disagreeing anchors UNVERIFIED.
 - Clearance is axial, from vertices plus declared envelopes.
 
 ## Version

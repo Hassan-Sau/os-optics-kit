@@ -42,8 +42,8 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 
 | 键 | 含义 |
 | --- | --- |
-| `groups` | 光路中的全部元件，按光经过的顺序。镜组沿光轴整体移动；恰好两个镜组运动。`travel_mm` 是运动组允许的范围，`envelope_mm` 是镜座在第一个顶点之前和最后一个顶点之后的轴向长度。 |
-| `image_plane` | Project 的一个观测面（固定在设计坐标系中）或一个点，必须位于光轴上。 |
+| `groups` | 像面之前位于光轴上的全部光学元件，按光经过的顺序（不在任何镜组中的元件会被拒绝，`UNGROUPED_PATH_ELEMENT`：求解会漏掉它，而写出的 Project 包含它）。镜组沿光轴整体移动；恰好两个镜组运动。`travel_mm` 是运动组允许的范围，`envelope_mm` 是镜座在第一个顶点之前和最后一个顶点之后的轴向长度。 |
+| `image_plane` | Project 的一个观测面（固定在设计坐标系中）或一个点，必须位于光轴上。若 Project 在最后一个镜组之后有观测面，给出的点必须与它重合（否则为 `IMAGE_PLANE_MISMATCH`：写出的 Project 的运行和目标都在该观测面上测量）。 |
 | `efl_mm` | 要求的焦距：`{start, stop, step}`（含 stop）或 `{values}`。 |
 | `anchors` | 已知解：某个焦距下运动组的位置，直接给出，或从基础 Project 的某个配置中读取（`{efl_mm, configuration_id}`）。它们作为求解起点并检查求解分支，可以位于要求范围之外。 |
 | `tolerances` | 每个样本的验收：\|EFL 误差\| 和 \|焦点误差\|，单位 mm。 |
@@ -66,7 +66,10 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 4. 若某一步不收敛，或解与预测值相差超过 `branch_jump_mm`（落到变焦方程的另一支），则改为两个半步重试，
    最多减半 `max_refinements` 次；
 5. 延拓到达下一个锚点的焦距时，解必须与该锚点自身的解相差不超过 `anchor_tolerance_mm`，否则该锚点报告
-   `BRANCH_MISMATCH`。
+   `BRANCH_MISMATCH`；
+6. 此时这两个锚点之间的连续性丢失：两者之间的样本为 `UNVERIFIED`，从唯一一次检查失败的端点锚点向外（第一个锚点
+   以下、最后一个锚点以上）延拓得到的样本也是如此。两个一致的锚点之间的区间保持其状态。`trajectory.json` 中的
+   `continuity`（以及标准输出摘要和 `report.md`）列出每处断点：两个锚点、它们的焦距、偏差以及未验证的样本。
 
 补偿组可以中途反向；示例中约在 53.7 mm 处折返。行程和间隙不参与求解，而是在求解后检查，因此超出行程的位置
 按求得的值报告。
@@ -89,6 +92,7 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 | `PASS` | 两项容差都满足，行程和间隙都成立 |
 | `INFEASIBLE` | 已求解，但有镜组超出行程（`TRAVEL_EXCEEDED`）或间隙低于最小值（`CLEARANCE_VIOLATED`） |
 | `FAIL` | 已求解，但未满足容差（`EFL_OUT_OF_TOLERANCE`、`FOCUS_OUT_OF_TOLERANCE`）或分支检查失败（`BRANCH_MISMATCH`） |
+| `UNVERIFIED` | 已求解，容差、行程和间隙都满足，但位于连续性丢失之处（`CONTINUITY_UNVERIFIED`，注明两个锚点）：没有锚点一致性确认其所在解支 |
 | `UNSOLVED` | 无解：`NOT_CONVERGED`、`SINGULAR_JACOBIAN`（折点）、`BRANCH_JUMP`、`AFOCAL`、`ENGINE_REFUSED`，或没有锚点收敛时的 `NO_SEED` |
 
 要求范围从最小的要求焦距到最大的要求焦距。范围内的锚点与其他样本一样处理。范围外的锚点（例如要求 35-70 mm
@@ -122,5 +126,8 @@ os-optics results configurations zoom/run                            # 并列比
 
 - 求解基于近轴分析；所求配置的像差在其追迹运行中体现。
 - 两个运动组，一条直的光轴（无反射镜），物在无穷远。
-- 从锚点出发跟踪一条解支。超过变焦方程折点的样本为 `UNSOLVED`。
+- 从锚点出发跟踪一条解支。超过变焦方程折点的样本为 `UNSOLVED`；两个锚点不一致时，其延拓到达的样本为
+  `UNVERIFIED`。
+- 镜组即整条光路：像面之前不在任何镜组中的元件，若其通光孔径（原生模型的通光或边缘半径）到达光轴或未声明，
+  就会被拒绝；孔径不触及光轴的元件不予考虑。像面同样按此规则与 Project 的观测面核对。
 - 间隙是轴向的：顶点位置加上声明的包络。

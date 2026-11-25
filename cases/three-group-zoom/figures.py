@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 DPI = 120
 MAX_BYTES = 400 * 1024
 MARKERS = {"PASS": ("o", "#1b7837"), "FAIL": ("s", "#b2182b"), "INFEASIBLE": ("X", "#d6604d"),
-           "UNSOLVED": ("x", "#4d4d4d")}
+           "UNSOLVED": ("x", "#4d4d4d"), "UNVERIFIED": ("D", "#e08214")}
 
 
 def draw(trajectory, out, name="trajectory.png"):

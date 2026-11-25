@@ -174,7 +174,7 @@ class ZoomEngineTests(unittest.TestCase):
     def test_every_sample_passes(self):
         self.assertEqual(self.code, 0, self.stderr)
         self.assertEqual(self.summary["status"], "PASS")
-        self.assertEqual(self.summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0})
+        self.assertEqual(self.summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0, "UNVERIFIED": 0})
         self.assertEqual(self.summary["coverage"]["covered_fraction"], 1.0)
         self.assertEqual(self.summary["engine"]["engine_version"].split(".")[:2], ["0", "14"])
 
@@ -247,7 +247,7 @@ class ZoomEngineTests(unittest.TestCase):
         code, summary, stderr = _zoom(path, self.root / "constrained", self.base)
         self.assertEqual(code, 1, stderr)
         self.assertEqual(summary["status"], "FAIL")
-        self.assertEqual(summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 6, "UNSOLVED": 0})
+        self.assertEqual(summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 6, "UNSOLVED": 0, "UNVERIFIED": 0})
         trajectory = json.loads((self.root / "constrained" / "trajectory.json").read_text(encoding="utf-8"))
         samples = {s["efl_requested_mm"]: s for s in trajectory["samples"]}
         wide_end = samples[20.0]
@@ -316,7 +316,7 @@ class CaseSpecTests(unittest.TestCase):
             code, summary, stderr = _zoom(CASE / "studies" / "zoom_constrained.json", tmp / "constrained",
                                           CASE / "project.json")
             self.assertEqual(code, 1, stderr)
-            self.assertEqual(summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 6, "UNSOLVED": 0})
+            self.assertEqual(summary["counts"], {"PASS": 15, "FAIL": 0, "INFEASIBLE": 6, "UNSOLVED": 0, "UNVERIFIED": 0})
             self.assertEqual(summary["coverage"]["pass_intervals_mm"], [[30.0, 100.0]])
             self.assertAlmostEqual(summary["coverage"]["covered_fraction"], 0.7)
             self.assertEqual(summary["configurations"], 21)
@@ -346,7 +346,7 @@ class RequestedRangeTests(unittest.TestCase):
                 tmp, _case_spec(efl_mm={"start": 35, "stop": 70, "step": 5}), ("--study",))
             self.assertEqual(code, 0, stderr)
             self.assertEqual(summary["status"], "PASS")
-            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0})
+            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0, "UNVERIFIED": 0})
             self.assertEqual(summary["coverage"], {"requested_range_mm": [35.0, 70.0], "samples": 8,
                                                    "max_step_mm": 5.0, "covered_fraction": 1.0,
                                                    "pass_intervals_mm": [[35.0, 70.0]]})
@@ -397,7 +397,7 @@ class RequestedRangeTests(unittest.TestCase):
             code, summary, stderr, trajectory = self.run_case(tmp, spec)
             self.assertEqual(code, 0, stderr)
             self.assertEqual(summary["status"], "PASS")
-            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0})
+            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0, "UNVERIFIED": 0})
             self.assertEqual(summary["not_pass"], [])
             (tele,) = trajectory["anchors_outside_range"]
             self.assertEqual(tele["status"], "INFEASIBLE")
@@ -418,7 +418,7 @@ class RequestedRangeTests(unittest.TestCase):
             code, summary, stderr, trajectory = self.run_case(tmp, spec)
             self.assertEqual(code, 1, stderr)
             self.assertEqual(summary["status"], "FAIL")
-            self.assertEqual(summary["counts"], {"PASS": 6, "FAIL": 0, "INFEASIBLE": 2, "UNSOLVED": 0})
+            self.assertEqual(summary["counts"], {"PASS": 6, "FAIL": 0, "INFEASIBLE": 2, "UNSOLVED": 0, "UNVERIFIED": 0})
             cov = trajectory["coverage"]
             self.assertEqual(cov["requested_range_mm"], [35.0, 70.0])
             self.assertEqual(cov["pass_intervals_mm"], [[35.0, 45.0], [60.0, 70.0]])
@@ -429,6 +429,134 @@ class RequestedRangeTests(unittest.TestCase):
             self.assertEqual([n["efl_requested_mm"] for n in summary["not_pass"]], [50.0, 55.0])
             (tele,) = trajectory["anchors_outside_range"]
             self.assertEqual((tele["efl_requested_mm"], tele["status"]), (105.0, "INFEASIBLE"))
+
+
+def _with_extra_lens(position_mm, focal_mm="50"):
+    """The case Project with one more ideal thin lens EXTRA (in no group of the spec) at ``position_mm``."""
+    project = json.loads((CASE / "project.json").read_text(encoding="utf-8"))
+    extra = _component("EXTRA", 0.0, "extra", "A lens the spec's groups leave out")
+    extra["nominal_pose"]["position_mm"] = list(position_mm)
+    project["components"].append(extra)
+    project["optical_models"].append(_model("extra", focal_mm))
+    return project
+
+
+def _refused(tmp, spec, project):
+    (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+    (tmp / "base.json").write_text(json.dumps(project), encoding="utf-8")
+    code, summary, stderr = _zoom(tmp / "spec.json", tmp / "out", tmp / "base.json")
+    return code, summary, (json.loads(stderr)["error"] if code == 4 else stderr)
+
+
+@requires_engine
+class ExportedProjectTests(unittest.TestCase):
+    """The solved model is the exported Project: no PASS for a model the written Project does not hold."""
+
+    def test_image_plane_off_the_projects_observation_is_refused(self):
+        spec = _case_spec(image_plane={"position_mm": [205.0, 0.0, 0.0]})
+        with TempDir() as tmp:
+            code, summary, error = _refused(tmp, spec, json.loads((CASE / "project.json").read_text("utf-8")))
+            self.assertEqual(code, 4)
+            self.assertIsNone(summary)
+            self.assertEqual(error["code"], "IMAGE_PLANE_MISMATCH")
+            self.assertEqual(error["requested_mm"], 205.0)
+            self.assertEqual(error["observations"], [{"observation_id": "image", "position_along_axis_mm": 200.0}])
+            self.assertIn("observation_id", error["message"])
+            self.assertFalse((tmp / "out" / "trajectory.json").exists())
+
+    def test_image_plane_point_on_the_observation_or_without_one_is_accepted(self):
+        project = json.loads((CASE / "project.json").read_text("utf-8"))
+        spec = _case_spec(image_plane={"position_mm": [200.0, 0.0, 0.0]}, efl_mm={"values": [35, 70, 105]})
+        with TempDir() as tmp:
+            code, summary, stderr = _refused(tmp, spec, project)
+            self.assertEqual((code, summary["status"]), (0, "PASS"), stderr)
+        project["observations"][0]["pose"]["position_mm"] = [50.0, 0.0, 0.0]  # an intermediate plane, before G3
+        spec = _case_spec(image_plane={"position_mm": [200.0, 0.0, 0.0]}, efl_mm={"values": [35, 70, 105]})
+        with TempDir() as tmp:
+            code, summary, stderr = _refused(tmp, spec, project)
+            self.assertEqual((code, summary["status"]), (0, "PASS"), stderr)
+
+    def test_powered_lens_in_no_group_is_refused(self):
+        # EXTRA (f = 50 mm at x = 160 mm) turns the 70 mm design into 38.89 mm: the solve of G1-G3 alone would
+        # report 70 mm and PASS for a Project whose full path does not have it
+        project = _with_extra_lens([160.0, 0.0, 0.0])
+        x2, x3 = FIXTURE["mid"][1:]
+        m = _mul([[1.0, 0.0], [-1.0 / 50.0, 1.0]], _mul([[1.0, 160.0 - x3], [0.0, 1.0]], abcd(x2, x3)))
+        with TempDir() as tmp:
+            code, summary, error = _refused(tmp, _case_spec(), project)
+            self.assertEqual(code, 4)
+            self.assertEqual(error["code"], "UNGROUPED_PATH_ELEMENT")
+            self.assertEqual(error["components"], ["EXTRA"])
+            self.assertAlmostEqual(error["groups_efl_mm"], 70.0, delta=1e-3)
+            self.assertAlmostEqual(error["full_path_efl_mm"], -1.0 / m[1][0], delta=1e-6)
+            self.assertAlmostEqual(error["full_path_efl_mm"], 38.8889, delta=1e-4)
+            self.assertIn("38.8889 mm", error["message"])
+            self.assertFalse((tmp / "out" / "trajectory.json").exists())
+
+    def test_a_lens_or_image_plane_slightly_off_the_axis_still_counts(self):
+        # an aperture that still reaches the axis is on the path, however small the lateral offset
+        for where in ([160.0, 0.001, 0.0], [160.0, 0.5, 0.0]):
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}),
+                                                _with_extra_lens(where))
+                self.assertEqual((code, error["code"]), (4, "UNGROUPED_PATH_ELEMENT"), where)
+        for lateral in (0.001, 0.5):
+            project = json.loads((CASE / "project.json").read_text("utf-8"))
+            project["observations"][0]["pose"]["position_mm"] = [200.0, lateral, 0.0]
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(image_plane={"position_mm": [205.0, 0.0, 0.0]}),
+                                                project)
+                self.assertEqual((code, error["code"]), (4, "IMAGE_PLANE_MISMATCH"), lateral)
+
+    def test_lenses_off_the_path_are_not_refused(self):
+        for where in ([260.0, 0.0, 0.0], [160.0, 40.0, 0.0]):  # behind the image plane; 40 mm beside the axis
+            with TempDir() as tmp:
+                code, summary, stderr = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}),
+                                                 _with_extra_lens(where))
+                self.assertEqual((code, summary["status"]), (0, "PASS"), (where, stderr))
+
+
+@requires_engine
+class ContinuityTests(unittest.TestCase):
+    """A march that does not arrive at the next anchor's solution validates neither branch."""
+
+    def test_anchor_on_another_branch_leaves_its_samples_unverified(self):
+        # 'tele' declared at 120 mm on the other branch of the zoom equation (G3 near G2): the march from 'mid'
+        # arrives on the zoom branch, 93.8 mm away, and the march above 120 mm follows the other branch
+        spec = _case_spec(efl_mm={"start": 35, "stop": 160, "step": 5})
+        spec["groups"][2]["travel_mm"] = [20, 150]
+        spec["anchors"][2] = {"efl_mm": 120, "configuration_id": "tele",
+                              "positions_mm": {"variator": 16.5479, "compensator": 43.0958}}
+        with TempDir() as tmp:
+            code, summary, stderr = _refused(tmp, spec, json.loads((CASE / "project.json").read_text("utf-8")))
+            self.assertEqual(code, 1, stderr)
+            self.assertEqual(summary["status"], "FAIL")
+            self.assertEqual(summary["counts"], {"PASS": 8, "FAIL": 1, "INFEASIBLE": 0, "UNSOLVED": 0,
+                                                 "UNVERIFIED": 17})
+            self.assertEqual(summary["coverage"]["pass_intervals_mm"], [[35.0, 70.0]])  # wide-mid agree: kept
+            (lost,) = summary["continuity"]["breaks"]
+            self.assertFalse(summary["continuity"]["verified"])
+            self.assertEqual((lost["from_anchor"], lost["from_efl_mm"], lost["to_anchor"], lost["to_efl_mm"]),
+                             ("mid", 70.0, "tele", 120.0))
+            self.assertGreater(lost["deviation_mm"], 90.0)
+            self.assertEqual((lost["unverified_efl_mm"], lost["unverified_samples"]), ([75.0, 160.0], 17))
+            trajectory = json.loads((tmp / "out" / "trajectory.json").read_text(encoding="utf-8"))
+            samples = {s["efl_requested_mm"]: s for s in trajectory["samples"]}
+            for efl in (75.0, 100.0, 115.0, 125.0, 160.0):
+                self.assertEqual(samples[efl]["status"], "UNVERIFIED", efl)
+                self.assertEqual([r["code"] for r in samples[efl]["reasons"]], ["CONTINUITY_UNVERIFIED"])
+                self.assertLessEqual(abs(samples[efl]["efl_error_mm"]), 1e-6)  # solved, in tolerance, unverified
+            self.assertEqual([r["code"] for r in samples[120.0]["reasons"]], ["BRANCH_MISMATCH"])
+            self.assertEqual(samples[120.0]["status"], "FAIL")
+            self.assertAlmostEqual(samples[115.0]["positions_mm"]["compensator"], reference_positions(115.0)[1],
+                                   delta=1e-5)
+            self.assertLess(samples[125.0]["positions_mm"]["compensator"], 60.0)  # the other branch
+            self.assertEqual(trajectory["continuity"]["breaks"][0]["unverified_samples"][0],
+                             samples[75.0]["sample_id"])
+            report = (tmp / "out" / "report.md").read_text(encoding="utf-8")
+            self.assertIn("## Continuity lost", report)
+            self.assertIn("Between anchor mid (70 mm) and anchor tele (120 mm)", report)
+            self.assertIn("| UNVERIFIED | 17 of 26 |", report)
 
 
 if __name__ == "__main__":
