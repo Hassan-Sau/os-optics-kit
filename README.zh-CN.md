@@ -156,7 +156,7 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 
 ## 版本对应
 
-os-optics-kit 0.4.x 需要 `os-optics>=0.14,<0.15`。其案例已在 os-optics 0.14.0 和目录版本 2026-10-28.1 上验证
+os-optics-kit 0.5.x 需要 `os-optics>=0.14,<0.15`。其案例已在 os-optics 0.14.0 和目录版本 2026-10-28.1 上验证
 （[`baseline.json`](baseline.json)）。Project 未声明环境时 os-optics 0.14 在标准空气中传播；最初在 os-optics 0.13.0 上记录的案例声明了其设计时的真空。每个案例记录验证时使用的引擎和目录版本。见
 [案例格式（英文）](docs/case-format.md)和[引擎对齐（英文）](docs/engine-alignment.md)。
 各版本的变更见[更新日志（英文）](CHANGELOG.md)。

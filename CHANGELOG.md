@@ -5,7 +5,10 @@ version and catalog release it was verified with (`baseline.json`). A release he
 the tag `vX.Y.Z`; `python scripts/check_repo.py` requires a section for the version in `baseline.json`. Changes
 that are not in a release yet come first, under "Unreleased".
 
-## Unreleased
+## 0.5.0
+
+Requires `os-optics>=0.14,<0.15`; verified with os-optics 0.14.0 and catalog release 2026-10-28.1. Every case
+is re-recorded on os-optics 0.14.0.
 
 ### Added
 
@@ -34,6 +37,14 @@ that are not in a release yet come first, under "Unreleased".
 
 ### Changed
 
+- Cases: every case is re-recorded on os-optics 0.14.0 with catalog release 2026-10-28.1. Cases first recorded on
+  os-optics 0.13 state the assumptions those records made: vacuum (`environment.pressure_pa` 0) and, where the Project
+  declares its glass, lossless glass (`absorption_coefficient_per_mm` 0); their target and imaging values are
+  unchanged. mirror-alignment and polarization-control run in standard air with identical values. beam-expander's run
+  status is `UNKNOWN` on os-optics 0.14 (the catalog's N-BK7 states no bulk loss) with its target and studies
+  unchanged; aspheric-lens, midwave-infrared-imager and sonnar-telephoto-lens now complete (`COMPLETED`, was
+  `PARTIAL`); cylindrical-light-sheet is rebuilt by the 0.14 lens builder in standard air (entrance radius
+  25.979142 mm) and its table re-recorded.
 - `study run DIR` uses the evaluator the study records (a compensated tolerance study records its own); a different
   `--evaluator` is refused with `EVALUATOR_MISMATCH`, and printed `next` commands name the recorded evaluator.
 - The kit requires `os-optics>=0.14,<0.15`. The cases keep their records from os-optics 0.13.0 and catalog release
@@ -43,6 +54,16 @@ that are not in a release yet come first, under "Unreleased".
 
 ### Fixed
 
+- `zoom`: a sample no anchor agreement confirms is `UNVERIFIED` (reason `CONTINUITY_UNVERIFIED`): after a march fails
+  the agreement check at the next anchor, the samples between the two anchors, and those marched outward from an end
+  anchor whose only check failed, no longer pass; `continuity` in the trajectory, summary and report names each break.
+- `zoom`: the solved model is the exported Project. An optical element before the image plane that is in no group and
+  whose aperture reaches the axis is refused with `UNGROUPED_PATH_ELEMENT` (with the groups' and the full path's EFL),
+  and an `image_plane.position_mm` that misses the Project's observation behind the last group is refused with
+  `IMAGE_PLANE_MISMATCH`, both before anything is written.
+- CI: the engine job installs exactly the engine the gate selects from `baseline.json` (pinned with `==`) and shows
+  the installed os-optics version, wheel and SHA-256 in its summary; a change to `scripts/engine_gate.py` verifies
+  every case.
 - Tolerance compensation: `--resume` runs the compensated samples again when the objective, a compensator (ops,
   nominal, bounds, tolerance, unit, name) or a solver setting changed, and keeps them when only a description changed;
   a sample interrupted during its solve runs again instead of being recovered without its compensation; with

@@ -2,7 +2,7 @@
 
 [Agent guide](../AGENT_GUIDE.md). English-only reference for the kit's tools
 (`os-optics-kit <command>`) and the case workflows; read only the section the task needs.
-Each command's `--help` holds its complete specification. os-optics-kit 0.4.x requires
+Each command's `--help` holds its complete specification. os-optics-kit 0.5.x requires
 `os-optics>=0.14,<0.15` ([installation](https://github.com/JunLin615/os-optics/blob/main/docs/en/installation.md));
 the quoted results come from os-optics 0.14.0 and catalog release `2026-10-28.1`. Human
 walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).

@@ -1,7 +1,7 @@
 {
   "schema": "os-optics-kit.skills",
   "schema_version": 1,
-  "kit_version": "0.4.0",
+  "kit_version": "0.5.0",
   "token_estimate": "ceil(characters/4)",
   "budgets": {
     "SKILL.md": 900,
@@ -237,8 +237,8 @@
       "command": "os-optics-kit zoom",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/zoom/SKILL.md",
-      "tokens": 851,
-      "sha256": "bfae138c8f9ee6b25337444e1fb90267671937842e285a977a6b31d7c03adba7"
+      "tokens": 898,
+      "sha256": "4f4489a8325c84a445f22e41a33ad1a402fd44b407a11ea07be7e685b58eecde"
     }
   ]
 }

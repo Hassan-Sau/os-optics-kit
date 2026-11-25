@@ -167,7 +167,7 @@ importable (`import os_optics_kit`), and `python -m os_optics_kit <command>` run
 
 ## Version alignment
 
-os-optics-kit 0.4.x requires `os-optics>=0.14,<0.15`. Its cases were verified with os-optics 0.14.0 and catalog release
+os-optics-kit 0.5.x requires `os-optics>=0.14,<0.15`. Its cases were verified with os-optics 0.14.0 and catalog release
 2026-10-28.1 ([`baseline.json`](https://github.com/JunLin615/os-optics-kit/blob/main/baseline.json)). os-optics 0.14
 propagates in standard air when a Project states no environment; the cases first recorded on os-optics 0.13.0 state
 the vacuum they were designed in.
