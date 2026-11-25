@@ -16,7 +16,7 @@ os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎�
 | --- | --- | --- |
 | [`os-optics`](https://pypi.org/project/os-optics/) | PyPI | 引擎：光学元件目录、仿真、结果与三维视图 |
 | [`os-optics-kit`](https://pypi.org/project/os-optics-kit/) | PyPI | 基于引擎的工具、案例和 Agent 技能 |
-| [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | 产品文档与问题反馈 |
+| [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | 引擎源代码、测试、文档与社区讨论 |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | 本仓库：工具、案例、技能与贡献 |
 
 **[Agent 指南（英文）](AGENT_GUIDE.md) · [本地查看器](docs/zh-CN/viewer.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
@@ -24,7 +24,7 @@ os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎�
 ## 安装
 
 ```bash
-python -m pip install "os-optics[protected]" os-optics-kit
+python -m pip install os-optics os-optics-kit
 os-optics doctor
 ```
 
@@ -169,4 +169,4 @@ os-optics-kit 0.4.x 需要 `os-optics>=0.14,<0.15`，已在 os-optics 0.13.0 和
 
 ## 许可证
 
-os-optics-kit 采用 [MIT 许可证](LICENSE)。引擎 os-optics 按其自身的许可证分发。
+os-optics-kit 采用 [MIT 许可证](LICENSE)。引擎 [os-optics](https://github.com/JunLin615/os-optics) 自 0.14.0 起同样采用 MIT 许可证开源。
