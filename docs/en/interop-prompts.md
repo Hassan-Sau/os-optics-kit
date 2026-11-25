@@ -6,7 +6,8 @@ Copy one template into your own coding agent and replace the parts in angle
 brackets. Each template asks the agent to work in your environment, with your
 installed tools, and to keep OpenSci results and external results apart. The matching
 cases (`interop-optimization`, `interop-diffraction`, `interop-quantum`,
-`interop-metasurface`) were verified with os-optics 0.13.0; each case's `CASE.md` records its versions.
+`interop-metasurface`) ran their external steps with os-optics 0.13.0, and os-optics 0.14.0 reproduces their engine
+runs exactly; each case's `CASE.md` records its versions.
 
 The templates cover simulation and analysis only.
 

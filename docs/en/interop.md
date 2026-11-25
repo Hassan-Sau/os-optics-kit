@@ -8,8 +8,9 @@ electromagnetic solvers run in your own Python environment and read what OpenSci
 exports. Each of the four cases below compares the external result with an independent
 reference; its `CASE.md` records the versions, the commands and the verified outcome.
 
-The cases were verified with os-optics 0.13.0. The numerical comparisons below are those
-verified runs. They use the linear optical network with per-path group delays, native
+The external comparisons below ran with os-optics 0.13.0; os-optics 0.14.0 reproduces the
+engine runs they start from exactly (the cases state vacuum, the medium of those runs).
+They use the linear optical network with per-path group delays, native
 components and the `TABULATED_THIN_LENS` model kind. The scripts that run the Engine check
 the installed version and stop with a clear message on an older engine; the external-side
 scripts read only exported files and do not import the Engine.
