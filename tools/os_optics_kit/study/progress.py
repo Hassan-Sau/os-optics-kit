@@ -17,6 +17,10 @@ executed, or executed in part, is refused with one error that names the command 
 ``study aggregate`` refuses only ``STUDY_NOT_RUN``: it aggregates a study executed in part, and its stdout then has
 status ``INCOMPLETE`` (exit 2) with the samples without a result and the ``next`` command.
 
+Every ``next`` command that runs the study names the evaluator it needs: the one ``study.json`` records (a
+compensated tolerance study records ``study.compensation:run_compensated``), else the last execution's when it is not
+the default.
+
 A sample has a result when its ``sample.json`` carries the plan's request hash and was not left by a cancellation of
 the study (state ``NOT_RUN`` with error code ``CANCELLED``, or ``RUN_STOPPED`` with problem ``STUDY_CANCELLED`` /
 ``INTERRUPTED``); a ``FAILED`` evaluation, a time or memory limit, a planner refusal and a ``stop_on`` stop are
@@ -40,13 +44,23 @@ LISTED = 10
 
 def run_command(study_dir, *, resume, evaluator=None):
     """The ``study run`` command that executes (``resume``: continues) the study in ``study_dir``; a named evaluator
-    other than the default is passed on."""
+    other than the default is passed on (``study_evaluator`` gives the one a study is executed with)."""
     command = f"os-optics-kit study run {Path(study_dir).as_posix()}"
     if resume:
         command += " --resume"
     if evaluator is not None and evaluator != evaluators.DEFAULT_EVALUATOR:
         command += f" --evaluator {evaluator}"
     return command
+
+
+def study_evaluator(study):
+    """The evaluator the ``next`` command of a study names: the one ``study.json`` records (the evaluator its planning
+    tool requires, e.g. ``study.compensation:run_compensated`` for a compensated tolerance study), else that of its
+    last execution (None before one)."""
+    recorded = (study or {}).get("evaluator")
+    if isinstance(recorded, str):
+        return recorded
+    return ((study or {}).get("execution") or {}).get("evaluator")
 
 
 def aggregate_command(study_dir):
@@ -93,8 +107,7 @@ def study_progress(study_dir):
     if state == EXECUTED:
         command = None if summary else aggregate_command(study_dir)
     else:
-        command = run_command(study_dir, resume=store.has_results(study_dir),
-                              evaluator=(study.get("execution") or {}).get("evaluator"))
+        command = run_command(study_dir, resume=store.has_results(study_dir), evaluator=study_evaluator(study))
     return {"state": state, "samples": len(entries), "with_result": len(entries) - len(without),
             "without_result": without, "summary": summary, "aggregated": aggregated_since_change(study_dir),
             "next": command}

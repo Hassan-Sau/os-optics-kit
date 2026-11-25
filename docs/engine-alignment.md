@@ -227,9 +227,10 @@ changed with the pull request.
 
 ### The engine job must have run
 
-While `engine.verified_version` is not on PyPI, the CI job "Engine checks (published os-optics)" passes without
-running anything and says so in its summary. For this pull request that is not a result. Merge it only after the
-engine release is on PyPI and a CI run of the final head shows the job ran: `baseline.json` changed, so every case
+While the engine range of `baseline.json` is not installable from PyPI, the CI job "Engine checks (published
+os-optics)" runs nothing and says so in its summary; on a pull request that changes `engine.verified_version` or
+the `catalog` of `baseline.json` it fails with `BASELINE_MOVED_WITHOUT_ENGINE`. Merge such a pull request only
+after the engine release is on PyPI and a CI run of the final head shows the job ran: `baseline.json` changed, so every case
 is verified against the published release. The release workflow enforces the same rule: a kit release whose
 verified engine is not on PyPI fails to build.
 

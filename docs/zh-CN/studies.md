@@ -14,6 +14,8 @@
 
 不加 `--plan-only` 时，工具通过同样的函数一次完成全部步骤。任何一步都可以从上一步的文件开始：执行先前
 写好的规划、汇总已保存的样本、展示已保存的研究。执行之后的步骤都不运行引擎。
+`os-optics-kit zoom SPEC.json --out DIR --study` 把[变焦研究](zoom.md)求得的配置写成 `DIR/study` 中的扫描研究
+（参数 `efl_mm`）并执行它，因此下文的命令同样适用于它。
 
 ## 用多个工作进程运行研究
 
@@ -88,6 +90,32 @@ os-optics-kit study run study --resume         # 只运行没有完成记录的�
 命令；在规划改变或新的执行开始之前，其他读取命令接受这份表格。`present build` 在使用该研究的素材上报告这些
 代码。失败、被拒绝、受时间或内存限制停止以及被 `stop_on` 停止的样本都算作有结果。
 
+## 带补偿的公差研究
+
+公差规格可以声明 `compensation`：若干补偿器（每个是一组带 `"$value"` 的编辑操作，以及单位、标称值和边界）和一个
+基于研究目标的目标函数。对每个样本，工具先运行装配后（as-built）的 Project，再在边界内求解使目标函数最小的补偿器
+偏移量，并运行补偿后的 Project。案例 [expansion-focus](../../cases/expansion-focus) 对其聚焦平面重新调焦：
+
+```bash
+os-optics-kit cases copy expansion-focus --dest .
+cd expansion-focus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus-plan --plan-only
+os-optics-kit study run refocus-plan --evaluator os_optics_kit.study.compensation:run_compensated
+```
+
+每个样本保留其装配后的记录，`table.csv` 另外列出补偿后的结果（`compensated:*` 列）和求解情况（`compensation:*`、
+`compensator:*`）。`counts`、目标分布和退出码都是装配后的结果；标准输出和 `summary.json` 中的 `compensation` 块
+给出装配后与补偿后的计数以及各次求解的状态 `states`：`SOLVED`；`FAILED` 并附原因（`NOT_CONVERGED`、`BOUNDS_HIT`、
+`WORSE_THAN_AS_BUILT` 等），该样本保留装配后的结果；或 `NOT_EVALUATED`。任何运行之前，补偿器的编辑操作先在偏移量
+0 和两个边界处应用一次；未通过的规格被拒绝（`SPEC_INVALID`、`NOMINAL_MISMATCH`、`COMPENSATOR_OVERLAP`），不写出
+研究。`--no-compensation` 只按装配后的状态运行同样的样本。
+
+求解在评估器 `os_optics_kit.study.compensation:run_compensated` 中进行，`study.json` 记录了它。`--plan-only` 给出的
+`next` 命令包含它；用 `study run` 运行或续跑该研究时，请以 `--evaluator` 传入它。`tolerance SPEC --resume` 会使用
+它。未经它执行的样本报告为 `NOT_EVALUATED`（`COMPENSATION_NOT_RUN`）。规格的键、求解器、检查和运行次数见
+`os-optics-kit skills show tolerance compensation.md`。
+
 ## 候选设计与外部搜索代码
 
 ```bash
@@ -126,6 +154,11 @@ if __name__ == "__main__":
 传入自己的函数 `f(request, sample_dir, limits) -> record`。调度器对象一旦被取消（调用 `cancel()`，或在它
 运行期间按 Ctrl-C），在调用其 `reset()` 之前不再运行任何作业：续跑时请使用新的调度器，或先对原调度器调用
 `reset()`。
+
+下一步取决于上一步结果的优化器（牛顿法或最小二乘迭代、线搜索）则每次调用评估一个设计：
+[评估适配器](evaluation-adapter.md)（`os_optics_kit.study.evaluation_adapter`）把一个 Project 变成以具名、有界的
+变量为自变量的函数，返回目标与约束的定长残差向量，以及其背后的每个数值、裕量和原因。只把相互独立的批次交给
+执行器。
 
 ## 何时值得并行
 

@@ -47,8 +47,8 @@ os-optics-kit sweep coarse.json --out coarse --workers 4
 os-optics-kit study status coarse
 ```
 
-Read `summary.json` counts and every non-PASS sample (`ERROR`, `UNKNOWN`, `OUT_OF_MODEL` stay in the
-table). Plan a finer study around the promising samples (narrower `range`, more samples, a higher
+Read `summary.json` counts and every non-PASS sample (`ERROR`, `UNKNOWN`, `OUT_OF_MODEL` rows stay).
+Plan a finer study around the promising samples (narrower `range`, more samples, a higher
 `compute_budget`) in a new directory. A failed or cancelled sample is explicit (`state`); the others
 stay usable. `study run DIR --resume` keeps the `COMPLETED` / `REFUSED` samples and runs the rest
 (failed, cancelled, not run); a larger tolerance `--samples` with the same seed keeps the samples
@@ -57,8 +57,8 @@ already run.
 For an external optimiser, hand each independent batch (finite differences, a Sobol or multistart set)
 to `os_optics_kit.study`: `make_request` per design, `plan_study`, `execute_study(dir, workers=N)`,
 `collect_records(dir)` in plan order, one new directory per batch; keep the dependent steps in your
-own loop. Workers import the calling script: in a script, call these under
-`if __name__ == "__main__":`.
+own loop, where `os_optics_kit.study.evaluation_adapter` maps variables to residuals.
+Workers import the calling script: call these under `if __name__ == "__main__":`.
 
 ## 5. Reuse saved results
 

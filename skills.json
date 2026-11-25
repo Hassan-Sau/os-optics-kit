@@ -65,6 +65,28 @@
       "sha256": "2ffcbef281eae5bbb116cabd6f9f96b9b9d368ca857576958eaeab2571a6fe56"
     },
     {
+      "name": "fans",
+      "kind": "tool",
+      "description": "Ray fans of a saved os-optics run: transverse and longitudinal aberration and per-ray OPD across the pupil, per field point and wavelength, from the engine's published ray data, with the engine's spot and OPD numbers beside them.",
+      "version": "0.1.0",
+      "command": "os-optics-kit fans",
+      "requires": "os-optics>=0.14,<0.15",
+      "path": "skills/fans/SKILL.md",
+      "tokens": 900,
+      "sha256": "0214e404f68b39965288ec181b6f22995ea915cb852913cae4114dc7b9e54e8a"
+    },
+    {
+      "name": "field",
+      "kind": "tool",
+      "description": "Field curvature and distortion of a saved os-optics run per field point and wavelength, from the engine's published ray data, source poses and aperture stop: image height, distortion against EFL tan(theta) on one plane, tangential and sagittal focus, astigmatism, and each field without a row.",
+      "version": "0.1.0",
+      "command": "os-optics-kit field",
+      "requires": "os-optics>=0.14,<0.15",
+      "path": "skills/field/SKILL.md",
+      "tokens": 867,
+      "sha256": "bce437091c99b0f5715f822a87316589e95ae889e30cab811ef425774b9755fe"
+    },
+    {
       "name": "measurements",
       "kind": "tool",
       "description": "Subtract backgrounds from detector CSV data, optionally normalize by a reference channel, and fit a straight line with residuals, a plot and a provenance record; the input file is never modified. Use it to analyze a measured response curve.",
@@ -156,12 +178,12 @@
       "name": "study",
       "kind": "tool",
       "description": "Run independent Engine evaluations as a resumable study, serially or in worker processes; plan, execute, aggregate and present as separate steps. Use it for sweeps, tolerance samples, candidate Projects and batches handed over by your own search code.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "command": "os-optics-kit study",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/study/SKILL.md",
-      "tokens": 899,
-      "sha256": "770521a1dd44e9a875bde17d90d9e43923fa1801e03ef1f45eda8a4de0fb1fdc"
+      "tokens": 898,
+      "sha256": "a91d2963fd610236a1e8daa193e19b0f6ead1ecaa6e8f308838f8f80783878fa"
     },
     {
       "name": "summary",
@@ -188,13 +210,13 @@
     {
       "name": "tolerance",
       "kind": "tool",
-      "description": "Seeded tolerance study - draw independent offsets from declared uniform or truncated-normal distributions, save the sample set before any run, run and count every sample, and report target distributions. Use it to estimate how often a design meets its targets.",
-      "version": "0.3.0",
+      "description": "Seeded tolerance study - draw independent offsets from declared uniform or truncated-normal distributions, save the sample set before any run, run and count every sample, and report target distributions, optionally after solving compensators. Use it to estimate how often a design meets its targets.",
+      "version": "0.4.0",
       "command": "os-optics-kit tolerance",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/tolerance/SKILL.md",
-      "tokens": 787,
-      "sha256": "52b81fa4c7b063d7862e71edbcc63dc1b1598d6d74ed96e1d291b1e8566a5b0c"
+      "tokens": 883,
+      "sha256": "8febdd10ccc3808bc2d486adc4f1182e2978376509cb3532795222cd78c812e2"
     },
     {
       "name": "view",
@@ -206,6 +228,17 @@
       "path": "skills/view/SKILL.md",
       "tokens": 608,
       "sha256": "ba17b63fcc3df192ba81ab43c92f0c6f11cd5322ac29bc08a6f6c7788f0d89da"
+    },
+    {
+      "name": "zoom",
+      "kind": "tool",
+      "description": "Zoom study of a fixed prescription: solve two moving groups' positions per requested focal length with the focus held on a fixed image plane (engine paraxial analysis), write them as named configurations of one Project, report achieved EFL, focus error, travel and clearance per sample.",
+      "version": "0.1.0",
+      "command": "os-optics-kit zoom",
+      "requires": "os-optics>=0.14,<0.15",
+      "path": "skills/zoom/SKILL.md",
+      "tokens": 816,
+      "sha256": "d18d7a000d9e947b15b647658350d42aa29be398adb45195652d726012aad406"
     }
   ]
 }

@@ -153,6 +153,11 @@ def by_id(rows: Sequence[Mapping[str, Any]], field: str, identifier: str) -> Any
 
 # ------------------------------------------------------------------------------------------------- 1. expansion + focus
 
+#: The medium of ``expander_focus`` and of its closed-form reference ``gaussian_expander_focus_reference``: vacuum
+#: (air at zero pressure). A Project that states no environment propagates in standard air (os-optics 0.14).
+EXPANDER_FOCUS_ENVIRONMENT: dict[str, str] = {"pressure_pa": "0"}
+
+
 def expander_focus(*, f1_mm: float = 50.0, f2_mm: float = 150.0, f3_mm: float = 100.0, gap_error_mm: float = 0.0,
                    waist_radius_mm: float = 0.5, wavelength_nm: float = 780.0, focus_plane_shift_mm: float = 0.0,
                    max_spot_radius_mm: float = 0.02, expanded_radius_target_mm: float | None = None,
@@ -167,9 +172,12 @@ def expander_focus(*, f1_mm: float = 50.0, f2_mm: float = 150.0, f3_mm: float = 
     L3 + f3 + ``focus_plane_shift_mm``. Targets: ``expanded_radius`` (``beam_radius_mm`` on ``collimated`` within
     ``expanded_radius_tolerance_rel`` of ``expanded_radius_target_mm``, default ``waist_radius_mm * f2 / f1``),
     ``spot_radius`` (``beam_radius_mm`` on ``focus`` at most ``max_spot_radius_mm``) and ``waist_location``
-    (``waist_distance_x_mm`` on ``focus`` within ±``waist_window_mm``)."""
+    (``waist_distance_x_mm`` on ``focus`` within ±``waist_window_mm``). The Project states the environment
+    ``EXPANDER_FOCUS_ENVIRONMENT`` (vacuum), the medium of its closed-form reference
+    ``gaussian_expander_focus_reference``."""
     document = _project(gaussian_source(wavelength_nm=wavelength_nm, waist_radius_mm=waist_radius_mm, power_w=power_w,
                                         position_mm=(-float(source_to_l1_mm), 0.0, 0.0)))
+    document["environment"] = dict(EXPANDER_FOCUS_ENVIRONMENT)
     x2 = float(f1_mm) + float(f2_mm) + float(gap_error_mm)
     x3 = x2 + float(l2_to_l3_mm)
     for instance_id, focal_mm, x_mm in (("L1", f1_mm, 0.0), ("L2", f2_mm, x2), ("L3", f3_mm, x3)):
@@ -204,7 +212,8 @@ def gaussian_expander_focus_reference(*, f1_mm: float = 50.0, f2_mm: float = 150
                                       wavelength_nm: float = 780.0, focus_plane_shift_mm: float = 0.0,
                                       source_to_l1_mm: float = 100.0, l2_to_l3_mm: float = 100.0,
                                       collimated_plane_after_l2_mm: float = 50.0, **_criteria: Any) -> dict[str, float]:
-    """Independent check (not Engine physics): complex-q propagation of the ``expander_focus`` layout.
+    """Independent check (not Engine physics): complex-q propagation of the ``expander_focus`` layout, in vacuum
+    (``EXPANDER_FOCUS_ENVIRONMENT``, the environment ``expander_focus`` states).
 
     ``q = z + i·z_R`` (z: distance after the waist; z_R = π w0² / λ), free space ``q -> q + d``, thin lens
     ``1/q -> 1/q - 1/f``, radius ``w = sqrt(-λ / (π·Im(1/q)))``. Returns ``expanded_radius_mm`` (radius on
@@ -853,9 +862,10 @@ DESIGN_INFO: dict[str, dict[str, Any]] = {
 
 
 __all__ = [
-    "BEAM_AGAINST_X", "BEAM_ALONG_X", "BENCHMARK", "CatalogDesignUnavailable", "DESIGN_INFO", "alignment",
-    "alignment_errors", "by_id", "catalog_beam_expander", "catalog_element_values", "catalog_polarization_control",
-    "check_design", "design_outcome", "expander_focus", "gaussian_expander_focus_reference", "gaussian_source",
-    "jones_polarization_reference", "malus_power_reference", "mirror_alignment_reference", "mirror_deviation_mrad",
-    "observation_plane", "polarization_control", "run_design", "turned", "two_plane_pointing",
+    "BEAM_AGAINST_X", "BEAM_ALONG_X", "BENCHMARK", "CatalogDesignUnavailable", "DESIGN_INFO",
+    "EXPANDER_FOCUS_ENVIRONMENT", "alignment", "alignment_errors", "by_id", "catalog_beam_expander",
+    "catalog_element_values", "catalog_polarization_control", "check_design", "design_outcome", "expander_focus",
+    "gaussian_expander_focus_reference", "gaussian_source", "jones_polarization_reference", "malus_power_reference",
+    "mirror_alignment_reference", "mirror_deviation_mrad", "observation_plane", "polarization_control", "run_design",
+    "turned", "two_plane_pointing",
 ]

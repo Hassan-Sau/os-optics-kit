@@ -121,6 +121,31 @@ class FiniteDifferenceNumericsTests(unittest.TestCase):
         self.assertEqual(not_ranked, [{"parameter": "a", "reason": "no scale and the parameter units differ"}])
 
 
+class QuantityTests(unittest.TestCase):
+    """``sa.quantity``: a spec number, bare or ``{"value", "unit"}``, is finite on every path."""
+
+    def test_non_finite_or_non_numeric_values_are_refused_on_every_path(self):
+        for bad in (math.nan, math.inf, -math.inf, True, "1.0", None):
+            for value, unit in ((bad, "mm"), ({"value": bad, "unit": ""}, None), ({"value": bad, "unit": "1"}, ""),
+                                ({"value": bad, "unit": "1"}, "1"), ({"value": bad, "unit": "um"}, "mm")):
+                with self.subTest(value=value, unit=unit), self.assertRaises(wc.WorkflowError) as caught:
+                    sa.quantity(value, unit, "p")
+                self.assertIn(caught.exception.code, ("SPEC_INVALID", "BAD_ARGUMENT"))
+                self.assertIn("finite number", str(caught.exception))
+
+    def test_finite_values_are_converted(self):
+        self.assertEqual(sa.quantity({"value": 2, "unit": ""}, None, "p"), 2.0)
+        self.assertEqual(sa.quantity({"value": -0.5, "unit": "1"}, "", "p"), -0.5)
+        self.assertEqual(sa.quantity({"value": 500, "unit": "um"}, "mm", "p"), 0.5)
+        self.assertEqual(sa.quantity(3, "mm", "p"), 3.0)
+
+    def test_a_non_finite_unitless_quantity_in_a_spec_is_refused(self):
+        with self.assertRaises(wc.WorkflowError) as caught:
+            sa.quantity({"value": math.nan, "unit": ""}, None, "resolution t")
+        self.assertEqual(caught.exception.code, "SPEC_INVALID")
+        self.assertEqual(caught.exception.details["path"], "resolution t")
+
+
 @requires_engine
 class SensitivityAgainstClosedFormTests(unittest.TestCase):
     """Engine derivatives against Malus law and the 2 theta mirror law (independent closed forms)."""

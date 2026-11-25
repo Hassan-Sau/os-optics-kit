@@ -35,6 +35,7 @@ host dir (`--force` overwrites).
 | Gallery or bundle handoff | `present list DIR`; `present bundle DIR --out X.zip --only ID,...` |
 | Orbit, detail move, sample playback | `present init ... --animate`; fields: `present settings` |
 | Sensitivity, tolerance | `sensitivity SPEC.json --out DIR`; `tolerance SPEC.json --out DIR` |
+| Zoom positions, fixed image plane | `zoom SPEC.json --out DIR [--study]` |
 | Parallel, resumable runs | `study` skill: `sweep SPEC.json --out S --workers 4`; `study run S --resume`; `study candidates P1.json P2.json --out C` |
 | Catalog parts | `candidates --category ... --wavelength-nm ...` |
 | Detector CSV data | `measurements DATA.csv --x ... --signal ... --out DIR` |

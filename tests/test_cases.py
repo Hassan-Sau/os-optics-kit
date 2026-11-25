@@ -29,7 +29,7 @@ CATALOG_FREE = "ideal-lens-focus"
 INDEX_KEYS = ("name", "title", "summary", "path", "class", "domain", "provenance", "publication", "source", "scale",
               "engine", "catalog", "tools", "tags", "images", "files", "project_sha256")
 LENS_CASES = ("achromatic-imaging", "aspheric-lens", "sonnar-telephoto-lens", "midwave-infrared-imager",
-              "cylindrical-light-sheet", "ideal-lens-focus", "interop-metasurface")
+              "cylindrical-light-sheet", "ideal-lens-focus", "interop-metasurface", "three-group-zoom")
 #: derived scale of every case: (band, elements, sources, branches), as the case library rules give it
 EXPECTED_SCALE = {
     "achromatic-imaging": ("small", 1, 1, 0), "aspheric-lens": ("medium", 5, 9, 0),
@@ -41,6 +41,7 @@ EXPECTED_SCALE = {
     "interop-quantum": ("medium", 1, 2, 1), "midwave-infrared-imager": ("medium", 5, 9, 0),
     "mirror-alignment": ("small", 1, 1, 0), "phase-only-flat-top": ("small", 3, 1, 0),
     "polarization-control": ("small", 2, 1, 0), "sonnar-telephoto-lens": ("medium", 6, 3, 0),
+    "three-group-zoom": ("small", 3, 2, 0),
 }
 
 

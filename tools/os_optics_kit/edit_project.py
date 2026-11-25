@@ -201,7 +201,10 @@ def apply_edits(document, ops, *, validate=True, expected_project_hash=None):
             before = current
             current = apply_project_ops(current, [op])
             changes.append({"op_index": index, "op": op["op"], "affected": _affected(before, current)})
-        updated = update_project(base, normalized, expected_project_hash=expected_project_hash) if validate else None
+        # require_check: an edited Project that does not pass the Engine's check is refused (PROJECT_REJECTED with
+        # the check's problems), not returned with an unchecked result
+        updated = update_project(base, normalized, expected_project_hash=expected_project_hash,
+                                 require_check=True) if validate else None
     except (ProjectOpError, ProjectUpdateError) as exc:
         details = exc.as_dict()
         code, message = details.pop("code"), details.pop("message")

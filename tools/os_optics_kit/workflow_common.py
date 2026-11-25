@@ -625,12 +625,16 @@ def sample_from_summary(summary, selected=None):
 def read_saved_run(run_dir, selected=None, *, require_integrity=False):
     """Summary + sample fields of a saved run directory (never reruns). The summary's ``integrity`` states whether
     the run's files verify; with ``require_integrity`` a run that does not verify is refused
-    (``RUN_INTEGRITY_FAILED``), for a reader that would adopt the run as a result."""
+    (``RUN_INTEGRITY_FAILED``), for a reader that would adopt the run as a result. A run whose integrity was not
+    checked is refused too (``RUN_INTEGRITY_NOT_CHECKED``): adoption needs a positive verification."""
     from .result_summary import summarize_run
 
-    summary = summarize_run(run_dir)
+    summary = summarize_run(run_dir, verify=True)
     integrity = summary.get("integrity") or {}
-    if require_integrity and integrity.get("checked") and not integrity.get("consistent"):
+    if require_integrity and not integrity.get("checked"):
+        raise WorkflowError("RUN_INTEGRITY_NOT_CHECKED", "the Engine did not check the run's files against their "
+                            "recorded hashes", run_dir=Path(run_dir).as_posix())
+    if require_integrity and not integrity.get("consistent"):
         raise WorkflowError("RUN_INTEGRITY_FAILED", "; ".join(integrity.get("problems") or []),
                             run_dir=Path(run_dir).as_posix(), problems=integrity.get("problems"))
     fields = sample_from_summary(summary, selected)
@@ -644,15 +648,23 @@ def read_saved_run(run_dir, selected=None, *, require_integrity=False):
 # --------------------------------------------------------------------------------------------- freshness
 
 def freshness(project, run_dir, *, verify=True):
-    """Delegate current/historical identity and integrity checks to the Engine.
+    """Whether the saved run in ``run_dir`` is CURRENT for ``project`` (a document or a path), by the Engine's rule
+    (``os_optics.local.freshness.run_freshness``). Different Engine builds alone do not make matching runs historical.
 
-    ``verify`` is retained for callers; freshness always includes the Engine's
-    integrity check. Different Engine builds alone do not make matching runs historical.
-    """
+    With ``verify`` (the default) the Engine also checks the run's files against their recorded hashes
+    (``integrity``). A run whose files do not verify is ``HISTORICAL`` with the reason ``RUN_UNVERIFIED`` and its
+    ``problems``, whatever its hashes say: its stored outcome is not the one the run wrote, so no reader may take
+    it as the current result of ``project``."""
     from os_optics.local.freshness import run_freshness
 
     document = read_json(project) if isinstance(project, (str, Path)) else project
-    return {"run_dir": Path(run_dir).as_posix(), **run_freshness(document, run_dir)}
+    result = {"run_dir": Path(run_dir).as_posix(), **run_freshness(document, run_dir, verify=bool(verify))}
+    integrity = result.get("integrity") or {}
+    if integrity.get("checked") and not integrity.get("consistent"):
+        result["freshness"] = "HISTORICAL"
+        result["reasons"] = [*(r for r in result.get("reasons") or [] if r != "RUN_UNVERIFIED"), "RUN_UNVERIFIED"]
+        result["problems"] = list(integrity.get("problems") or [])[:5]
+    return result
 
 
 # --------------------------------------------------------------------------------------------- CLI output

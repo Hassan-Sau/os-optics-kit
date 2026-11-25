@@ -2,7 +2,56 @@
 
 Releases of os-optics-kit, newest first. Each release states the os-optics range it requires and the os-optics
 version and catalog release it was verified with (`baseline.json`). A release heading is the version on PyPI and
-the tag `vX.Y.Z`; `python scripts/check_repo.py` requires a section for the version in `baseline.json`.
+the tag `vX.Y.Z`; `python scripts/check_repo.py` requires a section for the version in `baseline.json`. Changes
+that are not in a release yet come first, under "Unreleased".
+
+## Unreleased
+
+### Added
+
+- `zoom`: positions of two moving groups per requested focal length with the focus held on a fixed image plane,
+  solved by continuation from known anchors with the engine's paraxial analysis; writes a Project with one named
+  configuration per sample, a trajectory with achieved EFL, focus error, travel and clearance per sample, and
+  optionally a sweep study of the configurations (`docs/en/zoom.md`, case `three-group-zoom`).
+- `os-optics-kit fans RUN --monitor PLANE`: ray fans of a saved run at an image plane, per field point and
+  wavelength: transverse and longitudinal aberration and per-ray OPD across the pupil, read from the run's published
+  ray data (nothing is traced again), with the engine's spot and OPD numbers beside them. Skill `fans`.
+- `os-optics-kit field RUN --monitor PLANE`: field curvature and distortion of a saved run per field point and
+  wavelength: image height, distortion against `EFL tan(theta)` with both heights on one plane (by default the
+  engine's paraxial EFL and rear focal plane per wavelength, each chief ray carried to that plane; with `--efl`, the
+  stated EFL on the measurement plane), tangential and sagittal focus and astigmatism, the chief ray's crossing of the
+  aperture stop, and every declared field without a row in `unreached_fields` with its reason. Skill `field`.
+- Tolerance compensation: an optional `compensation` object in a `tolerance` spec names compensators (edit ops with
+  `"$value"`, a unit, a nominal and bounds) and an objective over the study's targets. Each sample is then reported
+  as built and compensated (`result_stage`), the compensators are solved within their bounds, and a solve that does
+  not succeed keeps the as-built result with a reason code (`NOT_CONVERGED`, `BOUNDS_HIT`, `WORSE_THAN_AS_BUILT`,
+  ...). `--no-compensation` ignores the object. Examples: `cases/expansion-focus/studies/tolerance_expander_refocus.json`
+  and `cases/mirror-alignment/studies/tolerance_alignment_compensated.json`.
+- Evaluation adapter (`os_optics_kit.study.evaluation_adapter`): a Python interface from named, bounded variables to
+  scaled objective and constraint residuals of a design, on the engine's evaluation session, for an external solver.
+  Every candidate returns a result; one the engine cannot evaluate carries a reason code. Example:
+  `cases/expansion-focus/adapter_example.py`.
+
+### Changed
+
+- `study run DIR` uses the evaluator the study records (a compensated tolerance study records its own); a different
+  `--evaluator` is refused with `EVALUATOR_MISMATCH`, and printed `next` commands name the recorded evaluator.
+- The kit requires `os-optics>=0.14,<0.15`. The cases keep their records from os-optics 0.13.0 and catalog release
+  2026-10-28.1 (`baseline.json`) until they are verified on os-optics 0.14; `three-group-zoom` and
+  `expansion-focus` are recorded on os-optics 0.14.0, the candidate engine of `baseline.json`, which
+  `scripts/check_repo.py` accepts when the case's CASE.md and expected.json both record it.
+
+### Fixed
+
+- `summary`, `compare`, `report`, `edit --run` and `study run --resume` check a saved run's files against their
+  recorded hashes again: with os-optics 0.14 the engine reads a run as stored unless asked to verify it. A run whose
+  files do not verify is `HISTORICAL` (`RUN_UNVERIFIED`) and is never adopted as a study sample.
+- `edit` refuses an edited Project that does not pass the engine's check (`PROJECT_REJECTED` with the check's
+  problems) instead of failing with `KeyError` on os-optics 0.14.
+- The ideal expander and focus design (`optical_designs.expander_focus`, used by the `expansion-focus` workflow)
+  states a vacuum environment (`optical_designs.EXPANDER_FOCUS_ENVIRONMENT`), the medium of its closed-form
+  Gaussian reference: os-optics 0.14 propagates a Project that states no environment in standard air. The
+  `expansion-focus` case Project is that design again and the case is recorded on os-optics 0.14.0.
 
 ## 0.4.0
 

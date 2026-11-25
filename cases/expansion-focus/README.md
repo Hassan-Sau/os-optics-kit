@@ -3,8 +3,8 @@
 [简体中文](README.zh-CN.md) · [Agent case sheet](CASE.md)
 
 A 780 nm Gaussian beam with a 0.5 mm waist radius is expanded three times by two ideal thin lenses (f = 50 mm and
-150 mm) and focused by a third lens (f = 100 mm). The design is catalog-free and fully parameterized: `workflow.py`
-rebuilds it from your inputs and studies one parameter at a time.
+150 mm) and focused by a third lens (f = 100 mm), in vacuum. The design is catalog-free and fully parameterized:
+`workflow.py` rebuilds it from your inputs and studies one parameter at a time.
 
 ![3D view: the source SRC, the expander lenses L1 and L2, the plane `collimated`, the focusing lens L3 and the plane `focus` with the traced beam](images/iso.png)
 
@@ -43,4 +43,8 @@ The default workflow runs 22 designs. Every engine value agrees with an independ
 | `waist_radius_mm` | 0.25 … 4 | 3 | 1 | 1 (severe truncation) |
 
 `studies/` adds a sensitivity study, a band-edge sensitivity study, a seeded tolerance study (92 of 100 samples
-pass) and two compute-budget edits. Verified with os-optics 0.13.0; run status PASS.
+pass) and two compute-budget edits. Verified with os-optics 0.14.0; run status PASS.
+
+`adapter_example.py` evaluates the same design as a function of the refocus offset through the
+[evaluation adapter](../../docs/en/evaluation-adapter.md): the spot radius as an objective, the waist location as a
+constraint, a fixed-length residual vector per candidate and a structured reason for the one outside the bounds.

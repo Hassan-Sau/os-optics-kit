@@ -394,7 +394,7 @@
         "sources": 1,
         "branches": 0
       },
-      "engine": "0.13.0",
+      "engine": "0.14.0",
       "catalog": null,
       "tools": [
         "sweep",
@@ -428,6 +428,7 @@
         "CASE.md",
         "README.md",
         "README.zh-CN.md",
+        "adapter_example.py",
         "expected.json",
         "images.json",
         "images/iso.png",
@@ -438,9 +439,10 @@
         "studies/sensitivity_expander.json",
         "studies/sensitivity_expander_band_edge.json",
         "studies/tolerance_expander.json",
+        "studies/tolerance_expander_refocus.json",
         "workflow.py"
       ],
-      "project_sha256": "617fc34c578308c9a4a7555884bf07502cd41ddb0cb3e7a6bee026077d3a59ee"
+      "project_sha256": "819a32d8da6c183acfe0ecfc73b9c328d3e48c0648e3b54d1f9322efc4be0a91"
     },
     {
       "name": "focus-requirement",
@@ -912,6 +914,7 @@
         "project.json",
         "studies/sensitivity_alignment.json",
         "studies/tolerance_alignment.json",
+        "studies/tolerance_alignment_compensated.json",
         "workflow.py"
       ],
       "project_sha256": "136629b24714052338cf06d5031b7a3481723cc4626cebf84a03c17b0962622a"
@@ -1093,6 +1096,78 @@
         "project.json"
       ],
       "project_sha256": "431b260d9f2eb7f5debc0a5273509eba113c02df8067435c85cad3439d604e0a"
+    },
+    {
+      "name": "three-group-zoom",
+      "title": "Three-group zoom with a fixed image plane",
+      "summary": "Ideal thin lenses f = 100, -30 and 50 mm form a 35-105 mm zoom; os-optics-kit zoom solves the variator and compensator positions per focal length with the focus held on a fixed image plane, checked against an independent thin-lens calculation.",
+      "path": "cases/three-group-zoom",
+      "class": "lens",
+      "domain": [
+        "imaging"
+      ],
+      "provenance": "self-built",
+      "publication": "own-work",
+      "scale": {
+        "band": "small",
+        "elements": 3,
+        "sources": 2,
+        "branches": 0
+      },
+      "engine": "0.14.0",
+      "catalog": null,
+      "tools": [
+        "zoom",
+        "sweep",
+        "compare",
+        "plot",
+        "report",
+        "view"
+      ],
+      "tags": [
+        "ideal-lens",
+        "parameter-sweep",
+        "requirement-check",
+        "independent-reference"
+      ],
+      "images": [
+        {
+          "file": "images/iso.png",
+          "kind": "system-view",
+          "view": "iso"
+        },
+        {
+          "file": "images/section.png",
+          "kind": "system-view",
+          "view": "section"
+        },
+        {
+          "file": "images/trajectory.png",
+          "kind": "figure",
+          "script": "figures.py"
+        },
+        {
+          "file": "images/constrained.png",
+          "kind": "figure",
+          "script": "figures.py"
+        }
+      ],
+      "files": [
+        "CASE.md",
+        "README.md",
+        "README.zh-CN.md",
+        "expected.json",
+        "figures.py",
+        "images.json",
+        "images/constrained.png",
+        "images/iso.png",
+        "images/section.png",
+        "images/trajectory.png",
+        "project.json",
+        "studies/zoom.json",
+        "studies/zoom_constrained.json"
+      ],
+      "project_sha256": "6911d1f943465fb8d842bb282724a56cee14f1d3ae92250d27d9e5d65d69ab55"
     }
   ]
 }

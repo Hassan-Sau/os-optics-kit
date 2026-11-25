@@ -1,0 +1,21 @@
+{
+  "description": "Solve the variator and compensator positions from 35 to 105 mm with the focus held on the fixed image plane, starting from the three known configurations.",
+  "schema": "os-optics-kit.zoom-spec",
+  "schema_version": 1,
+  "base_project": "../project.json",
+  "wavelength_nm": 633,
+  "groups": [
+    {"group_id": "front", "components": ["G1"], "envelope_mm": [0, 3]},
+    {"group_id": "variator", "components": ["G2"], "moving": true, "travel_mm": [10, 70], "envelope_mm": [3, 3]},
+    {"group_id": "compensator", "components": ["G3"], "moving": true, "travel_mm": [100, 150], "envelope_mm": [3, 3]}
+  ],
+  "image_plane": {"observation_id": "image"},
+  "efl_mm": {"start": 35, "stop": 105, "step": 2.5},
+  "anchors": [
+    {"efl_mm": 35, "configuration_id": "wide", "positions_mm": {"variator": 26.6323, "compensator": 124.7022}},
+    {"efl_mm": 70, "configuration_id": "mid", "positions_mm": {"variator": 47.9331, "compensator": 124.2553}},
+    {"efl_mm": 105, "configuration_id": "tele", "positions_mm": {"variator": 59.9205, "compensator": 132.3609}}
+  ],
+  "tolerances": {"efl_mm": 0.01, "focus_mm": 0.005},
+  "clearance": {"min_mm": 1.0}
+}

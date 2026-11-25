@@ -14,7 +14,9 @@ The kit runs them in four steps that each read and write one study directory:
 
 Without `--plan-only` a tool runs all steps in one call, through the same functions. Any step can start from the
 files of the previous one: execute a plan written earlier, aggregate saved samples, present a saved study. Nothing
-after the execution step runs the Engine.
+after the execution step runs the Engine. `os-optics-kit zoom SPEC.json --out DIR --study` writes the solved
+configurations of a [zoom study](zoom.md) as a sweep study in `DIR/study` (parameter `efl_mm`) and executes it, so
+the commands below apply to it too.
 
 ## Run a study with several workers
 
@@ -98,6 +100,35 @@ with status `INCOMPLETE`, the planning tool's status as `analysis_status`, the s
 `present build` reports these codes on the assets that use the study. A failed, refused, time- or memory-limited
 or `stop_on`-stopped sample counts as a result.
 
+## Tolerance studies with compensation
+
+A tolerance spec may declare `compensation`: compensators (each a set of edit ops with `"$value"`, a unit, a nominal
+and bounds) and an objective over the study's targets. For every sample the tool runs the as-built Project, solves
+the compensator offsets that minimise the objective within their bounds, and runs the compensated Project. The case
+[expansion-focus](../../cases/expansion-focus) refocuses its focus plane:
+
+```bash
+os-optics-kit cases copy expansion-focus --dest .
+cd expansion-focus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus-plan --plan-only
+os-optics-kit study run refocus-plan --evaluator os_optics_kit.study.compensation:run_compensated
+```
+
+Each sample keeps its as-built record, and `table.csv` adds the compensated result (`compensated:*` columns) and
+the solve (`compensation:*`, `compensator:*`). `counts`, the target distributions and the exit code are the as-built
+outcomes; the `compensation` block of stdout and `summary.json` holds the as-built and compensated counts and the
+`states` of the solves: `SOLVED`; `FAILED` with a reason (`NOT_CONVERGED`, `BOUNDS_HIT`, `WORSE_THAN_AS_BUILT`, ...),
+the sample keeping its as-built result; or `NOT_EVALUATED`. Before any run the compensator ops are applied at
+offset 0 and at both bounds; a spec that fails is refused (`SPEC_INVALID`, `NOMINAL_MISMATCH`,
+`COMPENSATOR_OVERLAP`) and no study is written. `--no-compensation` runs the same samples as built only.
+
+The solves run in the evaluator `os_optics_kit.study.compensation:run_compensated`, which `study.json` records. The
+`next` command that `--plan-only` prints names it; pass it as `--evaluator` when you run or resume the study with
+`study run`. `tolerance SPEC --resume` uses it. A sample executed without it is reported `NOT_EVALUATED`
+(`COMPENSATION_NOT_RUN`). The spec keys, the solver, the checks and the number of runs:
+`os-optics-kit skills show tolerance compensation.md`.
+
 ## Candidate designs and external search code
 
 ```bash
@@ -137,6 +168,12 @@ whose samples already ran (`STUDY_STARTED`) unless it is called with `resume=Tru
 run per request) and the scheduler are parameters of `execute_study`; a caller may pass its own function
 `f(request, sample_dir, limits) -> record`. A scheduler object that was cancelled (`cancel()`, or Ctrl-C during
 its run) runs nothing until its `reset()`: resume with a new scheduler, or with the same one after `reset()`.
+
+An optimiser whose next step depends on the last result (a Newton or least-squares iteration, a line search)
+evaluates one design per call instead: the [evaluation adapter](evaluation-adapter.md)
+(`os_optics_kit.study.evaluation_adapter`) turns a Project into a function of named, bounded variables and returns a
+fixed-length vector of objective and constraint residuals, with every value, margin and reason behind it. Hand only
+the independent batches to the executor.
 
 ## When parallel runs pay
 

@@ -238,6 +238,33 @@ class StoreTests(unittest.TestCase):
                 store.write_plan(tmp / "other", requests + requests[:1])
             self.assertEqual(caught.exception.code, "PLAN_INVALID")
 
+    def test_adopting_a_saved_run_needs_a_positive_integrity_check(self):
+        """``read_saved_run(require_integrity=True)`` asks for verification and refuses a run whose files were not
+        checked (fail closed), as well as one whose files do not verify."""
+        from os_optics_kit import result_summary
+
+        calls = []
+
+        def summary_with(integrity):
+            def summarize(run_dir, **keys):
+                calls.append(keys)
+                return {"integrity": integrity}
+            return summarize
+
+        with TempDir() as tmp:
+            not_checked = {"checked": False, "consistent": None, "problems": []}
+            with mock.patch.object(result_summary, "summarize_run", summary_with(not_checked)):
+                with self.assertRaises(wc.WorkflowError) as caught:
+                    wc.read_saved_run(tmp, require_integrity=True)
+            self.assertEqual(caught.exception.code, "RUN_INTEGRITY_NOT_CHECKED")
+            inconsistent = {"checked": True, "consistent": False, "problems": ["simulation_result.json: differs"]}
+            with mock.patch.object(result_summary, "summarize_run", summary_with(inconsistent)):
+                with self.assertRaises(wc.WorkflowError) as caught:
+                    wc.read_saved_run(tmp, require_integrity=True)
+            self.assertEqual((caught.exception.code, caught.exception.details["problems"]),
+                             ("RUN_INTEGRITY_FAILED", ["simulation_result.json: differs"]))
+            self.assertTrue(calls and all(keys.get("verify") is True for keys in calls))
+
 
 class ExecutionTests(unittest.TestCase):
     def plan(self, root, requests, **keys):
@@ -453,6 +480,27 @@ class DefaultEvaluatorTests(unittest.TestCase):
             self.assertEqual((summary.recovered, summary.ran), (0, 1))
             self.assertEqual(events(study_dir, "recovery_failed"), ["s0001"])
 
+    def test_saved_run_whose_files_were_edited_is_refused_for_adoption(self):
+        """The Engine reads a run as stored unless asked to verify it; a reader that adopts a run asks."""
+        with TempDir() as tmp:
+            study_dir = tmp / "study"
+            request = rq.make_request("s0001", expander(), selected_targets=["spot_radius"])
+            store.plan_study(study_dir, header(), [request])
+            execute.execute_study(study_dir)
+            run_dir = store.sample_dir(study_dir, "s0001") / "run"
+            summary, _fields = wc.read_saved_run(run_dir, require_integrity=True)
+            self.assertEqual((summary["integrity"]["checked"], summary["integrity"]["consistent"]), (True, True))
+            result = run_dir / "simulation_result.json"
+            text = result.read_text(encoding="utf-8")
+            self.assertIn("PASS", text)
+            result.write_text(text.replace("PASS", "FAIL", 1), encoding="utf-8")
+            with self.assertRaises(wc.WorkflowError) as caught:
+                wc.read_saved_run(run_dir, require_integrity=True)
+            self.assertEqual(caught.exception.code, "RUN_INTEGRITY_FAILED")
+            self.assertTrue(caught.exception.details["problems"])
+            summary, _fields = wc.read_saved_run(run_dir)  # a reader that only reports gets the record
+            self.assertEqual((summary["integrity"]["checked"], summary["integrity"]["consistent"]), (True, False))
+
     def test_ctrl_c_inside_an_engine_run_cancels_the_study_and_exits_130(self):
         import _thread
 
@@ -463,7 +511,7 @@ class DefaultEvaluatorTests(unittest.TestCase):
             requests = [rq.make_request(f"s000{index}", expander(f2=f2), selected_targets=["spot_radius"])
                         for index, f2 in ((1, 150.0), (2, 155.0), (3, 160.0))]
             store.plan_study(study_dir, header(), requests)
-            real, calls = engine_run._run_optical_project, []
+            real, calls = engine_run.session_run, []  # run_optical_project runs every Project through it
 
             def interrupting(*args, **kwargs):  # Ctrl-C arrives while the Engine runs the first sample
                 calls.append(1)
@@ -471,7 +519,7 @@ class DefaultEvaluatorTests(unittest.TestCase):
                     _thread.interrupt_main()
                 return real(*args, **kwargs)
 
-            with mock.patch.object(engine_run, "_run_optical_project", interrupting):
+            with mock.patch.object(engine_run, "session_run", interrupting):
                 code, out, err = invoke(study_tool.main, ["run", str(study_dir)])
             self.assertEqual((code, out["status"]), (130, "CANCELLED"), err)
             self.assertEqual(len(calls), 1)  # no other sample started
@@ -1410,6 +1458,107 @@ class EvaluatorRecordTests(unittest.TestCase):
             summary = execute.execute_study(study_dir, evaluator=FAKE, resume=True)
             self.assertEqual((summary.state, summary.reused, summary.ran), ("COMPLETED", 1, 2))
             self.assertEqual(summary.states, {"COMPLETED": 3})
+
+
+def tree_bytes(folder):
+    """``{relative path: bytes}`` of every file under ``folder`` (the ownership lock left out)."""
+    return {path.relative_to(folder).as_posix(): path.read_bytes() for path in sorted(Path(folder).rglob("*"))
+            if path.is_file() and path.name != store.OWNER_LOCK}
+
+
+class RecordedEvaluatorTests(unittest.TestCase):
+    """A study whose ``study.json`` records an evaluator (a compensated tolerance study does) runs with it when none
+    is given, refuses another one before anything is written, and names it in every printed ``next`` command."""
+
+    def plan(self, root, requests, **keys):
+        store.plan_study(root, header(parameters=[{"name": "x", "unit": "mm"}], evaluator=OTHER, **keys), requests,
+                         resume=store.has_study(root))
+        return root
+
+    def test_without_an_evaluator_the_recorded_one_runs_and_a_resume_keeps_its_records(self):
+        with TempDir() as tmp:
+            study_dir = self.plan(tmp / "study", fake_requests([1.0, 2.0, 3.0]))
+            summary = execute.execute_study(study_dir)
+            self.assertEqual((summary.evaluator, summary.ran), (OTHER, 3))
+            self.assertEqual(store.read_record(study_dir, "s0001")["evaluator"], OTHER)
+            self.assertEqual(store.read_record(study_dir, "s0001")["targets"][0]["value"], 20.0)
+            records = {sid: store.sample_path(study_dir, sid).read_bytes() for sid in ("s0001", "s0002", "s0003")}
+            summary = execute.execute_study(study_dir, resume=True)
+            self.assertEqual((summary.evaluator, summary.ran, summary.reused), (OTHER, 0, 3))
+            self.assertEqual({sid: store.sample_path(study_dir, sid).read_bytes() for sid in records}, records)
+            # the same evaluator given by name or as its importable function is accepted
+            for given in (OTHER, evaluators.load_evaluator(OTHER)):
+                summary = execute.execute_study(study_dir, evaluator=given, resume=True)
+                self.assertEqual((summary.ran, summary.reused), (0, 3))
+            # the CLI without --evaluator: nothing runs again
+            code, out, _err = invoke(study_tool.main, ["run", str(study_dir), "--resume"])
+            self.assertEqual(code, 0)
+            self.assertEqual((out["execution"]["ran"], out["execution"]["reused"]), (0, 3))
+            self.assertEqual({sid: store.sample_path(study_dir, sid).read_bytes() for sid in records}, records)
+
+    def test_another_evaluator_is_refused_before_anything_is_written(self):
+        with TempDir() as tmp:
+            study_dir = self.plan(tmp / "study", fake_requests([1.0, 2.0]))
+            execute.execute_study(study_dir)
+            before = tree_bytes(study_dir)
+            for given, named in ((FAKE, FAKE), (evaluators.DEFAULT_EVALUATOR, evaluators.DEFAULT_EVALUATOR),
+                                 (evaluators.load_evaluator(FAKE), FAKE), (closure_evaluator(1.0), None)):
+                for resume in (True, False):
+                    with self.assertRaises(wc.WorkflowError) as caught:
+                        execute.execute_study(study_dir, evaluator=given, resume=resume)
+                    self.assertEqual(caught.exception.code, "EVALUATOR_MISMATCH")
+                    self.assertEqual(caught.exception.details["recorded"], OTHER)
+                    if named is not None:
+                        self.assertEqual(caught.exception.details["given"], named)
+                    else:
+                        self.assertIn("no importable module:function name", caught.exception.details["given"])
+                    self.assertEqual(tree_bytes(study_dir), before)
+            code, out, err = invoke(study_tool.main, ["run", str(study_dir), "--resume", "--evaluator", FAKE])
+            self.assertEqual((code, out), (4, None))
+            error = json.loads(err)["error"]
+            self.assertEqual((error["code"], error["recorded"], error["given"]),
+                             ("EVALUATOR_MISMATCH", OTHER, FAKE))
+            self.assertEqual(tree_bytes(study_dir), before)
+
+    def test_next_commands_name_the_recorded_evaluator(self):
+        with TempDir() as tmp:
+            study_dir = self.plan(tmp / "study", fake_requests([1.0, 2.0, 3.0]))
+            folder = Path(study_dir).as_posix()
+            fresh = f"os-optics-kit study run {folder} --evaluator {OTHER}"
+            self.assertEqual(options.planned_summary(study_dir, "test")["next"], fresh)
+            status = study_tool.status(study_dir)
+            self.assertEqual((status["next"], status["evaluator"]), (fresh, OTHER))
+            self.assertEqual(status["to_run_on_resume"]["total"], 3)
+            # executed in part (s0001 done, the others never started): status and the aggregate continue with it
+            first = store.read_request(study_dir, "s0001")
+            execute.run_job({"study_dir": folder, "sample_id": "s0001", "request_hash": first["request_hash"],
+                             "evaluator": OTHER, "limits": None, "attempt": 1})
+            resume = f"os-optics-kit study run {folder} --resume --evaluator {OTHER}"
+            status = study_tool.status(study_dir)
+            self.assertEqual((status["progress"], status["next"]), ("PARTIAL", resume))
+            self.assertEqual(status["to_run_on_resume"]["total"], 2)  # the recorded evaluator's record is kept
+            _summary, brief = study_tool.aggregate_study(study_dir)
+            self.assertEqual((brief["status"], brief["next"]), ("INCOMPLETE", resume))
+
+    def test_a_study_without_a_recorded_evaluator_is_unchanged(self):
+        with TempDir() as tmp:
+            study_dir = tmp / "study"
+            store.plan_study(study_dir, header(parameters=[{"name": "x", "unit": "mm"}]), fake_requests([1.0]))
+            self.assertNotIn("evaluator", study_tool.status(study_dir))
+            self.assertTrue(options.planned_summary(study_dir, "test")["next"].endswith(Path(study_dir).name))
+            execute.execute_study(study_dir, evaluator=FAKE)
+            summary = execute.execute_study(study_dir, evaluator=OTHER, resume=True)
+            self.assertEqual((summary.ran, summary.reused), (1, 0))
+
+    def test_a_recorded_evaluator_without_a_module_function_name_is_refused(self):
+        with TempDir() as tmp:
+            study_dir = tmp / "study"
+            store.plan_study(study_dir, header(parameters=[{"name": "x", "unit": "mm"}], evaluator="run_project"),
+                             fake_requests([1.0]))
+            with self.assertRaises(wc.WorkflowError) as caught:
+                execute.execute_study(study_dir)
+            self.assertEqual(caught.exception.code, "STUDY_INVALID")
+            self.assertFalse(store.has_results(study_dir))
 
 
 class BenchmarkSlowParallelTests(unittest.TestCase):

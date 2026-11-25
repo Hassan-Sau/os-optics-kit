@@ -1,0 +1,21 @@
+{
+  "description": "The same zoom from 20 to 120 mm with tighter travel limits: the samples that need a group outside its travel or closer than 1 mm to its neighbour are reported as infeasible.",
+  "schema": "os-optics-kit.zoom-spec",
+  "schema_version": 1,
+  "base_project": "../project.json",
+  "wavelength_nm": 633,
+  "groups": [
+    {"group_id": "front", "components": ["G1"], "envelope_mm": [0, 3]},
+    {"group_id": "variator", "components": ["G2"], "moving": true, "travel_mm": [15, 60], "envelope_mm": [3, 3]},
+    {"group_id": "compensator", "components": ["G3"], "moving": true, "travel_mm": [120, 132], "envelope_mm": [3, 3]}
+  ],
+  "image_plane": {"observation_id": "image"},
+  "efl_mm": {"start": 20, "stop": 120, "step": 5},
+  "anchors": [
+    {"efl_mm": 35, "configuration_id": "wide", "positions_mm": {"variator": 26.6323, "compensator": 124.7022}},
+    {"efl_mm": 70, "configuration_id": "mid", "positions_mm": {"variator": 47.9331, "compensator": 124.2553}},
+    {"efl_mm": 105, "configuration_id": "tele", "positions_mm": {"variator": 59.9205, "compensator": 132.3609}}
+  ],
+  "tolerances": {"efl_mm": 0.01, "focus_mm": 0.005},
+  "clearance": {"min_mm": 1.0}
+}

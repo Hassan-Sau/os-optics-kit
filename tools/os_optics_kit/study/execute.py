@@ -17,6 +17,10 @@ studies (and of any caller that planned requests with ``store.plan_study``):
 * ``stop_on`` (outcome classes) acts in plan order: every sample after the first plan-ordered sample with such an
   outcome is recorded ``ERROR`` / ``STOPPED`` (``state`` ``NOT_RUN``), whether or not it ran; samples not started
   once a stop is known are skipped; an evaluation stopped by the study's cancellation has no outcome for this rule;
+* the evaluator is the one given, else the one ``study.json`` records (top-level ``evaluator``: a compensated
+  tolerance study records ``study.compensation:run_compensated``), else ``evaluators.run_project``; a study that
+  records an evaluator refuses another one (``EVALUATOR_MISMATCH``, with ``recorded`` and ``given``) before anything
+  is written;
 * ``resume=True`` keeps the samples whose record has the plan's ``request_hash``, state ``COMPLETED`` or
   ``REFUSED`` and was produced by the same evaluator, reads back a complete run directory left without a record, and
   runs the rest; without it a study with results is refused (``STUDY_STARTED``). An evaluator without an importable
@@ -287,16 +291,45 @@ class _CancelSource:
 
 # --------------------------------------------------------------------------------------------- execution
 
-def _evaluator_choice(evaluator):
-    """``(name or None, function or None)``: a ``module:function`` text, or a function (named when importable)."""
+def recorded_evaluator(study):
+    """The ``module:function`` evaluator a study records in ``study.json`` (top-level ``evaluator``: the evaluator
+    its planning tool requires, e.g. ``study.compensation:run_compensated`` for a compensated tolerance study), or
+    None when it records none."""
+    recorded = (study or {}).get("evaluator")
+    if recorded is None:
+        return None
+    if not isinstance(recorded, str) or ":" not in recorded:
+        raise wc.WorkflowError("STUDY_INVALID", f"study.json evaluator {recorded!r} is not a module:function name; "
+                               f"{store.REPLAN_HINT}", recorded=recorded)
+    return recorded
+
+
+def _evaluator_choice(evaluator, recorded=None):
+    """``(name or None, function or None)``: a ``module:function`` text, or a function (named when importable).
+
+    ``recorded``: the study's recorded evaluator (``recorded_evaluator``). Without ``evaluator`` it is the one used
+    (else ``evaluators.DEFAULT_EVALUATOR``); a given evaluator with another name, or a function without an
+    importable name, is refused with ``EVALUATOR_MISMATCH`` (details ``recorded``, ``given``)."""
+    if evaluator is None:
+        evaluator = recorded
     if evaluator is None or isinstance(evaluator, str):
         name = evaluator or evaluators.DEFAULT_EVALUATOR
         if ":" not in name:
             raise wc.WorkflowError("EVALUATOR_INVALID", f"evaluator {name!r}: use module:function", evaluator=name)
-        return name, None
-    if not callable(evaluator):
+        function = None
+    elif not callable(evaluator):
         raise wc.WorkflowError("EVALUATOR_INVALID", "the evaluator must be a function or module:function")
-    return evaluators.evaluator_name(evaluator), evaluator
+    else:
+        name, function = evaluators.evaluator_name(evaluator), evaluator
+    if recorded is not None and name != recorded:
+        given = name if name is not None else (
+            f"{getattr(evaluator, '__module__', '?')}.{getattr(evaluator, '__qualname__', '?')} (no importable "
+            "module:function name)")
+        raise wc.WorkflowError("EVALUATOR_MISMATCH", f"this study records the evaluator {recorded}, which its "
+                               f"planning tool requires; {given} was given. Run it without --evaluator (the recorded "
+                               "one is used) or with the recorded one; nothing was run", recorded=recorded,
+                               given=given)
+    return name, function
 
 
 def execute_study(study_dir, *, workers=1, scheduler=None, evaluator=None, limits=None, resume=False, stop_on=None,
@@ -308,8 +341,10 @@ def execute_study(study_dir, *, workers=1, scheduler=None, evaluator=None, limit
     samples as their cost, 0.2 s per sample when none completed yet; one with ``scheduler="serial"``);
     ``scheduler``: ``"serial"``, ``"process"`` or a scheduler object (not closed here, so one pool can serve several
     studies; after ``cancel()`` it runs nothing until ``reset()``); ``evaluator``: ``"module:function"`` or a function
-    (default ``evaluators.run_project``; a worker process needs an importable one; a function without an importable
-    module-level name has no identity, so ``resume=True`` runs its samples again); ``limits``: ``{"time_limit_s", "max_memory_mib"}`` per evaluation; ``stop_on``: outcome classes
+    (default: the evaluator ``study.json`` records, else ``evaluators.run_project``; a study that records one refuses
+    another with ``EVALUATOR_MISMATCH`` before anything is written; a worker process needs an importable one; a
+    function without an importable module-level name has no identity, so ``resume=True`` runs its samples again);
+    ``limits``: ``{"time_limit_s", "max_memory_mib"}`` per evaluation; ``stop_on``: outcome classes
     (default: the study's ``stop_on``); ``on_progress(event)``: called in this process after every sample with
     ``{sample_id, state, outcome, done, total}``; ``blas_threads``: threads per worker (default 1 with several
     workers). Refuses with ``STUDY_RUNNING`` while another execution owns the study.
@@ -354,6 +389,8 @@ def _execute(study_dir, owner, t0, *, workers, scheduler, evaluator, limits, res
              blas_threads):
     study = store.read_study(study_dir)
     entries = store.read_plan(study_dir)
+    # first: an evaluator the study does not accept is refused before anything is written or run
+    evaluator_name, evaluator_function = _evaluator_choice(evaluator, recorded_evaluator(study))
     store.require_same_identity(study["identity"], current_identity(entries), study_dir=study_dir,
                                 resuming=bool(resume))
     stop_on = list(study.get("stop_on") or []) if stop_on is None else list(stop_on)
@@ -364,7 +401,6 @@ def _execute(study_dir, owner, t0, *, workers, scheduler, evaluator, limits, res
     if not resume and store.has_results(study_dir):
         raise wc.WorkflowError("STUDY_STARTED", f"{study_dir.as_posix()} already holds sample results; resume it "
                                f"with --resume, or {store.REPLAN_HINT}", study_dir=study_dir.as_posix())
-    evaluator_name, evaluator_function = _evaluator_choice(evaluator)
     choice = None
     if workers == "auto" and scheduler == "serial":
         workers = 1  # the serial scheduler answers what "auto" would decide

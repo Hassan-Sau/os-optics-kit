@@ -6,7 +6,8 @@
 比较已保存的运行、绘图并生成报告，以及估计灵敏度和公差。每一步都会保存各自的项目和运行，输出一个
 紧凑的 JSON 摘要，并把完整数据保存在文件中。三个带参数化工作流程的案例把同样的步骤用于扩束与聚焦、
 偏振控制和光路对准。
-扫描、灵敏度和公差研究可以在并行工作进程中运行并可续跑，见[研究](studies.md)。
+扫描、灵敏度和公差研究可以在并行工作进程中运行并可续跑，见[研究](studies.md)。[变焦研究](zoom.md)在一个焦距
+范围内求解两个运动镜组的位置，并可把求得的配置作为研究运行。
 
 ## 准备工作
 
@@ -14,7 +15,7 @@
 python -m pip install "os-optics[protected]" "os-optics-kit[plot]"
 ```
 
-os-optics-kit 0.4.x 与 os-optics 0.13 配合使用；下文数值来自 os-optics 0.13.0，涉及目录元件的设计采用
+os-optics-kit 0.4.x 需要 `os-optics>=0.14,<0.15`；下文数值来自 os-optics 0.13.0，涉及目录元件的设计采用
 目录版本 `2026-10-28.1`。每一节先用 `os-optics-kit cases copy NAME --dest .` 复制一个案例，再在案例
 目录中运行命令。第 1–3 节使用目录元件，需要 `os-optics catalog sync`；第 4、5 节使用无需目录的理想
 元件。每次新运行仍应读取其实际标识与目标判定：引擎或目录改变时，目录内容和结果标识可能不同。
@@ -174,6 +175,10 @@ os-optics-kit tolerance studies/tolerance_expander.json --out tolerance-zero --z
 1.5 mm ± 2 % 的要求（抽样值范围 1.462–1.540 mm）。通过比例 92/100 是在上述分布下仿真样本中满足目标的
 比例。`--verify-seed` 重新抽样并确认 `samples.csv` 的字节完全相同。第三条命令中所有偏移量为零，5 个样本
 全部精确复现标称项目和结果的哈希。
+
+[`studies/tolerance_expander_refocus.json`](../../cases/expansion-focus/studies/tolerance_expander_refocus.json)
+对同一设计抽样，并为每个样本求解聚焦平面的重新调焦，逐个报告样本装配后和补偿后的结果：见
+[带补偿的公差研究](studies.md#带补偿的公差研究)。
 
 ## 5. 参数化工作流程
 

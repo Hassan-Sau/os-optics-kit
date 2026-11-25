@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -86,6 +87,130 @@ class RepositoryCheckTests(RepositoryTree):
                          ["cases/demo/out/x.txt", "cases/demo/run-1/manifest.json", "cases/demo/scene.glb",
                           "dist.whl", "public_optical_catalog.v2.json"])
 
+    def test_work_logs_are_not_tracked(self):
+        for name in ("ROUND_LOG.md", "docs/round_log.md"):
+            self.write(name, "# log\n")
+        self.assertEqual(sorted(self.problems("forbidden")), [("forbidden", "ROUND_LOG.md", None),
+                                                              ("forbidden", "docs/round_log.md", None)])
+
+    def test_version_and_catalog_statements_follow_the_baseline(self):
+        # BASELINE: requirement >=0.12,<0.13, verified 0.12.0, kit 0.1.0, catalog 2026-10-28.1
+        self.write("docs/en/guide.md", "\n".join([
+            "os-optics-kit 0.1.x works with os-optics 0.12; verified with os-optics 0.12.0 and catalog release",
+            "`2026-10-28.1`. Use OS Optics 0.12 and os-optics-kit 0.1.",
+            "os-optics-kit 0.1.x works with os-optics 0.11.",  # 3: series outside the requirement
+            "These recipes use OS Optics 0.13 with os-optics-kit 0.0.",  # 4: engine series, kit series
+            "The numbers below come from os-optics 0.11.0 and catalog release `2026-11-24.1`.",  # 5: both
+            "A benchmark on os-optics 0.11.0 keeps the version it ran on; os-optics.local is a module.",
+            "Was verified with os-optics",
+            "0.11.0 across a line break.",  # 7
+        ]) + "\n")
+        self.write("docs/zh-CN/guide.md", "os-optics-kit 0.1.x 与 os-optics 0.11 配合使用；已在 os-optics 0.11.0 和"
+                                          "目录版本 2026-10-15.1 上验证；下文数值来自 os-optics 0.12.0。\n")
+        self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n\nVerified with os-optics 0.11.0 and catalog "
+                                   "release 2026-10-15.1 (history is not checked).\n")
+        self.write("cases/demo/README.md", "Recorded with os-optics 0.11.0.\n")  # a case states its own
+        self.assertEqual(sorted(self.problems("statements")), [
+            ("statements", "docs/en/guide.md", 3), ("statements", "docs/en/guide.md", 4),
+            ("statements", "docs/en/guide.md", 4), ("statements", "docs/en/guide.md", 5),
+            ("statements", "docs/en/guide.md", 5), ("statements", "docs/en/guide.md", 7),
+            ("statements", "docs/zh-CN/guide.md", 1), ("statements", "docs/zh-CN/guide.md", 1),
+            ("statements", "docs/zh-CN/guide.md", 1)])
+        # a candidate engine is required but not verified: the series is the candidate's, verification the last one
+        engine = dict(BASELINE["engine"], requirement=">=0.13,<0.14", verified_version="0.12.0",
+                      candidate_version="0.13.0")
+        self.write("baseline.json", json.dumps(dict(BASELINE, engine=engine)))
+        self.write("docs/en/guide.md", "os-optics-kit 0.1.x requires os-optics 0.13; verified with os-optics 0.12.0.\n")
+        self.write("docs/zh-CN/guide.md", "os-optics-kit 0.1.x 与 os-optics 0.12 配合使用。\n")
+        self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n")
+        self.assertEqual(self.problems("statements"), [("statements", "docs/zh-CN/guide.md", 1)])
+
+    def test_cases_record_the_baseline_engine_and_catalog(self):
+        case = ("---\nname: demo\nengine: {engine}\ncatalog: {catalog}\n---\n## Baseline\n\n"
+                "os-optics {prose}, {where}: run status PASS (`expected.json`).\n")
+        expected = {"catalog": "2026-10-28.1", "engine": "0.12.0", "schema": "os-optics-kit.case-expected"}
+
+        def write_case(engine="0.12.0", catalog="2026-10-28.1", prose="0.12.0", where="catalog 2026-10-28.1",
+                       readme="Verified with os-optics 0.12.0 and catalog 2026-10-28.1.",
+                       readme_zh="已用 os-optics 0.12.0 与目录 2026-10-28.1 验证。", record=expected):
+            self.write("cases/demo/CASE.md", case.format(engine=engine, catalog=catalog, prose=prose, where=where))
+            self.write("cases/demo/expected.json", json.dumps(record))
+            self.write("cases/demo/README.md", readme + "\n")
+            self.write("cases/demo/README.zh-CN.md", readme_zh + "\n")
+
+        write_case()
+        self.assertEqual(self.problems("cases"), [])
+        # prose relabelled without re-recording: the Baseline line, both READMEs and a catalog name disagree
+        write_case(prose="0.13.0", readme="Verified with os-optics 0.13.0 and catalog 2026-11-24.1.",
+                   readme_zh="已用 os-optics 0.13.0 与目录 2026-10-28.1 验证。")
+        self.assertEqual(sorted(self.problems("cases")), [
+            ("cases", "cases/demo/CASE.md", 8), ("cases", "cases/demo/README.md", 1),
+            ("cases", "cases/demo/README.md", 1), ("cases", "cases/demo/README.zh-CN.md", 1)])
+        # records that disagree with baseline.json and with each other
+        write_case(engine="0.11.0", catalog="2026-10-15.1", prose="0.11.0", where="catalog 2026-10-15.1",
+                   readme="Verified with os-optics 0.11.0.", readme_zh="已用 os-optics 0.11.0 验证。")
+        messages = sorted(item["message"] for item in check_repo.run_checks(self.root)["problems"]
+                          if item["check"] == "cases")
+        self.assertEqual(len(messages), 4, messages)
+        for fragment in ("engine.verified_version", "catalog.version", "differs from CASE.md engine",
+                         "differs from CASE.md catalog"):
+            self.assertTrue(any(fragment in message for message in messages), (fragment, messages))
+        # a catalog-free case records none in both places
+        write_case(catalog="none", where="no catalog", record=dict(expected, catalog=None),
+                   readme="Verified with os-optics 0.12.0.", readme_zh="已用 os-optics 0.12.0 验证。")
+        self.assertEqual(self.problems("cases"), [])
+
+    def test_a_case_may_record_the_candidate_engine_when_its_records_agree(self):
+        # The kit requires a candidate engine that is not verified yet; a case that needs it records it.
+        engine = dict(BASELINE["engine"], requirement=">=0.13,<0.14", verified_version="0.12.0",
+                      candidate_version="0.13.0")
+        self.write("baseline.json", json.dumps(dict(BASELINE, engine=engine)))
+        case = ("---\nname: {name}\nengine: {engine}\ncatalog: none\n---\n## Baseline\n\n"
+                "os-optics {prose}, no catalog: run status PASS (`expected.json`).\n")
+
+        def write_case(name, engine, prose=None, record=None, readme=None):
+            self.write(f"cases/{name}/CASE.md", case.format(name=name, engine=engine, prose=prose or engine))
+            expected = self.root / f"cases/{name}/expected.json"
+            if record is None:
+                expected.unlink(missing_ok=True)
+            else:
+                self.write(f"cases/{name}/expected.json", json.dumps(
+                    {"catalog": None, "engine": record, "schema": "os-optics-kit.case-expected"}))
+            self.write(f"cases/{name}/README.md", (readme or f"Verified with os-optics {prose or engine}.") + "\n")
+
+        def messages():
+            return sorted((item["path"], item["message"]) for item in check_repo.run_checks(self.root)["problems"]
+                          if item["check"] == "cases")
+
+        # one case on the verified engine, one on the candidate: both consistent
+        write_case("demo", "0.12.0", record="0.12.0")
+        write_case("zoom", "0.13.0", record="0.13.0")
+        self.assertEqual(messages(), [])
+        # the candidate case without its record is not accepted
+        write_case("zoom", "0.13.0")
+        found = messages()
+        self.assertEqual([path for path, _ in found], ["cases/zoom/CASE.md"], found)
+        self.assertIn("engine.candidate_version", found[0][1])
+        # front matter on the candidate, record on the verified engine: the record disagrees
+        write_case("zoom", "0.13.0", record="0.12.0")
+        found = messages()
+        self.assertEqual([path for path, _ in found], ["cases/zoom/expected.json"], found)
+        self.assertIn("differs from CASE.md engine 0.13.0", found[0][1])
+        # prose that names another engine than the candidate the case records
+        write_case("zoom", "0.13.0", prose="0.12.0", record="0.13.0", readme="Verified with os-optics 0.12.0.")
+        self.assertEqual([path for path, _ in messages()], ["cases/zoom/CASE.md", "cases/zoom/README.md"])
+        # an engine that is neither the verified nor the candidate one
+        write_case("zoom", "0.13.1", record="0.13.1")
+        found = messages()
+        self.assertEqual([path for path, _ in found], ["cases/zoom/CASE.md"], found)
+        self.assertIn("engine.verified_version 0.12.0 or engine.candidate_version 0.13.0", found[0][1])
+        # once no candidate is set, a case on an unverified engine is reported again
+        write_case("zoom", "0.13.0", record="0.13.0")
+        self.write("baseline.json", json.dumps(BASELINE))
+        found = [item for item in messages() if item[0].startswith("cases/zoom/")]
+        self.assertEqual([path for path, _ in found], ["cases/zoom/CASE.md"], found)
+        self.assertNotIn("candidate", found[0][1])
+
     def test_machine_paths_and_secrets_are_reported(self):
         self.write("cases/demo/notes.md", "\n".join([
             "C:" + "\\Users\\someone\\project", "E:" + "\\\\working\\\\x", "/home/" + "alice/run",
@@ -129,7 +254,9 @@ class RepositoryCheckTests(RepositoryTree):
             ("# Changelog\n\n## 0.0.9\n\n- x\n", "no section '## 0.1.0'"),
             ("# Changelog\n\n## 0.0.9\n\n## 0.1.0\n", "follows 0.0.9"),
             ("# Changelog\n\n## 0.1.0\n\n## 0.1.0\n", "appears twice"),
-            ("# Changelog\n\n## Unreleased\n\n## 0.1.0\n", "not a release version"),
+            ("# Changelog\n\n## Next\n\n## 0.1.0\n", "not a release version"),
+            ("# Changelog\n\n## 0.1.0\n\n## Unreleased\n", "comes before every release"),
+            ("# Changelog\n\n## Unreleased\n\n- x\n", "no section '## 0.1.0'"),
             ("# Changelog\n\n## 0.2.0\n\n## 0.1.0\n", "comes first"),
         ):
             with self.subTest(fragment=fragment):
@@ -143,6 +270,9 @@ class RepositoryCheckTests(RepositoryTree):
                 self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n")
                 self.assertEqual(self.problems("changelog"), [])
         self.write("CHANGELOG.md", "# Changelog\n\n## 0.1.0\n\n### Added\n\n## 0.0.10\n\n## 0.0.9\n")
+        self.assertEqual(self.problems("changelog"), [])
+        # changes merged since the last release are listed above it, under "## Unreleased"
+        self.write("CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n### Added\n\n- y\n\n## 0.1.0\n\n## 0.0.9\n")
         self.assertEqual(self.problems("changelog"), [])
         # a version bump without its section fails
         self.write("baseline.json", json.dumps(dict(BASELINE, kit_version="0.1.1")))
@@ -227,7 +357,7 @@ class RepositoryStateTests(unittest.TestCase):
     def test_this_repository_has_no_size_path_secret_json_or_baseline_problems(self):
         problems = [item for item in check_repo.run_checks(ROOT)["problems"]
                     if item["check"] in {"size", "forbidden", "paths", "secrets", "json", "baseline", "pins",
-                                         "ranges", "changelog"}]
+                                         "ranges", "statements", "cases", "changelog"}]
         self.assertEqual(problems, [])
 
     def test_the_source_archive_carries_the_changelog(self):
@@ -495,6 +625,42 @@ class WorkflowTests(unittest.TestCase):
         # both guards run before anything is built
         self.assertLess(build.index("--require-published"), build.index("python -m build"))
         self.assertLess(build.index("merge-base"), build.index("python -m build"))
+
+    def test_a_pull_request_moving_the_verified_baseline_fails_without_the_engine(self):
+        import textwrap
+        gate = self.step(self.job("ci.yml", "engine"), "Engine candidate gate result")
+        self.assertIn("BASELINE_MOVED_WITHOUT_ENGINE", gate)
+        # the comparison runs before the step reports a skip
+        self.assertLess(gate.index("BASELINE_MOVED_WITHOUT_ENGINE"), gate.index("ENGINE_CANDIDATE_NOT_PUBLISHED"))
+        script = textwrap.dedent(gate[gate.index("<<'PY'\n") + len("<<'PY'\n"):gate.index("\n          PY\n")])
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+
+            def git(*args):
+                return subprocess.run(["git", "-C", folder, "-c", "user.name=t", "-c", "user.email=t@example.org",
+                                       *args], capture_output=True, text=True, check=True).stdout.strip()
+
+            def commit(document):
+                (root / "baseline.json").write_text(json.dumps(document), encoding="utf-8")
+                git("add", "baseline.json")
+                git("commit", "-q", "-m", "baseline")
+                return git("rev-parse", "HEAD")
+
+            def moved(base):
+                code = subprocess.run([sys.executable, "-c", script, base], cwd=folder).returncode
+                return code != 0
+
+            git("init", "-q")
+            first = commit(BASELINE)
+            self.assertFalse(moved(first))
+            candidate = commit(dict(BASELINE, engine=dict(BASELINE["engine"], candidate_version="0.13.0")))
+            self.assertFalse(moved(first))  # naming a candidate does not move the verified baseline
+            commit(dict(BASELINE, engine=dict(BASELINE["engine"], verified_version="0.13.0")))
+            self.assertTrue(moved(candidate))
+            commit(dict(BASELINE, catalog=dict(BASELINE["catalog"], version="2026-11-24.1")))
+            self.assertTrue(moved(first))
 
 
 if __name__ == "__main__":

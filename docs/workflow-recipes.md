@@ -2,8 +2,8 @@
 
 [Agent guide](../AGENT_GUIDE.md). English-only reference for the kit's tools
 (`os-optics-kit <command>`) and the case workflows; read only the section the task needs.
-Each command's `--help` holds its complete specification. os-optics-kit 0.4.x works with
-os-optics 0.13 ([installation](https://github.com/JunLin615/os-optics/blob/main/docs/en/installation.md));
+Each command's `--help` holds its complete specification. os-optics-kit 0.4.x requires
+`os-optics>=0.14,<0.15` ([installation](https://github.com/JunLin615/os-optics/blob/main/docs/en/installation.md));
 the quoted results come from os-optics 0.13.0 and catalog release `2026-10-28.1`. Human
 walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 
@@ -232,7 +232,7 @@ waist target by an interval. Save as `edits.json`:
 os-optics-kit edit project.json --edits edits.json --out run-edit/project.json --run run-edit/run
 ```
 
-Result on catalog `2026-10-28.1`: exit 1, `run.outcome` `FAIL`, `expanded_waist`
+Result with os-optics 0.13.0 on catalog `2026-10-28.1`: exit 1, `run.outcome` `FAIL`, `expanded_waist`
 1.1148985411200965 mm outside 1.8–2.2 mm (a design that misses its target). The output
 is `run-edit/project.json` (the Engine-normalized Project),
 `run-edit/project.changes.json` (every op as given and normalized, before/after of each
@@ -273,7 +273,7 @@ os-optics-kit study bench --samples 24                        # 1, 2, 4 workers 
 | `--plan-only` | write the plan and stop (`PLANNED`, exit 0); `study run` executes it with the planning tool's analysis and presentation choice |
 | `--time-limit-s S`, `--max-memory-mib M` | per evaluation, read at Engine checkpoints (each phase change and inside long phases); the run stops at the next checkpoint: state `CANCELLED`, error code `RUN_STOPPED`, problem code `TIME_LIMIT` / `MEMORY_LIMIT` (`error_problems` in `table.csv`); a worker still busy 5 s past its time limit is terminated and recorded the same way; the serial scheduler has no other preemption |
 | `--ray-data full\|summary` | requested outputs: `summary` keeps chief rays only (same results and hashes) |
-| `--scheduler serial\|process`, `--evaluator module:function` | `study run` only: scheduler kind (`serial` with `--workers auto` runs serially); replace the Engine call by `f(request, sample_dir, limits) -> record` |
+| `--scheduler serial\|process`, `--evaluator module:function` | `study run` only: scheduler kind (`serial` with `--workers auto` runs serially); replace the Engine call by `f(request, sample_dir, limits) -> record` (default: the evaluator `study.json` records, as a compensated tolerance study does, else one Engine run; another one is refused with `EVALUATOR_MISMATCH`) |
 
 Files: `study.json` (tool keys + `schema` `os-optics-kit.study`, `identity` {plan hash,
 Engine version and build, catalog version and sha256, kit version}, `execution` {scheduler,
@@ -632,6 +632,7 @@ worker processes. Output: `DIR/workflow.json`, `DIR/nominal/`,
 | `BUDGET_INVALID` | workers x threads exceed the logical CPUs | fewer `--workers` |
 | `INTERRUPTED` | Ctrl-C outside a study execution; exit 130 | run the command again (a study continues with `study run DIR --resume`) |
 | `EVALUATOR_INVALID` | `--evaluator` cannot be imported, or a worker process needs a named function | give `module:function` of an importable module |
+| `EVALUATOR_MISMATCH` | `study run --evaluator` (or `tolerance` with `run_project`) names another evaluator than the one `study.json` records (`recorded`, `given`); nothing was written | leave `--evaluator` out: the recorded one is used |
 | `STUDY_NOT_RUN` | a reader (`study aggregate`, `plot sweep`, `report`, `compare`, `present`) got a planned study none of whose samples has a result | `next`: `study run DIR` (`--resume` after a cancellation) |
 | `STUDY_INCOMPLETE` | a reader other than `study aggregate` got a study executed in part and not aggregated since; `without_result` lists the samples | `next`: `study run DIR --resume`; or `study aggregate DIR` (exit 2 `INCOMPLETE`, the other samples as `NOT_RUN` rows) |
 | `STUDY_NOT_AGGREGATED` | every sample has a result, no `summary.json` | `study aggregate DIR` |
