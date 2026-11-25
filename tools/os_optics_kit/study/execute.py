@@ -22,7 +22,8 @@ studies (and of any caller that planned requests with ``store.plan_study``):
   records an evaluator refuses another one (``EVALUATOR_MISMATCH``, with ``recorded`` and ``given``) before anything
   is written;
 * ``resume=True`` keeps the samples whose record has the plan's ``request_hash``, state ``COMPLETED`` or
-  ``REFUSED`` and was produced by the same evaluator, reads back a complete run directory left without a record, and
+  ``REFUSED`` and was produced by the same evaluator, reads back a complete run directory left without a record when
+  the default evaluator wrote it (``store.recoverable_run``; another evaluator's interrupted sample runs again), and
   runs the rest; without it a study with results is refused (``STUDY_STARTED``). An evaluator without an importable
   ``module:function`` name has no identity: a resume runs its samples again;
 * a cancellation (``scheduler.cancel()``, Ctrl-C) stops handing out work, stops running evaluations at their next
@@ -32,6 +33,12 @@ studies (and of any caller that planned requests with ``store.plan_study``):
 A stopped evaluation has one record shape whatever stopped it: state ``CANCELLED``, error code ``RUN_STOPPED``, the
 cause as problem code (``TIME_LIMIT``, ``MEMORY_LIMIT``, ``STUDY_CANCELLED``, ``INTERRUPTED``), also when its worker
 process had to be terminated.
+
+The time limit applies to each Engine run (the Engine's run monitor stops a run at its next checkpoint). Behind it, a
+worker process still busy ``TIME_LIMIT_GRACE_S`` after the time limit times the most Engine runs one evaluation may
+make is terminated: one run for the default evaluator; an evaluator function with an ``engine_runs(labels)``
+attribute states its own (``study.compensation:run_compensated``: the as-built run, the trials and the compensated
+run), and the largest value over the plan is used.
 
 Every step is appended to ``journal.jsonl`` (``execution_started``, ``reused``, ``recovered``, ``refused``,
 ``started``, ``finished``, ``failed``, ``cancelled``, ``not_run``, ``stopped``, ``execution_finished``).
@@ -54,7 +61,7 @@ FINAL_STATES = ("COMPLETED", "REFUSED")
 #: Scheduler error codes of a job that was stopped -> the problem code of its ``RUN_STOPPED`` record (state
 #: ``CANCELLED``); any other scheduler error is recorded ``FAILED`` under its own code.
 STOP_CAUSES = {"CANCELLED": "STUDY_CANCELLED", "INTERRUPTED": "INTERRUPTED", "TIME_LIMIT": "TIME_LIMIT"}
-#: Seconds a cancelled worker gets beyond the time limit before it is terminated.
+#: Seconds a worker gets beyond its evaluation's time budget (time limit x Engine runs) before it is terminated.
 TIME_LIMIT_GRACE_S = 5.0
 
 
@@ -304,6 +311,23 @@ def recorded_evaluator(study):
     return recorded
 
 
+def engine_runs_per_evaluation(entries, evaluator_name, evaluator_function=None):
+    """The most Engine runs one evaluation of a plan entry may make: ``engine_runs(labels)`` of the evaluator
+    function (loaded by name when only the name is given) over the entries' labels, 1 for an evaluator without that
+    attribute (the default evaluator runs the Engine once)."""
+    function = evaluator_function
+    if function is None and evaluator_name not in (None, evaluators.DEFAULT_EVALUATOR):
+        try:
+            function = evaluators.load_evaluator(evaluator_name)
+        except wc.WorkflowError:
+            return 1  # the worker refuses it with the same error
+    count = getattr(function, "engine_runs", None)
+    if not callable(count):
+        return 1
+    runs = [count(entry.get("labels") or {}) for entry in entries]
+    return max([1, *[int(n) for n in runs if isinstance(n, int) and not isinstance(n, bool)]])
+
+
 def _evaluator_choice(evaluator, recorded=None):
     """``(name or None, function or None)``: a ``module:function`` text, or a function (named when importable).
 
@@ -344,8 +368,8 @@ def execute_study(study_dir, *, workers=1, scheduler=None, evaluator=None, limit
     (default: the evaluator ``study.json`` records, else ``evaluators.run_project``; a study that records one refuses
     another with ``EVALUATOR_MISMATCH`` before anything is written; a worker process needs an importable one; a
     function without an importable module-level name has no identity, so ``resume=True`` runs its samples again);
-    ``limits``: ``{"time_limit_s", "max_memory_mib"}`` per evaluation; ``stop_on``: outcome classes
-    (default: the study's ``stop_on``); ``on_progress(event)``: called in this process after every sample with
+    ``limits``: ``{"time_limit_s", "max_memory_mib"}`` per Engine run (module docstring); ``stop_on``: outcome
+    classes (default: the study's ``stop_on``); ``on_progress(event)``: called in this process after every sample with
     ``{sample_id, state, outcome, done, total}``; ``blas_threads``: threads per worker (default 1 with several
     workers). Refuses with ``STUDY_RUNNING`` while another execution owns the study.
 
@@ -416,7 +440,10 @@ def _execute(study_dir, owner, t0, *, workers, scheduler, evaluator, limits, res
     if owned:
         budget = ResourceBudget.resolve(workers, blas_threads=blas_threads, max_memory_mib=limits["max_memory_mib"],
                                         time_limit_s=limits["time_limit_s"])
-        timeout = None if limits["time_limit_s"] is None else limits["time_limit_s"] + TIME_LIMIT_GRACE_S
+        timeout = None
+        if limits["time_limit_s"] is not None:  # the time limit applies to each Engine run of an evaluation
+            runs = engine_runs_per_evaluation(entries, evaluator_name, evaluator_function)
+            timeout = limits["time_limit_s"] * runs + TIME_LIMIT_GRACE_S
         sched = schedulers.make_scheduler(scheduler, budget.workers, blas_threads=budget.blas_threads,
                                           job_timeout_s=timeout)
     else:

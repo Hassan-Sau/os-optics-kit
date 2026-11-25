@@ -41,7 +41,8 @@ os-optics-kit sweep sweep.json --base project.json --out study --workers 4
 工作进程数 x 线程数不超过逻辑 CPU 数；超过时请求被拒绝。工作进程启动之前，命令先取得每个 Project 指定的
 目录版本，因此能串行运行的研究也能用工作进程运行。`--time-limit-s` 和 `--max-memory-mib` 限制每次评估：
 引擎的运行监视器在检查点（每次阶段切换以及长阶段内部）读取它们并在该处停止运行；超过时间限制五秒仍未返回
-的工作进程会被终止。两种情况下样本都记为 `CANCELLED`，错误代码为 `RUN_STOPPED`，原因（`TIME_LIMIT`、
+的工作进程会被终止（带补偿的公差样本最多进行 `compensation.max_evaluations + 2` 次引擎运行，按相应倍数的
+时间限制计算）。两种情况下样本都记为 `CANCELLED`，错误代码为 `RUN_STOPPED`，原因（`TIME_LIMIT`、
 `MEMORY_LIMIT`）作为问题代码。串行调度器没有其他抢占方式。
 
 ## 中断、查看与续跑
@@ -64,10 +65,10 @@ os-optics-kit study run study --resume         # 只运行没有完成记录的�
 每条样本记录在结果类别（`outcome`）之外还有一个作业状态 `state`：`COMPLETED`（引擎给出结果或拒绝了该
 设计）、`REFUSED`（规划时无法构建该样本）、`FAILED`、`CANCELLED`（被限制或取消停止）或 `NOT_RUN`，并记录
 产生它的评估器 `evaluator`。续跑时保留请求未变、已完成且由同一评估器产生的记录，读回已完成但缺少记录的
-运行目录，并运行其余样本；`journal.jsonl` 记录哪些样本被复用、哪些实际运行。评估器以其 `module:function`
+运行目录（仅限默认评估器：其他评估器的记录包含的不止该次运行，这样的样本会重新运行），并运行其余样本；`journal.jsonl` 记录哪些样本被复用、哪些实际运行。评估器以其 `module:function`
 名称标识；从 Python 传入、没有这种名称的函数（lambda、嵌套函数）没有标识，续跑会重新运行它产生的样本，
 `study status` 会在 `resume_note` 中说明这一点。请求由其 Project、所选目标、
-请求的输出和种子的 SHA-256 标识：用 `--resume` 和修改后的规格重新运行工具时，只运行请求发生变化的样本
+请求的输出和种子（带补偿的公差样本还包括其补偿的目标函数、补偿器和求解设置）的 SHA-256 标识：用 `--resume` 和修改后的规格重新运行工具时，只运行请求发生变化的样本
 （保留的记录采用新规划的标签）；公差研究在种子不变时增大 `--samples`，已运行的样本保留。随附的工具在规划
 时抽取所有随机值（公差研究：由规格中的 `seed` 抽取，写入每个样本的 Project），因此其请求的 `seed` 为 null；
 自行抽取随机数的评估器可用 `sample_seed(study_seed, sample_id)` 得到请求种子，它与执行顺序无关。用其他引擎构建
