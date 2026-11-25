@@ -340,7 +340,7 @@ def test_out_of_bounds_growth_stays_finite(variable, value):
     adapter = _adapter(_problem(variables=[variable]))
     r = adapter.evaluate([value])
     assert r.reason["code"] == "OUT_OF_BOUNDS" and len(r.residuals) == 2
-    ceiling = math.sqrt(sys.float_info.max / 2)
+    ceiling = math.sqrt(sys.float_info.max / (2 * 2))
     assert r.residuals == [ceiling, ceiling] and math.isfinite(sum(x * x for x in r.residuals))
     violation = r.reason["violation"]
     assert violation is None or (math.isfinite(violation) and violation > 0)
@@ -678,3 +678,37 @@ def test_engine_finite_residual_whose_square_overflows_is_a_reason():
     assert math.isfinite(residual) and residual == pytest.approx(normal.residuals[0] * 0.02 / 1e-160)
     assert overflow.residuals == [1e3] and overflow.identity == normal.identity
     assert _strict_json(overflow)["reason"]["code"] == "AGGREGATE_NOT_FINITE"
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 7, 16, 63, 64, 101])
+def test_out_of_bounds_residuals_keep_the_sum_of_squares_finite_for_any_count(n):
+    objectives = [ea.Objective(f"o{i}", {"target": "spot"}, scale=1.0) for i in range(n)]
+    variable = ea.Variable("shift", [], (-1.0, 1.0), scale=1e-300)
+    r = _adapter(_problem(variables=[variable], objectives=objectives, constraints=[])).evaluate([2.0])
+    assert r.reason["code"] == "OUT_OF_BOUNDS" and len(r.residuals) == n
+    assert math.isfinite(sum(x * x for x in r.residuals))
+    _strict_json(r)
+
+
+def test_a_non_finite_candidate_value_serializes_as_strict_json():
+    r = _adapter().evaluate({"shift": math.nan})
+    assert not r.valid
+    assert _strict_json(r)["x"]["shift"] is None
+
+
+def test_an_infinite_engine_reading_serializes_as_strict_json():
+    r = _adapter(values={"spot": math.inf, "waist": 0.0}).evaluate({"shift": 0.0})
+    assert not r.valid
+    _strict_json(r)
+
+
+def test_the_overflow_message_names_what_overflowed_and_how_to_bring_it_into_range():
+    r = _adapter(_problem(objectives=[ea.Objective("a", {"target": "spot"}, weight=1e308, scale=1.0),
+                                      ea.Objective("b", {"target": "spot"}, weight=1e308, scale=1.0)],
+                          aggregation="sum_abs", constraints=[]), values={"spot": 0.9}).evaluate({"shift": 0.0})
+    assert r.reason["code"] == "AGGREGATE_NOT_FINITE"
+    message = r.reason["message"]
+    if r.reason["overflowed"] == ["objective"]:
+        assert "objective exceeds" in message and "smaller weights bring the objective into range" in message
+    else:
+        assert " exceed the float range" in message

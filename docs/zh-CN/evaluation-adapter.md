@@ -78,7 +78,7 @@ result = adapter.evaluate({"refocus": 0.3})   # 或 adapter.evaluate([0.3])，�
 | `reason` | 候选无效时：`code`、`stage`、`message` 及细节 |
 
 无效候选保持残差长度：每项为 `invalid_residual`（默认 1000；应取大于有效候选可能达到的任何残差），
-`OUT_OF_BOUNDS` 时随超出边界的距离增大，上限为 `sqrt(sys.float_info.max / len(residuals))`，使残差平方和保持有限
+`OUT_OF_BOUNDS` 时随超出边界的距离增大，上限为 `sqrt(sys.float_info.max / (2 * len(residuals)))`，使残差平方和不超过浮点范围的一半
 （距离本身溢出时 `violation` 为 `null`）。每个结果的 `residuals`、`objective` 和 `residual_objective` 都是有限数
 或 `null`，因此 `json.dumps(result.as_dict(), allow_nan=False)` 可以接受它们。`evaluate` 对任何候选都不抛出异常。
 原因代码：

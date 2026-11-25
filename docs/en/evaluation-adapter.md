@@ -86,7 +86,7 @@ it, and `feasible` is `null` when a constraint is not established.
 
 An invalid candidate keeps the residual length: each entry is `invalid_residual` (1000 by default; choose it above
 any residual a valid candidate reaches), and for `OUT_OF_BOUNDS` it grows with the distance outside the bounds, up
-to `sqrt(sys.float_info.max / len(residuals))` so that the sum of the squared residuals stays finite (`violation`
+to `sqrt(sys.float_info.max / (2 * len(residuals)))` so that the sum of the squared residuals stays within half the float range (`violation`
 is `null` when the distance itself overflows). `residuals`, `objective` and `residual_objective` are finite or
 `null` in every result, so `json.dumps(result.as_dict(), allow_nan=False)` accepts them. `evaluate` never raises
 for a candidate. Reason codes:

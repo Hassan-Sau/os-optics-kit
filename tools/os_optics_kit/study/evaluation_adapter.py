@@ -61,7 +61,7 @@ An invalid candidate carries ``reason`` = ``{"code", "stage", "message", ...}``,
 and residuals filled with ``invalid_residual`` (finite, so a least-squares solver can still step away from it); for
 ``OUT_OF_BOUNDS`` each entry is ``invalid_residual * (1 + d)`` with ``d`` the bound violation in variable scales
 (reason ``violation``; null when it overflows), so a farther candidate is worse; the growth stops at
-``sqrt(sys.float_info.max / len(residuals))`` (where the sum of the squared residuals would overflow) or at
+``sqrt(sys.float_info.max / (2 * len(residuals)))`` (the sum of the squared residuals stays within half the float range) or at
 ``invalid_residual`` when that is larger. Choose ``invalid_residual`` above the largest residual a valid candidate can
 reach (objective scales near the expected errors keep valid residuals near 1). Its ``evaluation`` is the empty scope
 when nothing ran. ``DEFAULT_IMAGING`` (``launch_grid`` 24) is the sampling of MTF readings unless ``Problem.imaging``
@@ -308,11 +308,24 @@ class CandidateResult:
     value_use: str = "exact"
 
     def as_dict(self) -> dict[str, Any]:
-        return {"x": dict(self.x), "valid": self.valid, "feasible": self.feasible, "objective": self.objective,
+        """The result as plain data that serializes as strict JSON: a non-finite number anywhere (an echoed candidate
+        value or Engine reading) is written as ``None``."""
+        return _json_safe({"x": dict(self.x), "valid": self.valid, "feasible": self.feasible, "objective": self.objective,
                 "residual_objective": self.residual_objective, "dls_compatible": self.dls_compatible,
                 "residuals": list(self.residuals), "residual_names": list(self.residual_names),
                 "value_use": self.value_use, "objectives": self.objectives, "constraints": self.constraints,
-                "reason": self.reason, "evaluation": self.evaluation, "identity": self.identity}
+                "reason": self.reason, "evaluation": self.evaluation, "identity": self.identity})
+
+
+def _json_safe(value: Any) -> Any:
+    """``value`` with every non-finite float replaced by ``None`` (dicts, lists and tuples walked)."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 class _Refused(Exception):
@@ -484,8 +497,8 @@ class Adapter:
         result.reason = reason
         result.valid = False
         base = self.problem.invalid_residual
-        # grown (OUT_OF_BOUNDS), never below invalid_residual, and short of overflowing the sum of squares
-        ceiling = max(base, math.sqrt(sys.float_info.max / max(1, self.size)))
+        # grown (OUT_OF_BOUNDS), never below invalid_residual; the sum of the squares stays within half the float range
+        ceiling = max(base, math.sqrt(sys.float_info.max / (2 * max(1, self.size))))
         result.residuals = [min(base * grow, ceiling)] * self.size
         if result.evaluation is None:
             result.evaluation = copy.deepcopy(EMPTY_SCOPE)
@@ -615,9 +628,11 @@ class Adapter:
                       if not math.isfinite(total)]
         if overflowed:
             largest = max(abs(r) for r in residuals)
+            verb = "exceeds" if len(overflowed) == 1 else "exceed"
+            advice = ("larger scales or smaller weights bring the residuals into range" if "residual_objective" in overflowed
+                      else "smaller weights bring the objective into range")
             raise _Refused("AGGREGATE_NOT_FINITE", "results",
-                           f"{' and '.join(overflowed)} exceeds the float range (largest residual {largest:.6g}); "
-                           "larger scales or smaller weights bring the residuals into range",
+                           f"{' and '.join(overflowed)} {verb} the float range (largest residual {largest:.6g}); {advice}",
                            overflowed=overflowed, aggregation=problem.aggregation,
                            residuals=[float(r) for r in residuals], largest_residual=float(largest))
         result.objective = objective
