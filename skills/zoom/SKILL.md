@@ -41,7 +41,9 @@ study, parameter `efl_mm`, for `compare`, `plot sweep`, `report`, `present`). Pe
 (rear focal point minus image plane along the axis), clearances, `status` (`PASS`, `FAIL`, `INFEASIBLE`,
 `UNSOLVED`) and `reasons` (`TRAVEL_EXCEEDED`, `CLEARANCE_VIOLATED`, `EFL_OUT_OF_TOLERANCE`,
 `FOCUS_OUT_OF_TOLERANCE`, `BRANCH_MISMATCH`, solver codes). Stdout: compact JSON with counts, coverage
-(`covered_fraction`, `pass_intervals_mm`), worst values, anchors and the samples that are not PASS. Exit 0 all PASS,
+(`covered_fraction`, `pass_intervals_mm`), worst values, anchors and the samples that are not PASS, all over the
+requested samples; an anchor outside the requested range seeds the solve and is reported apart under
+`anchors_outside_range`. Exit 0 all PASS,
 1 otherwise, 4 refused (`SPEC_INVALID`, `UNKNOWN_ID`, `OUTPUT_EXISTS`, `AXIS_FOLDED`, `IMAGE_PLANE_OFF_AXIS`).
 
 ## Minimal example

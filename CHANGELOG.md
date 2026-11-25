@@ -43,6 +43,25 @@ that are not in a release yet come first, under "Unreleased".
 
 ### Fixed
 
+- Tolerance compensation: `--resume` runs the compensated samples again when the objective, a compensator (ops,
+  nominal, bounds, tolerance, unit, name) or a solver setting changed, and keeps them when only a description changed;
+  a sample interrupted during its solve runs again instead of being recovered without its compensation; with
+  `--workers`, `--time-limit-s` applies to each Engine run of a compensated sample (the worker stop allows
+  `compensation.max_evaluations + 2` runs).
+- `field`: the chief ray's stop offset is measured from the centre of the stop's opening (`opening_center_mm`) in the
+  design frame, and the crossed stop is identified by its Engine surface id, so a stop holding a sample is recognised;
+  an unresolved crossing or stop geometry reads `CHIEF_RAY_STOP_UNRESOLVED`. The result lists `aperture_stops`. A plane
+  that only reflected paths reach is refused with `REFLECTED_PATH_UNSUPPORTED`.
+- `fans`: the engine's imaging spot is set beside a path's fans only when the imaging document is of the same run,
+  plane, source, wavelength, route and crossing; otherwise the fans are kept and `engine.spot_rms_comparison` gives the
+  reason (`IMAGING_CROSSING_MISMATCH`, `IMAGING_PATH_MISMATCH`, `IMAGING_RUN_MISMATCH`, ...).
+- `zoom`: an anchor outside the requested focal-length range no longer widens the pass intervals or coverage or changes
+  the counts, step statistics, worst values or status; it still seeds the solve and the branch check and is reported
+  under `anchors_outside_range`.
+- Evaluation adapter: finite residuals whose `objective` or `residual_objective` exceeds the float range give an invalid
+  result with the reason `AGGREGATE_NOT_FINITE` instead of a valid one with an infinite objective; the `OUT_OF_BOUNDS`
+  residual growth keeps the sum of squares within half the float range; every result serializes with
+  `json.dumps(..., allow_nan=False)`.
 - `summary`, `compare`, `report`, `edit --run` and `study run --resume` check a saved run's files against their
   recorded hashes again: with os-optics 0.14 the engine reads a run as stored unless asked to verify it. A run whose
   files do not verify is `HISTORICAL` (`RUN_UNVERIFIED`) and is never adopted as a study sample.

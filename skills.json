@@ -72,8 +72,8 @@
       "command": "os-optics-kit fans",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/fans/SKILL.md",
-      "tokens": 900,
-      "sha256": "0214e404f68b39965288ec181b6f22995ea915cb852913cae4114dc7b9e54e8a"
+      "tokens": 899,
+      "sha256": "a3e12bf00e8d218855d7a779dc964962103f092172c1b5f2b6a61a1d195404c3"
     },
     {
       "name": "field",
@@ -83,8 +83,8 @@
       "command": "os-optics-kit field",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/field/SKILL.md",
-      "tokens": 867,
-      "sha256": "bce437091c99b0f5715f822a87316589e95ae889e30cab811ef425774b9755fe"
+      "tokens": 898,
+      "sha256": "3c26e412fca2a140812ddc13cd3e483cfec482b88059cd2b7abfc9f3de80a5f7"
     },
     {
       "name": "measurements",
@@ -237,8 +237,8 @@
       "command": "os-optics-kit zoom",
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/zoom/SKILL.md",
-      "tokens": 816,
-      "sha256": "d18d7a000d9e947b15b647658350d42aa29be398adb45195652d726012aad406"
+      "tokens": 851,
+      "sha256": "bfae138c8f9ee6b25337444e1fb90267671937842e285a977a6b31d7c03adba7"
     }
   ]
 }
