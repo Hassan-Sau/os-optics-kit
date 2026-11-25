@@ -633,3 +633,413 @@ def test_engine_study_run_uses_the_recorded_compensation_evaluator(tmp_path):
     with pytest.raises(wc.WorkflowError) as caught:
         ex.execute_study(study_dir, evaluator=evaluators.run_project, resume=True)
     assert caught.value.code == "EVALUATOR_MISMATCH" and _tree(study_dir) == before
+
+
+# --------------------------------------------------------------------------------------------- resume identity
+
+def _normalized_plan(**changes):
+    """A normalized plan as ``compensation.normalize`` writes it (with its description keys); ``changes``:
+    ``comp.KEY`` (the compensator), ``term.KEY`` (the objective term) or a plan key."""
+    comp = {**COMP, "nominal_source": "given", "ops": [{"op": "transform", "translation_mm": ["$value", 0, 0]}]}
+    plan = {**PLAN, "compensators": [comp]}
+    for key, value in changes.items():
+        if key.startswith("comp."):
+            comp[key[5:]] = value
+        elif key.startswith("term."):
+            plan["objective"] = [{**plan["objective"][0], key[5:]: value}]
+        else:
+            plan[key] = value
+    return plan
+
+
+RESULT_CHANGES = {"term.goal": 1.0, "term.scale": 0.5, "term.target": "other", "term.unit": "um",
+                  "comp.name": "refocus2", "comp.unit": "um", "comp.nominal": 0.5, "comp.bounds": [-2.0, 2.0],
+                  "comp.tolerance": 1e-3, "comp.ops": [{"op": "transform", "translation_mm": [0, "$value", 0]}],
+                  "max_evaluations": 61, "max_sweeps": 4, "cost_tolerance": 1e-8}
+DESCRIPTION_CHANGES = {"comp.nominal_source": "default", "objective_definition": "another text",
+                       "solver": "another text"}
+
+
+@pytest.mark.parametrize("key", sorted(RESULT_CHANGES))
+def test_plan_identity_covers_every_result_setting(key):
+    assert cm.plan_identity(_normalized_plan(**{key: RESULT_CHANGES[key]})) != cm.plan_identity(_normalized_plan())
+
+
+@pytest.mark.parametrize("key", sorted(DESCRIPTION_CHANGES))
+def test_plan_identity_ignores_descriptions(key):
+    assert cm.plan_identity(_normalized_plan(**{key: DESCRIPTION_CHANGES[key]})) == cm.plan_identity(_normalized_plan())
+
+
+def _labels(plan, role="sample"):
+    from os_optics_kit.study import requests as rq
+
+    return {"role": role, cm.PLAN_LABEL: plan, rq.EVALUATION_LABEL: cm.plan_identity(plan)}
+
+
+def test_compensation_identity_enters_the_request_hash():
+    from os_optics_kit.study import requests as rq
+
+    def make(labels):
+        return rq.make_request("s0001", {"offset": 0.0}, selected_targets=["spot"], labels=labels)
+
+    base = make(_labels(_normalized_plan()))
+    assert make(_labels(_normalized_plan(**{"term.goal": 1.0})))["request_hash"] != base["request_hash"]
+    described = make(_labels(_normalized_plan(**DESCRIPTION_CHANGES)))
+    assert described["request_hash"] == base["request_hash"] and described["labels"] != base["labels"]
+    plain = make({"role": "sample"})  # a request without the label hashes as before
+    assert plain["request_hash"] == rq.request_hash({"offset": 0.0}, ["spot"], plain["outputs"], None)
+    assert plain["request_hash"] != base["request_hash"]
+    with pytest.raises(wc.WorkflowError) as caught:
+        make({"role": "sample", rq.EVALUATION_LABEL: "not a digest"})
+    assert caught.value.code == "REQUEST_INVALID"
+
+
+def goal_evaluator(request, sample_dir, limits=None):
+    """A stand-in compensated evaluator: the record's ``spot`` value is the plan's objective goal (0 without a plan),
+    and its ``compensation`` block names the objective it was evaluated with."""
+    plan = (request["labels"] or {}).get(cm.PLAN_LABEL)
+    goal = plan["objective"][0]["goal"] if plan else 0.0
+    record = _record(goal)
+    record["compensation"] = None if plan is None else {"state": cm.SOLVED, "objective": {"terms": plan["objective"]}}
+    return record
+
+
+GOAL = "tests.test_tolerance_compensation:goal_evaluator"
+
+
+def _header():
+    header = {"kind": "test.compensation", "engine": {}, "installed_catalog": {}}
+    if HAS_ENGINE:
+        header.update(engine=wc.engine_identity(), installed_catalog=wc.catalog_identity())
+    return header
+
+
+def _plan_requests(plan):
+    from os_optics_kit.study import requests as rq
+
+    out = [rq.make_request("s0000", {"offset": 0.0}, selected_targets=["spot"], labels={"role": "nominal"})]
+    for sample_id in ("s0001", "s0002"):
+        out.append(rq.make_request(sample_id, {"offset": 0.0, "id": sample_id}, selected_targets=["spot"],
+                                   labels=_labels(plan)))
+    return out
+
+
+def test_resume_with_a_changed_plan_runs_the_compensated_samples_again(tmp_path):
+    """Without an Engine: a changed result setting replaces the compensated records, a description change keeps them
+    (relabelled), and the nominal record is kept throughout."""
+    from os_optics_kit.study import execute as ex, store
+
+    study_dir = tmp_path / "s"
+    store.plan_study(study_dir, _header(), _plan_requests(_normalized_plan()))
+    first = ex.execute_study(study_dir, evaluator=GOAL)
+    assert (first.ran, first.reused) == (3, 0)
+    store.plan_study(study_dir, _header(), _plan_requests(_normalized_plan(**{"term.goal": 1.0})), resume=True)
+    changed = ex.execute_study(study_dir, evaluator=GOAL, resume=True)
+    assert (changed.ran, changed.reused, changed.recovered) == (2, 1, 0)
+    for sample_id in ("s0001", "s0002"):
+        record = store.read_record(study_dir, sample_id)
+        assert record["targets"][0]["value"] == 1.0
+        assert record["compensation"]["objective"]["terms"][0]["goal"] == 1.0
+        assert record[cm.PLAN_LABEL]["objective"][0]["goal"] == 1.0
+    same = ex.execute_study(study_dir, evaluator=GOAL, resume=True)
+    assert (same.ran, same.reused) == (0, 3)
+    described = _normalized_plan(**{"term.goal": 1.0, **DESCRIPTION_CHANGES})
+    store.plan_study(study_dir, _header(), _plan_requests(described), resume=True)
+    kept = ex.execute_study(study_dir, evaluator=GOAL, resume=True)
+    assert (kept.ran, kept.reused) == (0, 3)
+    record = store.read_record(study_dir, "s0001")
+    assert record[cm.PLAN_LABEL]["compensators"][0]["nominal_source"] == "default"  # relabelled
+    assert record["targets"][0]["value"] == 1.0
+
+
+# --------------------------------------------------------------------------------------------- interrupted samples
+
+def _interrupted_sample(study_dir, evaluator):
+    """A sample directory as an evaluation interrupted after its Engine run leaves it: attempt marker, run/ with a
+    manifest, no sample.json."""
+    from os_optics_kit.study import requests as rq, store
+
+    request = rq.make_request("s0001", {"offset": 0.0}, selected_targets=["spot"], labels=_labels(_normalized_plan()))
+    store.plan_study(study_dir, _header(), [request])
+    run_dir = store.sample_dir(study_dir, "s0001") / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    store.write_attempt(study_dir, "s0001", request["request_hash"], 1, evaluator=evaluator)
+    return store.read_plan(study_dir)[0]
+
+
+def test_interrupted_compensated_sample_is_not_read_back_from_its_as_built_run(tmp_path):
+    from os_optics_kit.study import store
+
+    entry = _interrupted_sample(tmp_path / "c", cm.EVALUATOR)
+    assert not store.recoverable_run(tmp_path / "c", entry, cm.EVALUATOR)
+    assert store.resume_selection(tmp_path / "c", [entry], cm.EVALUATOR) == ([], [], [entry])
+    entry = _interrupted_sample(tmp_path / "d", cm.evaluators.DEFAULT_EVALUATOR)  # the default evaluator's record
+    assert store.recoverable_run(tmp_path / "d", entry, cm.evaluators.DEFAULT_EVALUATOR)  # is its run: read back
+
+
+# --------------------------------------------------------------------------------------------- per-run time limit
+
+def _stopped(cause):
+    record = wc._empty_record(None, None, ["spot"])
+    record["error"] = {"stage": "run", "code": "RUN_STOPPED", "problems": [{"code": cause, "message": cause}]}
+    return record
+
+
+def _slow_run(sub, folder, limits):
+    """A stand-in Engine run of ``project.run_s`` seconds (``project.trial_s`` for a solver trial) that honours the
+    per-run time limit and a study cancellation as the Engine's run monitor does; spot = |offset - 0.25| + 0.01."""
+    import time
+
+    project = sub["project"]
+    seconds = project["trial_s"] if Path(folder).name == "trial" else project["run_s"]
+    limit = (limits or {}).get("time_limit_s")
+    started = time.monotonic()
+    while time.monotonic() - started < seconds:
+        if cm.evaluators.cancel_requested():
+            return _stopped("STUDY_CANCELLED")
+        if limit is not None and time.monotonic() - started > limit:
+            return _stopped("TIME_LIMIT")
+        time.sleep(0.01)
+    return _record(abs(project.get("offset", 0.0) - 0.25) + 0.01)
+
+
+def slow_compensated(request, sample_dir, limits=None):
+    """``compensation.run_compensated`` with ``_slow_run`` as its Engine (compensator offsets travel in the
+    Project); importable by name, so worker processes run it."""
+    saved = cm.compensated_document
+    cm.compensated_document = lambda doc, comps, offsets: {**doc, "offset": offsets[comps[0]["name"]]}
+    try:
+        return cm.run_compensated(request, sample_dir, limits, run=_slow_run)
+    finally:
+        cm.compensated_document = saved
+
+
+slow_compensated.engine_runs = cm.engine_runs  # type: ignore[attr-defined]
+SLOW = "tests.test_tolerance_compensation:slow_compensated"
+
+
+def _slow_requests(run_s=0.05, trial_s=None, samples=("s0001",)):
+    from os_optics_kit.study import requests as rq
+
+    project = {"offset": 0.0, "run_s": run_s, "trial_s": run_s if trial_s is None else trial_s}
+    out = [rq.make_request("s0000", {**project, "run_s": 0.01}, selected_targets=["spot"],
+                           labels={"role": "nominal"})]
+    for sample_id in samples:
+        out.append(rq.make_request(sample_id, {**project, "id": sample_id}, selected_targets=["spot"],
+                                   labels=_labels(PLAN)))
+    return out
+
+
+def test_engine_runs_per_evaluation_of_the_compensation_evaluator():
+    from os_optics_kit.study import execute as ex, store
+
+    entries = [store.plan_entry(r) for r in _slow_requests()]
+    assert cm.engine_runs(entries[1]["labels"]) == PLAN["max_evaluations"] + 2
+    assert ex.engine_runs_per_evaluation(entries, cm.EVALUATOR) == PLAN["max_evaluations"] + 2
+    assert ex.engine_runs_per_evaluation(entries[:1], cm.EVALUATOR) == 1  # the nominal run only
+    assert ex.engine_runs_per_evaluation(entries, cm.evaluators.DEFAULT_EVALUATOR) == 1
+
+
+def test_worker_time_stop_allows_every_engine_run_of_a_compensated_sample(tmp_path, monkeypatch):
+    """Process workers, 0.3 s per run: each of about 20 trials of 0.05 s stays within its own limit, so the sample
+    is solved, although the whole sample takes longer than one run's limit plus the grace."""
+    from os_optics_kit.study import execute as ex, store
+
+    monkeypatch.setattr(ex, "TIME_LIMIT_GRACE_S", 0.2)
+    study_dir = tmp_path / "s"
+    store.plan_study(study_dir, _header(), _slow_requests())
+    summary = ex.execute_study(study_dir, evaluator=SLOW, workers=2, limits={"time_limit_s": 0.3})
+    assert summary.scheduler == "process" and summary.states == {"COMPLETED": 2}
+    record = store.read_record(study_dir, "s0001")
+    assert record["state"] == "COMPLETED" and record["outcome"] == "PASS"
+    assert record["compensation"]["state"] == cm.SOLVED
+    assert record["compensation"]["evaluations"] * 0.05 > 0.3 + 0.2  # the sample outlasted one run's stop
+
+
+def test_trial_stopped_by_its_time_limit_keeps_the_as_built_result(tmp_path, monkeypatch):
+    from os_optics_kit.study import execute as ex, store
+
+    monkeypatch.setattr(ex, "TIME_LIMIT_GRACE_S", 0.2)
+    study_dir = tmp_path / "s"
+    store.plan_study(study_dir, _header(), _slow_requests(run_s=0.02, trial_s=5.0))
+    summary = ex.execute_study(study_dir, evaluator=SLOW, workers=2, limits={"time_limit_s": 0.3})
+    assert summary.states == {"COMPLETED": 2}
+    record = store.read_record(study_dir, "s0001")
+    assert (record["state"], record["outcome"], record["error"]) == ("COMPLETED", "PASS", None)
+    assert record["targets"][0]["value"] == pytest.approx(0.26)  # the as-built value
+    block = record["compensation"]
+    assert block["state"] == cm.FAILED and block["reason"]["code"] == "RUN_STOPPED"
+    assert block["reason"]["problems"] == ["TIME_LIMIT"] and block["compensated"] is None
+
+
+def test_cancelled_compensation_in_a_worker_is_resumed(tmp_path):
+    from os_optics_kit.study import execute as ex, schedulers, store
+
+    study_dir = tmp_path / "s"
+    store.plan_study(study_dir, _header(), _slow_requests(run_s=0.02, trial_s=0.2, samples=("s0001", "s0002")))
+    scheduler = schedulers.ProcessScheduler(2)
+    try:
+        summary = ex.execute_study(study_dir, evaluator=SLOW, scheduler=scheduler,
+                                   on_progress=lambda event: scheduler.cancel())  # after the nominal run
+    finally:
+        scheduler.close()
+    assert summary.state == "CANCELLED"
+    cancelled = store.read_record(study_dir, "s0001")
+    assert cancelled["state"] == "CANCELLED"
+    if cancelled.get("compensation"):  # stopped during its solve: the as-built result stays in the record
+        assert cancelled["compensation"]["reason"]["code"] == "RUN_STOPPED"
+        assert cancelled["targets"][0]["value"] == pytest.approx(0.26)
+    resumed = ex.execute_study(study_dir, evaluator=SLOW, resume=True)
+    assert resumed.state == "COMPLETED" and (resumed.reused, resumed.ran) == (1, 2)
+    for sample_id in ("s0001", "s0002"):
+        record = store.read_record(study_dir, sample_id)
+        assert record["state"] == "COMPLETED" and record["compensation"]["state"] == cm.SOLVED
+
+
+# --------------------------------------------------------------------------------------------- engine: resume
+
+def _refocus(goal=0.0, **compensation):
+    spec = json.loads(REFOCUS.read_text(encoding="utf-8"))
+    spec["samples"], spec["max_evaluations"] = 2, 3
+    spec["compensation"]["objective"][0]["goal"] = goal
+    spec["compensation"].update(compensation)
+    return spec
+
+
+def _solved_goals(study_dir):
+    """``{sample: (plan label goal, goal the solve used, state)}`` of the compensated samples."""
+    out = {}
+    for sample_id in ("s0001", "s0002"):
+        record = json.loads((study_dir / "samples" / sample_id / "sample.json").read_text(encoding="utf-8"))
+        block = record["compensation"]
+        out[sample_id] = (record[cm.PLAN_LABEL]["objective"][0]["goal"], block["objective"]["terms"][0]["goal"],
+                          block["state"])
+    return out
+
+
+@engine
+def test_engine_resume_with_a_changed_compensation_plan(tmp_path):
+    """refocus, objective goal 0 -> 1 mm: `tolerance --resume` and `tolerance --plan-only --resume` + `study run
+    --resume` run both compensated samples again with the new plan and keep the nominal run; the same plan, or one
+    that differs in its description only, reuses every sample."""
+    from os_optics_kit import study_tool as st
+    from os_optics_kit import tolerance_study as ts
+
+    study_dir = tmp_path / "s"
+    first = ts.run_tolerance(_refocus(0.0), study_dir, spec_dir=REFOCUS.parent, plots=False, report=False)
+    assert first["compensation"]["states"][cm.SOLVED] == 2
+    nominal = (study_dir / "samples/s0000/sample.json").read_bytes()
+    # path 1: tolerance --resume with the changed plan
+    changed = ts.run_tolerance(_refocus(1.0), study_dir, spec_dir=REFOCUS.parent, plots=False, report=False,
+                               resume=True)
+    brief = ts.compact(changed)["execution"]
+    assert (brief["ran"], brief["reused"], brief["recovered"]) == (2, 1, 0)
+    assert _solved_goals(study_dir) == {"s0001": (1.0, 1.0, cm.FAILED), "s0002": (1.0, 1.0, cm.FAILED)}
+    assert changed["compensation"]["objective"][0]["goal"] == 1.0
+    assert changed["compensation"]["failure_reasons"] == {"BOUNDS_HIT": 2}  # 1 mm spot: defocus to the bound
+    assert (study_dir / "samples/s0000/sample.json").read_bytes() == nominal
+    # path 2: plan only with the changed plan, then study run --resume
+    ts.run_tolerance(_refocus(0.0), study_dir, spec_dir=REFOCUS.parent, plots=False, report=False, resume=True,
+                     plan_only=True)
+    code, ran = _invoke(st.main, ["run", str(study_dir), "--resume"])
+    assert code in (0, 1) and (ran["execution"]["ran"], ran["execution"]["reused"]) == (2, 1)
+    assert _solved_goals(study_dir) == {"s0001": (0.0, 0.0, cm.SOLVED), "s0002": (0.0, 0.0, cm.SOLVED)}
+    records = _sample_records(study_dir)
+    assert {k: json.loads(v)["compensation"]["compensated"]["identity"]["result_hash"]
+            for k, v in records.items() if k != "s0000"} == {
+        r["sample_id"]: r["compensated:result_hash"] for r in first["rows"]}  # the first solve again
+    # the same plan, then one that differs only in its description and a nominal read instead of written: reused
+    described = _refocus(0.0, description="refocus, described again")
+    described["compensation"]["compensators"][0].pop("nominal")  # read from the base Project: 0 as written before
+    for spec in (_refocus(0.0), described):
+        again =ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False, resume=True)
+        brief = ts.compact(again)["execution"]
+        assert (brief["ran"], brief["reused"]) == (0, 3)
+        assert again["compensation"]["states"] == ran["compensation"]["states"]
+    record = json.loads((study_dir / "samples/s0001/sample.json").read_text(encoding="utf-8"))
+    assert record[cm.PLAN_LABEL]["compensators"][0]["nominal_source"] == "default"  # relabelled
+    assert {k: json.loads(v)["compensation"] for k, v in _sample_records(study_dir).items()} == {
+        k: json.loads(v)["compensation"] for k, v in records.items()}
+
+
+# --------------------------------------------------------------------------------------------- engine: interrupted
+
+def _interrupt(study_dir, sample_id, evaluator):
+    """What an evaluation interrupted after its as-built Engine run leaves: the run directory, the attempt marker,
+    no sample.json."""
+    from os_optics_kit.study import store
+
+    request = store.read_request(study_dir, sample_id)
+    store.sample_path(study_dir, sample_id).unlink()
+    store.write_attempt(study_dir, sample_id, request["request_hash"], 1, evaluator=evaluator, execution="gone")
+    assert (store.sample_dir(study_dir, sample_id) / "run" / "manifest.json").is_file()
+
+
+@engine
+def test_engine_interrupted_compensation_runs_again_on_resume(tmp_path):
+    """An attempt marker and a verified as-built run directory without sample.json: the resume runs the sample
+    again and records the full compensated result (twice in a row); the next resume reuses it."""
+    from os_optics_kit import tolerance_study as ts
+
+    spec = _refocus(0.0)
+    study_dir = tmp_path / "s"
+    first = ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False)
+    expected = {r["sample_id"]: (r["result_hash"], r["compensation:state"], r["compensated:result_hash"])
+                for r in first["rows"]}
+    assert all(state == cm.SOLVED for _h, state, _c in expected.values())
+    for _round in range(2):
+        _interrupt(study_dir, "s0001", cm.EVALUATOR)
+        resumed = ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False,
+                                   resume=True)
+        brief = ts.compact(resumed)["execution"]
+        assert (brief["ran"], brief["reused"], brief["recovered"]) == (1, 2, 0)
+        record = json.loads((study_dir / "samples/s0001/sample.json").read_text(encoding="utf-8"))
+        assert record["worker"] != "recovered" and record["compensation"]["state"] == cm.SOLVED
+        assert {r["sample_id"]: (r["result_hash"], r["compensation:state"], r["compensated:result_hash"])
+                for r in resumed["rows"]} == expected
+        assert resumed["compensation"]["states"] == {cm.SOLVED: 2, cm.FAILED: 0, cm.NOT_EVALUATED: 0}
+        again = ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False, resume=True)
+        assert (ts.compact(again)["execution"]["ran"], ts.compact(again)["execution"]["reused"]) == (0, 3)
+        assert again["compensation"]["states"] == resumed["compensation"]["states"]
+
+
+@engine
+def test_engine_interrupted_plain_tolerance_sample_is_still_read_back(tmp_path):
+    from os_optics_kit import tolerance_study as ts
+
+    spec = _refocus(0.0)
+    study_dir = tmp_path / "s"
+    first = ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False,
+                             compensation=False)
+    _interrupt(study_dir, "s0001", cm.evaluators.DEFAULT_EVALUATOR)
+    resumed = ts.run_tolerance(spec, study_dir, spec_dir=REFOCUS.parent, plots=False, report=False,
+                               compensation=False, resume=True)
+    brief = ts.compact(resumed)["execution"]
+    assert (brief["ran"], brief["reused"], brief["recovered"]) == (0, 2, 1)
+    record = json.loads((study_dir / "samples/s0001/sample.json").read_text(encoding="utf-8"))
+    assert record["worker"] == "recovered"
+    assert [r["result_hash"] for r in resumed["rows"]] == [r["result_hash"] for r in first["rows"]]
+
+
+# --------------------------------------------------------------------------------------------- engine: time limit
+
+@engine
+def test_engine_worker_time_stop_counts_every_engine_run_of_a_sample(tmp_path, monkeypatch):
+    """Two workers and a 1 s limit per Engine run (each run of this design takes a fraction of it): about 34 trials
+    make one sample longer than a single run's limit, and the sample is still solved, not terminated."""
+    from os_optics_kit import tolerance_study as ts
+    from os_optics_kit.study import execute as ex
+
+    monkeypatch.setattr(ex, "TIME_LIMIT_GRACE_S", 0.0)
+    spec = _refocus(0.0)
+    spec["samples"], spec["max_evaluations"] = 1, 2
+    spec["compensation"]["compensators"][0]["tolerance"] = 1e-6
+    summary = ts.run_tolerance(spec, tmp_path / "s", spec_dir=REFOCUS.parent, plots=False, report=False,
+                               workers=2, limits={"time_limit_s": 1.0})
+    brief = ts.compact(summary)
+    assert brief["execution"]["scheduler"] == "process" and brief["execution"]["ran"] == 2
+    record = json.loads((tmp_path / "s/samples/s0001/sample.json").read_text(encoding="utf-8"))
+    assert record["state"] == "COMPLETED" and record["error"] is None
+    assert record["compensation"]["state"] == cm.SOLVED and record["compensation"]["evaluations"] > 20
+    assert record["timing"]["run_s"] < 1.0  # the as-built run alone is well within its limit

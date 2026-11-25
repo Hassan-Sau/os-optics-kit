@@ -81,8 +81,12 @@ NOT_EVALUATED (COMPENSATION_NOT_RUN: run without the compensation evaluator). Th
 os_optics_kit.study.compensation:run_compensated; --plan-only prints the study run command with it. Runs: the
 top-level max_evaluations caps nominal + samples; each sample adds at most compensation.max_evaluations trials and one
 compensated run (runs_max = 1 + samples * (compensation.max_evaluations + 2)); --time-limit-s and --max-memory-mib
-apply to each Engine run. counts, the exit code and target_distributions are the as-built outcomes; the
-compensation block (summary.json and stdout) holds the stage counts, solve states and failure reasons.
+apply to each Engine run, and a worker process (--workers) is terminated only when a sample passes the time limit
+times its compensation.max_evaluations + 2 runs, plus 5 s. counts, the exit code and target_distributions are the
+as-built outcomes; the compensation block (summary.json and stdout) holds the stage counts, solve states and failure
+reasons. --resume runs the compensated samples again when the objective, a compensator (ops, nominal, bounds,
+tolerance, unit, name) or a solver setting changed, and keeps them when only a description changed; a sample
+interrupted during its solve runs again.
 
 Stdout: one compact JSON document (counts with denominators, target distributions, samples whose runs carry
 warnings, unsuccessful samples, execution, compensation when declared). Exit 0 completed with at least one PASS
@@ -101,6 +105,7 @@ from . import workflow_common as wc
 from . import sweep_parameters as sweep
 from . import sensitivity_analysis as sa
 from .study import aggregate as agg, compensation as comp_mod, evaluators, options as opts, progress, store
+from .study import requests as rq
 
 PROG = "os-optics-kit tolerance"
 KIND = "opensci-example.tolerance-study"
@@ -437,7 +442,8 @@ def plan_tolerance(spec, study_dir, *, base=None, build=None, base_path=None, sp
         zero_tolerance=zero_tolerance, plots=plots, report=report, compensation=compensation)
     parameters = normalized["parameters"]
     plan = normalized.get("compensation")
-    sample_labels = {"role": "sample"} if plan is None else {"role": "sample", comp_mod.PLAN_LABEL: plan}
+    sample_labels = {"role": "sample"} if plan is None else {
+        "role": "sample", comp_mod.PLAN_LABEL: plan, rq.EVALUATION_LABEL: comp_mod.plan_identity(plan)}
     requests = [sa.offset_request("s0000", document, parameters, {}, build=None, targets=targets,
                                   labels={"role": "nominal"}, outputs=outputs)]
     for sample_id, offsets in drawn:

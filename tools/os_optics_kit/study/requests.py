@@ -17,7 +17,10 @@ tools; a record key such as ``targets`` cannot be a label). ``outputs`` selects 
 ray-data level ``full`` or ``summary``); numerical fidelity is the Project's own ``compute_budget``. ``seed`` is null
 unless the evaluator uses randomness; ``sample_seed`` derives one from the study seed and the sample id, independent
 of execution order. ``request_hash`` is the SHA-256 of the canonical JSON of ``project``, ``selected_targets``,
-``outputs`` and ``seed`` (and of ``refusal`` for a refused request): a saved sample is reused only while it matches.
+``outputs`` and ``seed`` (and of ``refusal`` for a refused request, and of the label ``evaluation_sha256`` when a
+request carries one): a saved sample is reused only while it matches. ``evaluation_sha256`` is the SHA-256 of the
+evaluator settings a request carries in its labels that decide its result (a compensated tolerance sample: the
+result-affecting part of its compensation plan); every other label is bookkeeping and leaves the hash unchanged.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ REQUEST_SCHEMA = "os-optics-kit.study-request"
 REQUEST_SCHEMA_VERSION = 1
 RAY_DATA_LEVELS = ("full", "summary")
 DEFAULT_OUTPUTS = {"run_directory": True, "ray_data": "full"}
+#: Label holding the SHA-256 of the evaluator settings carried in the labels that decide the result (module docstring).
+EVALUATION_LABEL = "evaluation_sha256"
 #: Sample ids are lower-case ASCII so they can name directories and presentation sources.
 SAMPLE_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 #: Names Windows reserves for devices: never a sample directory.
@@ -74,11 +79,14 @@ def normalize_outputs(outputs):
     return merged
 
 
-def request_hash(project, selected_targets, outputs, seed, refusal=None):
-    """SHA-256 of the canonical JSON of what decides an evaluation's result and saved outputs."""
+def request_hash(project, selected_targets, outputs, seed, refusal=None, evaluation=None):
+    """SHA-256 of the canonical JSON of what decides an evaluation's result and saved outputs (``evaluation``: the
+    request's ``evaluation_sha256`` label, None when it has none)."""
     basis = {"project": project, "selected_targets": selected_targets, "outputs": outputs, "seed": seed}
     if refusal is not None:
         basis["refusal"] = refusal
+    if evaluation is not None:
+        basis["evaluation"] = evaluation
     return wc.canonical_digest(basis)
 
 
@@ -94,7 +102,8 @@ def make_request(sample_id, project, *, labels=None, selected_targets=None, outp
         "labels": wc.json_safe(labels or {}), "outputs": normalize_outputs(outputs), "seed": seed,
     }
     request["request_hash"] = request_hash(request["project"], request["selected_targets"], request["outputs"],
-                                           request["seed"], request["refusal"])
+                                           request["seed"], request["refusal"],
+                                           request["labels"].get(EVALUATION_LABEL))
     return validate_request(request)
 
 
@@ -126,12 +135,16 @@ def validate_request(request):
     if clashes:
         raise wc.WorkflowError("REQUEST_INVALID", f"{sample_id}: labels may not use the record keys {clashes}",
                                sample_id=sample_id)
+    evaluation = request["labels"].get(EVALUATION_LABEL)
+    if evaluation is not None and not (isinstance(evaluation, str) and re.fullmatch(r"[0-9a-f]{64}", evaluation)):
+        raise wc.WorkflowError("REQUEST_INVALID", f"{sample_id}: labels.{EVALUATION_LABEL} is a SHA-256 hex digest",
+                               sample_id=sample_id)
     seed = request.get("seed")
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
         raise wc.WorkflowError("REQUEST_INVALID", f"{sample_id}: seed is a non-negative integer or null",
                                sample_id=sample_id)
     outputs = normalize_outputs(request.get("outputs"))
-    expected = request_hash(project, targets, outputs, seed, refusal)
+    expected = request_hash(project, targets, outputs, seed, refusal, evaluation)
     if request.get("request_hash") != expected:
         raise wc.WorkflowError("REQUEST_INVALID", f"{sample_id}: request_hash does not match the request content",
                                sample_id=sample_id, expected=expected, found=request.get("request_hash"))

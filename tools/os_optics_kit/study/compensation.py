@@ -52,7 +52,17 @@ never ``FAILED``.
 Runs: the tolerance spec's top-level ``max_evaluations`` caps the planned runs (nominal + one per sample); each
 sample then runs at most ``compensation.max_evaluations`` trials plus one final compensated run, so a study runs at
 most ``1 + samples * (compensation.max_evaluations + 2)`` Engine runs (``runs_max``). ``--time-limit-s`` and
-``--max-memory-mib`` apply to each Engine run (the as-built run, each trial, the compensated run).
+``--max-memory-mib`` apply to each Engine run (the as-built run, each trial, the compensated run); a worker process
+is terminated only when one sample's evaluation passes ``engine_runs`` times the time limit plus the executor's grace
+(``execute.TIME_LIMIT_GRACE_S``).
+
+Identity: each sample request carries the plan (label ``compensation_plan``) and the SHA-256 of its result-affecting
+settings (label ``evaluation_sha256``, ``plan_identity``: objective terms, compensators with their ops, nominal,
+bounds and tolerance, ``max_evaluations``, ``max_sweeps``, ``cost_tolerance``), which enters the request hash. A
+resume with a changed plan therefore runs the compensated samples again (the nominal run is kept); a change that
+leaves these settings as they are (a description, whether a nominal was given or read from the base Project) keeps
+them. An evaluation interrupted after its as-built run is run again on resume: the saved as-built run directory alone
+is not the evaluator's result.
 """
 
 from __future__ import annotations
@@ -177,6 +187,30 @@ def runs_max(plan, samples):
     """Most Engine runs of a compensated study: nominal, then per sample the as-built run, the trials and the
     compensated run."""
     return 1 + samples * (plan["max_evaluations"] + 2)
+
+
+#: Keys of a normalized plan that decide a compensated result (``plan_identity``); the others are descriptions.
+IDENTITY_KEYS = {"objective": ("target", "unit", "goal", "scale"),
+                 "compensators": ("name", "unit", "nominal", "ops", "bounds", "tolerance")}
+
+
+def plan_identity(plan):
+    """SHA-256 of the settings of a normalized plan that decide a compensated result: the objective terms, the
+    compensators (name, unit, nominal, ops, bounds, tolerance) and the solver settings ``max_evaluations``,
+    ``max_sweeps`` and ``cost_tolerance``. Descriptions (``nominal_source``, ``objective_definition``, ``solver``)
+    are left out."""
+    basis = {key: [{field: entry.get(field) for field in fields} for entry in plan[key]]
+             for key, fields in IDENTITY_KEYS.items()}
+    basis.update({key: plan[key] for key in ("max_evaluations", "max_sweeps", "cost_tolerance")})
+    return wc.canonical_digest(basis)
+
+
+def engine_runs(labels):
+    """Most Engine runs one evaluation by ``run_compensated`` makes for a request with ``labels``: the as-built run,
+    then with a plan at most ``max_evaluations`` trials and the compensated run (the executor scales the worker's
+    hard time stop by it)."""
+    plan = (labels or {}).get(PLAN_LABEL)
+    return 1 if not isinstance(plan, dict) else 1 + int(plan.get("max_evaluations") or DEFAULTS["max_evaluations"]) + 1
 
 
 # --------------------------------------------------------------------------------------------- plan-time checks
@@ -461,6 +495,8 @@ def compensate(request, record, sample_dir, plan, run=None, limits=None):
     evaluates one Project (default ``evaluators.run_project``)."""
     run = evaluators.run_project if run is None else run
     sample_dir = Path(sample_dir)
+    for stale in ("compensation", "compensated"):  # files of an interrupted or superseded evaluation
+        shutil.rmtree(sample_dir / stale, ignore_errors=True)
     compensators, terms = plan["compensators"], plan["objective"]
     block = {"state": FAILED, "reason": None, "objective": {"as_built": None, "compensated": None, "terms": terms},
              "compensators": {c["name"]: {"offset": None, "value": None, "unit": c["unit"], "bounds": c["bounds"]}
@@ -527,21 +563,26 @@ def compensate(request, record, sample_dir, plan, run=None, limits=None):
     return block
 
 
-def run_compensated(request, sample_dir, limits=None):
+def run_compensated(request, sample_dir, limits=None, run=None):
     """Evaluator of a compensated tolerance study: the as-built run (the sample record, as ``run_project``), then
-    for a sample with a compensation plan the solve and the compensated run (``record["compensation"]``)."""
-    record = evaluators.run_project(request, sample_dir, limits)
+    for a sample with a compensation plan the solve and the compensated run (``record["compensation"]``).
+    ``run(sub_request, folder, limits)`` evaluates one Project (default ``evaluators.run_project``)."""
+    run = evaluators.run_project if run is None else run
+    record = run(request, sample_dir, limits)
     plan = (request.get("labels") or {}).get(PLAN_LABEL)
     if plan is None:
         record["result_stage"] = "nominal" if (request.get("labels") or {}).get("role") == "nominal" else "as_built"
         record["compensation"] = None
         return record
     record["result_stage"] = "as_built"
-    block = compensate(request, record, sample_dir, plan, limits=limits)
+    block = compensate(request, record, sample_dir, plan, run=run, limits=limits)
     record["compensation"] = block
     if (block.get("reason") or {}).get("code") == "RUN_STOPPED" and evaluators.cancel_requested():
         record["state"] = "CANCELLED"  # the study was cancelled during the solve: a resume evaluates it again
     return record
+
+
+run_compensated.engine_runs = engine_runs  # type: ignore[attr-defined]
 
 
 # --------------------------------------------------------------------------------------------- aggregation

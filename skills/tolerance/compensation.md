@@ -45,7 +45,12 @@ minimise the objective are solved and the compensated Project is run.
   command names it; `study run --evaluator` with another one is refused before anything is written
   (`EVALUATOR_MISMATCH`, with `recorded` and `given`).
 - Runs: at most `runs_max = 1 + samples * (compensation.max_evaluations + 2)`. The top-level `max_evaluations`
-  caps nominal + samples only. `--time-limit-s` and `--max-memory-mib` apply to each Engine run.
+  caps nominal + samples only. `--time-limit-s` and `--max-memory-mib` apply to each Engine run; a worker is
+  terminated only after the time limit times `compensation.max_evaluations + 2`, plus 5 s. A trial stopped by the
+  time limit fails the solve (`RUN_STOPPED`) and keeps the as-built result.
+- `--resume` runs the compensated samples again (the nominal run is kept) after a change to the objective, a
+  compensator (name, unit, nominal, ops, bounds, tolerance) or a solver setting; a description change keeps them. A
+  sample interrupted during its solve runs again.
 
 Examples: `cases/expansion-focus/studies/tolerance_expander_refocus.json` (refocus),
 `cases/mirror-alignment/studies/tolerance_alignment_compensated.json` (mirror alignment).
