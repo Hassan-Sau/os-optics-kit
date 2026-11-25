@@ -133,7 +133,7 @@ def case_files(case_dir: Path, *, summary: str = "A short summary.", body_extra:
 
 VERIFIED = {"engine": "0.12.0", "catalog": None}
 #: the verified run of cases/ideal-lens-focus (the source of demo_case)
-DEMO_VERIFIED = {"engine": "0.13.0", "catalog": None}
+DEMO_VERIFIED = {"engine": "0.14.0", "catalog": None}
 CLASSIFIED = {"class": "free-space", "domain": "gaussian-beam", "provenance": "self-built",
               "publication": "own-work", "tags": "beam-expander, focusing"}
 ISO_RECORD = {"file": "images/iso.png", "kind": "system-view", "options": ["--views", "iso", "--size", "960x540"],

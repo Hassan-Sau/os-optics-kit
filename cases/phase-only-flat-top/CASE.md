@@ -6,7 +6,7 @@ class: free-space
 domain: beam-shaping, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: present
@@ -20,7 +20,7 @@ A 532 nm, 10 mW beam feeds a phase-only Fourier design. A circular super-Gaussia
 
 ## Run
 
-Use Python 3.12+ with os-optics 0.13.0 and os-optics-kit 0.4.0. In a copied case directory:
+Use Python 3.12+ with os-optics 0.14.0 and os-optics-kit 0.4.0. In a copied case directory:
 
 ```bash
 python -m pip install -r requirements-flat-top.txt
@@ -37,7 +37,7 @@ Native target: illumination 1/e² radius 0.749–0.752 mm. External observables:
 
 ## Baseline
 
-No catalog. Scalar, coherent, paraxial model; continuous lossless phase and ideal f = 100 mm Fourier lens. Smooth energy transport initializes 251 Gerchberg–Saxton updates minimizing target-intensity error. Independent checks use complex-q propagation, direct Fourier quadrature, power conservation and a half-pitch evaluation of the fixed mask.
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`), in vacuum (`environment.pressure_pa` 0), the medium of its os-optics 0.13.0 record; os-optics 0.14 propagates in standard air when a Project states no environment. Scalar, coherent, paraxial model; continuous lossless phase and ideal f = 100 mm Fourier lens. Smooth energy transport initializes 251 Gerchberg–Saxton updates minimizing target-intensity error. Independent checks use complex-q propagation, direct Fourier quadrature, power conservation and a half-pitch evaluation of the fixed mask.
 
 ## Files
 

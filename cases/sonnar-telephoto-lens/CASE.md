@@ -6,7 +6,7 @@ class: lens
 domain: imaging, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: none
@@ -53,10 +53,9 @@ Both bound the arriving beam's ray-footprint RMS.
 
 ## Baseline
 
-os-optics 0.13.0, catalog-free: status `WARNING`, outcome `PARTIAL`. The untraced-light probe
-stopped on its path budget; it is a separate model from the imaging quantities, which are all
-KNOWN, and the power ledger balances (`conserved true`, residual 2.1e-16 W).
-`os-optics-kit cases verify sonnar-telephoto-lens` repeats the run and compares it.
+os-optics 0.14.0, vacuum, lossless glass: status `WARNING`, outcome `COMPLETED` (0.13.0: `PARTIAL`). The
+untraced-light probe stops on its path budget, separate from the imaging quantities (all KNOWN);
+the power ledger balances (`conserved true`, residual 2.1e-16 W). `cases verify` repeats the run.
 
 ## Files
 

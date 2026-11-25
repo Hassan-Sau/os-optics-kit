@@ -65,14 +65,16 @@ constraint in this case forbids.
 
 **The geometric MTF is the wrong metric here, and the engine says so.** Every field's
 `geometric_mtf_*` quantity comes back `OUT_OF_MODEL_SCOPE` with the reason
-`GEOMETRIC_REGIME_NOT_MET`: *"the wavefront error (0.126 waves RMS) is below 1.0 wave: diffraction
-sets the MTF here, and the diffraction MTF is the one to read"*. The better the image, the less the
+`GEOMETRIC_REGIME_NOT_MET`: *"diffraction sets the MTF here: read
+mtf_tangential"* (the wavefront error, 0.126 waves RMS, is below one wave). The better the image, the less the
 geometric MTF applies — its premise is a large aberration. A case that reported the ray-based MTF
 for this lens would be quoting a quantity the engine refuses to stand behind.
 
-**The run status is WARNING, and that is a property of the engine, not the lens.** The engine's
+**The stray-light search runs out of paths, a property of the engine, not the lens.** The engine's
 stray-light search follows every reflection branch inside the glass with an unbounded recursion, so
-any transmission lens eventually exhausts its path budget:
+any transmission lens eventually exhausts its path budget. With os-optics 0.14.0 the run still completes
+(execution COMPLETED, run status PASS; os-optics 0.13.0 reported PARTIAL and WARNING), and the budget stays
+reported:
 
 | field | value |
 | --- | --- |
@@ -82,7 +84,9 @@ any transmission lens eventually exhausts its path budget:
 | power at the image plane | 0.00094 W, every line `conserved: true` |
 
 The main beams are traced in full: all nine sources are `DETECTED`, all nine targets are MET.
-Raising `max_paths` only lengthens the run; it does not change the answer.
+Raising `max_paths` only lengthens the run; it does not change the answer. Verified with os-optics 0.14.0, in
+vacuum (`environment.pressure_pa` 0) with lossless glass (`absorption_coefficient_per_mm` 0), the medium and glass
+of the first record: every target and imaging quantity equals its os-optics 0.13.0 value.
 
 **Why 89.5 % of the power is untraced here, and why it does not bias the image.** These are
 uncoated surfaces, and mid-wave infrared materials reflect hard: silicon at n = 3.43 reflects 0.30

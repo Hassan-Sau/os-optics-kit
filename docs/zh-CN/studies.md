@@ -163,7 +163,7 @@ if __name__ == "__main__":
 
 ## 何时值得并行
 
-工作进程只付出一次启动开销（创建进程并导入引擎）。下表是在有 12 个逻辑 CPU 的 Windows 台式机上用
+工作进程只付出一次启动开销（创建进程并导入引擎）。下表是在有 12 个逻辑 CPU 的 Windows 台式机上，以
 os-optics 0.13.0 运行 `python scripts/bench_study.py --workers 1,2,4 --samples 48` 的结果，每个工作进程数
 各运行一次：
 

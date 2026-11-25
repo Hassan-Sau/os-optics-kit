@@ -6,7 +6,7 @@ class: free-space
 domain: wavefront-control, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: present
@@ -46,7 +46,7 @@ Transmitted power is 18.60305 mW in every phase state.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog; external workflow Python 3.12+ (verified 3.14.8), NumPy 2.5.4, SciPy 1.18.1,
+os-optics 0.14.0, no catalog, vacuum (`environment.pressure_pa` 0, as on 0.13.0); external workflow Python 3.12+ (verified 3.14.8), NumPy 2.5.4, SciPy 1.18.1,
 Matplotlib 3.11.2. Default runtime about 3 s. ABCD q error <6e-15;
 Parseval error <7e-16. Independent polar quadrature differs by <0.00073
 for the two documented runs. Sensor is noiseless; scalar paraxial optics,

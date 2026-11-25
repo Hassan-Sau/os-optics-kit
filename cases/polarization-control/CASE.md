@@ -6,7 +6,7 @@ class: free-space
 domain: polarization
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: edit, sweep, compare, plot, report, sensitivity, tolerance
@@ -47,7 +47,7 @@ wavelength gives 3 PASS, 6 FAIL and 9 out of model (every 1064 nm sample).
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`).
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`).
 `os-optics-kit cases verify polarization-control` repeats the run and compares it.
 
 ## Files

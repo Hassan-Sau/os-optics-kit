@@ -96,8 +96,9 @@ its geometric MTF as well.
 
 ## Run status
 
-The run is `PARTIAL` with validation status `WARNING`. The engine's untraced-light enumeration — a
-recursive probe that follows ghost reflections and clipped light — stopped on its path budget. That
+The run is `COMPLETED` with validation status `WARNING` (os-optics 0.13.0 reported it `PARTIAL`). The engine's
+untraced-light enumeration — a recursive probe that follows ghost reflections and clipped light — stops on its path
+budget (`max_paths`); os-optics 0.14 records that budget as exhausted without making the run PARTIAL. That
 probe is a **different model** from the imaging quantities: it asks whether light could reach a
 plane that no traced beam reaches, and it is unbounded for any transmissive prescription because the
 probe can keep re-entering the glass. The imaging quantities are all KNOWN and independent of it.
@@ -105,6 +106,11 @@ probe can keep re-entering the glass. The imaging quantities are all KNOWN and i
 The power ledger balances: `conserved true`, residual 2.1e-16 W. Each uncoated glass-to-air
 interface reflects its Fresnel share, which the engine records as a sink rather than following, and
 the imaging quantities are weighted by the amplitude those interfaces transmit.
+
+Verified with os-optics 0.14.0, in vacuum (`environment.pressure_pa` 0) with lossless glass
+(`absorption_coefficient_per_mm` 0),
+the medium and glass of the first record: every target, imaging quantity and ledger entry equals its os-optics 0.13.0
+value.
 
 ## Reproduce
 

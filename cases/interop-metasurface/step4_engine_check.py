@@ -43,6 +43,9 @@ from step3_fit_model import aperture_fraction, interpolate, thin_lens_focus
 LENS_X_MM, HEIGHT_MM, PLANE_X_MM = 0.0, 50.0, 0.3
 SOURCE_DISTANCE_MM = 1.0
 MODEL_AGREEMENT_REL = 1e-6  # Engine vs the thin-lens prediction of the same model
+# The medium the design was verified in: vacuum (air at zero pressure). Without an environment os-optics 0.14
+# propagates in standard air.
+ENVIRONMENT = {"pressure_pa": "0"}
 
 
 def model_rows(model):
@@ -77,6 +80,7 @@ def project(model, mode, *, wavelengths_nm, waist_um, tilt_deg=0.0, target_metri
         source["spectral_lines"] = [{"wavelength_nm": float(w), "power_w": 0.001} for w in wavelengths_nm]
     return {
         "schema": "opensci.project", "project_schema_version": "2.0", "design_intent": "OPTICAL_SYSTEM",
+        "environment": dict(ENVIRONMENT),
         "optical_models": models,
         "components": [
             {"instance_id": "SRC", "optical_role": "source", "nominal_pose": pose(start, direction),

@@ -38,5 +38,5 @@ python optimize_expander.py --out opt-strict --max-divergence-rad 1e-9
 | 引擎与参考的总 Sobol 指数（L1、L2、束腰）之差 | 2e-14 | 1e-6 |
 
 `evaluations.jsonl` 记录每次计算的输入、状态与运行标识。任何设计都无法满足的要求（`--max-divergence-rad 1e-9`）以
-NO_FEASIBLE_RESULT 结束，退出码 2。已在 Python 3.14.7 上用 os-optics 0.13.0 验证（SciPy 1.18.1、Optuna 5.0.0、
-SALib 1.6.0）。
+NO_FEASIBLE_RESULT 结束，退出码 2。优化曾在 Python 3.14.7 与 os-optics 0.13.0 下运行（SciPy 1.18.1、Optuna 5.0.0、
+SALib 1.6.0）。引擎运行已用 os-optics 0.14.0 验证，光路处于真空中（`environment.pressure_pa` 为 0），数值相同。

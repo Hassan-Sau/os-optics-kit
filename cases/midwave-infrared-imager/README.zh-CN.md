@@ -56,13 +56,13 @@ MTF 曲线就是这个被测锥的衍射 MTF。
 ## 本案例显式呈现的引擎行为
 
 **在这里几何 MTF 是错的指标，而且引擎自己也这么说。** 每个视场的 `geometric_mtf_*` 都返回
-`OUT_OF_MODEL_SCOPE`，原因是 `GEOMETRIC_REGIME_NOT_MET`：*"the wavefront error (0.126 waves
-RMS) is below 1.0 wave: diffraction sets the MTF here, and the diffraction MTF is the one to
-read"*。像质越好，几何 MTF 越不成立——它的前提本来就是大像差。若一个案例为这支镜头报告基于光线的
+`OUT_OF_MODEL_SCOPE`，原因是 `GEOMETRIC_REGIME_NOT_MET`：*"diffraction sets the MTF here: read
+mtf_tangential"*（波前误差 0.126 波 RMS，小于一个波长）。像质越好，几何 MTF 越不成立——它的前提本来就是大像差。若一个案例为这支镜头报告基于光线的
 MTF，引用的就是引擎拒绝为之背书的量。
 
-**运行状态是 WARNING，这是引擎的性质，不是镜头的缺陷。** 引擎的杂散光检索在玻璃体内沿每条反射
-分支做无界递归，因此任何透射镜头最终都会耗尽路径预算：
+**杂散光检索耗尽路径预算，这是引擎的性质，不是镜头的缺陷。** 引擎的杂散光检索在玻璃体内沿每条反射
+分支做无界递归，因此任何透射镜头最终都会耗尽路径预算。在 os-optics 0.14.0 中运行仍然完成（执行结果
+COMPLETED，运行状态 PASS；os-optics 0.13.0 报告 PARTIAL 与 WARNING），预算耗尽仍会报告：
 
 | 项 | 值 |
 | --- | --- |
@@ -72,7 +72,8 @@ MTF，引用的就是引擎拒绝为之背书的量。
 | 像面处功率 | 0.00094 W，每一行 `conserved: true` |
 
 主光束被完整追迹：九个光源全部 `DETECTED`，九条目标全部 MET。把 `max_paths` 调大只会让运行更久，
-不会改变答案。
+不会改变答案。已用 os-optics 0.14.0 验证，光路处于真空中（`environment.pressure_pa` 为 0），玻璃无吸收
+（`absorption_coefficient_per_mm` 为 0），与最初记录的介质和玻璃相同：每个目标与成像量都与 os-optics 0.13.0 的数值相同。
 
 **为什么这里有 89.5% 的功率未被追迹，以及它为什么不会使像产生偏差。** 这些表面都未镀膜，而中波
 红外材料的反射很强：n = 3.43 的硅每个面反射 0.30，n = 2.44 的 ZnSe 反射 0.17。十个面串联只透过

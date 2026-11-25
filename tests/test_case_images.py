@@ -138,7 +138,7 @@ class ImageCheckTests(unittest.TestCase):
     def test_run_block(self):
         self.edit(lambda d: d["run"].update(engine="0.12.0"))
         self.assertProblem("IMAGES_RECORD", "run.engine '0.12.0' differs from the CASE.md engine")
-        self.edit(lambda d: d["run"].update(engine="0.13.0", catalog="2026-10-28.1"))
+        self.edit(lambda d: d["run"].update(engine="0.14.0", catalog="2026-10-28.1"))
         self.assertProblem("IMAGES_RECORD", "run.catalog '2026-10-28.1' differs from the CASE.md catalog")
         self.edit(lambda d: d["run"].pop("catalog"))
         self.assertProblem("IMAGES_RECORD", "run must have exactly the keys")
@@ -381,7 +381,7 @@ class FakeEngine:
     files whose size depends on --size (``large`` sizes give PNGs over the budget)."""
 
     MANIFEST = {"catalog_version": None,
-                "engine_run": {"engine_version": "0.13.0", "input_hash": {"digest": "e" * 64}},
+                "engine_run": {"engine_version": "0.14.0", "input_hash": {"digest": "e" * 64}},
                 "optical_view": {"scene_content_hash_osc1": "s" * 64},
                 "project": {"project_hash": {"digest": "p" * 64}}}
 
@@ -445,7 +445,7 @@ class ImagesCommandTests(unittest.TestCase):
         self.assertEqual([(r["file"], r["view"]) for r in document["images"]],
                          [("images/iso.png", "iso"), ("images/section.png", "section")])
         record = self.tree.images()
-        self.assertEqual(record["run"], {"catalog": None, "engine": "0.13.0", "engine_input_hash": "e" * 64,
+        self.assertEqual(record["run"], {"catalog": None, "engine": "0.14.0", "engine_input_hash": "e" * 64,
                                          "project_hash": "p" * 64, "scene_content_hash": "s" * 64})
         self.assertEqual(record["project_sha256"], C.sha256_file(self.tree.case / "project.json"))
         self.assertEqual(record["images"], document["images"])

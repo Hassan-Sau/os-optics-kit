@@ -79,9 +79,15 @@
     "pupil_points_per_ring": 16,
     "pupil_ring_count": 8
   },
+  "environment": {
+    "air_model": "EDLEN_1953_OPTICSTUDIO",
+    "pressure_pa": "0",
+    "temperature_c": "20"
+  },
   "materials": [],
   "model_materials": [
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "SCHOTT N-BK7 optical glass datasheet",
       "dispersion": {
         "b": [
@@ -105,6 +111,7 @@
       }
     },
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "SCHOTT N-F2 optical glass datasheet",
       "dispersion": {
         "b": [

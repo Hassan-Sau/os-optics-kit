@@ -4,7 +4,7 @@
 (`os-optics-kit <command>`) and the case workflows; read only the section the task needs.
 Each command's `--help` holds its complete specification. os-optics-kit 0.4.x requires
 `os-optics>=0.14,<0.15` ([installation](https://github.com/JunLin615/os-optics/blob/main/docs/en/installation.md));
-the quoted results come from os-optics 0.13.0 and catalog release `2026-10-28.1`. Human
+the quoted results come from os-optics 0.14.0 and catalog release `2026-10-28.1`. Human
 walkthrough: [English](en/workflows.md) · [简体中文](zh-CN/workflows.md).
 
 ## Conventions
@@ -232,7 +232,7 @@ waist target by an interval. Save as `edits.json`:
 os-optics-kit edit project.json --edits edits.json --out run-edit/project.json --run run-edit/run
 ```
 
-Result with os-optics 0.13.0 on catalog `2026-10-28.1`: exit 1, `run.outcome` `FAIL`, `expanded_waist`
+Result with os-optics 0.14.0 on catalog `2026-10-28.1`: exit 1, `run.outcome` `FAIL`, `expanded_waist`
 1.1148985411200965 mm outside 1.8–2.2 mm (a design that misses its target). The output
 is `run-edit/project.json` (the Engine-normalized Project),
 `run-edit/project.changes.json` (every op as given and normalized, before/after of each

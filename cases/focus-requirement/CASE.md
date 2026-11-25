@@ -6,7 +6,7 @@ class: free-space
 domain: gaussian-beam
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: summary, edit, sweep, compare, report, present
@@ -40,9 +40,9 @@ both transitions refined to brackets at most 0.01 mm wide by default. Each bound
 
 ## Baseline
 
-Engine 0.13.0, no catalog: PASS, `spot_radius` MET, radius 12.414 µm.
+os-optics 0.14.0, no catalog, vacuum (`environment.pressure_pa` 0, as on 0.13.0): PASS, `spot_radius` MET, radius 12.414 µm.
 Every sampled radius is checked against an independent complex-q calculation.
-`expected.json` verifies the nominal native result; `verification.json` in the output records the actual interval,
+`expected.json` verifies the nominal native result; `data/snapshot.json` is the 0.13.0 run, which 0.14.0 reproduces; `verification.json` in the output records the actual interval,
 boundary brackets, resolution, reference error and identities.
 
 ## Files

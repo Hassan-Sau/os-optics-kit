@@ -6,7 +6,7 @@ class: free-space
 domain: radiometry
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: measurements
@@ -50,7 +50,7 @@ os-optics-kit measurements data/reference_drift.csv --x time_s --signal signal_V
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`).
+os-optics 0.14.0, no catalog, vacuum: run status PASS (`expected.json`).
 `os-optics-kit cases verify detector-measurements` repeats the run and compares it.
 
 ## Files

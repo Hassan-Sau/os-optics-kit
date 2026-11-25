@@ -14,13 +14,13 @@ Both images are the engine's browser-free snapshots of a run of `project.json`:
 `os-optics-kit cases images cylindrical-light-sheet` re-renders exactly these views as recorded in
 `images.json`.
 
-The source travels along +z at 488 nm with a 1 mm waist radius and 10 mW power. The lens front vertex is at z=20 mm; the 2 mm thick, n=1.52 lens has a curved entrance and plane exit. Its cylinder axis is x, so y focuses. The default entrance radius is 26 mm, the clear diameter is 10 mm, and each surface transmits 0.995 of the power. The refractive index is constant over 450–650 nm. The modeled surfaces are ideal and M²=1.
+The source travels along +z at 488 nm with a 1 mm waist radius and 10 mW power. The lens front vertex is at z=20 mm; the 2 mm thick, n=1.52 lens has a curved entrance and plane exit. Its cylinder axis is x, so y focuses. The default entrance radius is 25.979142 mm (the native builder solves the 50 mm focal length in standard air), the clear diameter is 10 mm, and each surface transmits 0.995 of the power. The refractive index is constant over 450–650 nm. The modeled surfaces are ideal, the glass is lossless and M²=1. The beam propagates in vacuum (`environment.pressure_pa` 0), the medium of the independent ABCD check.
 
 | Lens focal length | Waist thickness FWHM | Full sqrt(2)-thickness range | Waist z |
 | --- | --- | --- | --- |
-| 50 mm | 9.14456 um | 0.776659 mm | 70.6824 mm |
-| 40 mm | 7.31569 um | 0.497068 mm | 60.6834 mm |
-| 65 mm | 11.88777 um | 1.312519 mm | 85.6796 mm |
+| 50 mm | 9.13723 um | 0.775414 mm | 70.6423 mm |
+| 40 mm | 7.30983 um | 0.496271 mm | 60.6514 mm |
+| 65 mm | 11.87823 um | 1.310414 mm | 85.6275 mm |
 
 All three deliver 9.90025 mW. The wide-axis FWHM at the default focus is 1.17748 mm. The 40 mm lens gives a 20% thinner waist with a 36% shorter range. The example targets are waist thickness <=10 um and full range >=0.45 mm; the 40 and 50 mm designs satisfy them. The 65 mm variation extends the range but misses the thickness target (workflow exit code 1).
 

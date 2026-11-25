@@ -42,5 +42,5 @@ Apache-2.0。
 | 仅按相位延迟补偿的 3 mm 窗口 | 不可区分度 0.95 → 0.854 |
 | 1 mm 马赫-曾德尔干涉仪中的 0.25 ps 光子 | 拒绝：`SINGLE_FREQUENCY_MODEL_INVALID` |
 
-导出中每条路径的群延迟使窗口 0.163 ps 的群延迟失配可见。已在 Python 3.14.7 上用 os-optics 0.13.0 验证
-（perceval-quandela 1.3.1、piquasso 8.0.1）。
+导出中每条路径的群延迟使窗口 0.163 ps 的群延迟失配可见。量子部分曾在 Python 3.14.7 与 os-optics 0.13.0 下运行
+（perceval-quandela 1.3.1、piquasso 8.0.1）。引擎运行已用 os-optics 0.14.0 验证，光路处于真空中（`environment.pressure_pa` 为 0），数值相同。
