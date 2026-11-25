@@ -461,8 +461,17 @@ class EngineDocumentTests(unittest.TestCase):
             {"quantity_id": "S#0.geometric_spot_rms_radius", "state": "KNOWN", "value": 9.0,
              "scope": {"source_id": "S", "observation_id": "other", "wavelength_nm": 486.1}},
             {"quantity_id": "T#0.geometric_spot_rms_radius", "state": "UNAVAILABLE", "value": None,
-             "scope": {"source_id": "T"}}]}
-        self.assertEqual(ray_fans.engine_spot_rms(imaging, "image"), {("S", 486.1): 5.0, ("S", 656.3): 7.0})
+             "scope": {"source_id": "T"}}],
+            "arrays": {"S#0.rays": {"path_id": "S#0", "crossing_index": 0}}}
+        spots = ray_fans.imaging_spots(imaging, "image")
+        self.assertEqual([(s["source_id"], s["wavelength_nm"], s["value"]) for s in spots],
+                         [("S", 486.1, 5.0), ("S", 656.3, 7.0)])
+        # the route and crossing the engine traced, where the document states them
+        self.assertEqual([(s["path_id"], s["crossing_index"]) for s in spots], [("S#0", 0), (None, None)])
+        # a quantity without a plane in its scope is of the document's monitor
+        imaging["settings"] = {"monitor": "image"}
+        self.assertEqual([(s["source_id"], s["state"]) for s in ray_fans.imaging_spots(imaging, "image")],
+                         [("S", "KNOWN"), ("S", "KNOWN"), ("T", "UNAVAILABLE")])
 
     def test_unreached_paths_are_listed_with_the_engine_termination(self):
         rows = bundle()
@@ -498,6 +507,121 @@ class EngineDocumentTests(unittest.TestCase):
                 ray_fans.build(run, "focus", runner=runner)
             self.assertEqual(caught.exception.code, "NO_FANS")
             self.assertIn("PUPIL_FRAME_UNRESOLVED", str(caught.exception))
+
+
+RUN_IDENTITY = {"engine_input_hash": "a" * 64, "run_result_hash": "b" * 64}
+
+
+def _imaging(path_id="S#0", crossing=0, state="KNOWN", value=5.0, identity=RUN_IDENTITY, wavelength=550.0,
+             source="S", plane="image", line="S#0"):
+    """A 'results imaging' document with one spot of ``source`` traced along ``path_id`` at ``crossing``."""
+    document = {"analysis": "IMAGING", "settings": {"monitor": plane},
+                "quantities": [{"quantity_id": f"{line}.geometric_spot_rms_radius", "state": state,
+                                "value": value, "reason": None if state == "KNOWN" else "NO_ARRIVAL",
+                                "scope": {"source_id": source, "observation_id": plane, "wavelength_nm": wavelength}}],
+                "arrays": {f"{line}.rays": {"path_id": path_id, "crossing_index": crossing}}}
+    if identity is not None:
+        document["identity"] = {"physical": dict(identity, engine_build_id="0.14.0", settings_hash="c" * 64)}
+    return document
+
+
+class EngineSpotComparisonTests(unittest.TestCase):
+    """The engine's imaging spot is set beside a path's fans only when it is of the same light."""
+
+    def compare(self, imaging, path_id="S#0", source="S", wavelength=550.0, run=RUN_IDENTITY):
+        spots = ray_fans.imaging_spots(imaging, "image")
+        return ray_fans.spot_comparison(spots, ray_fans.imaging_run_check(imaging, run), "image", path_id, source,
+                                        wavelength)
+
+    def assert_not_compared(self, imaging, reason, **kwargs):
+        value, comparison = self.compare(imaging, **kwargs)
+        self.assertIsNone(value)
+        self.assertEqual(comparison["status"], "NOT_COMPARED")
+        self.assertEqual(comparison["reason"], reason, comparison["message"])
+        self.assertTrue(comparison["message"])
+        return comparison
+
+    def test_the_same_path_and_crossing_is_compared(self):
+        value, comparison = self.compare(_imaging())
+        self.assertEqual(value, 5.0)
+        self.assertEqual(comparison, {"status": "COMPARED", "reason": None, "message": None,
+                                      "quantity_id": "S#0.geometric_spot_rms_radius", "path_id": "S#0",
+                                      "crossing_index": 0, "state": "KNOWN"})
+
+    def test_either_polarization_component_of_the_route_is_compared(self):
+        self.assertEqual(self.compare(_imaging(path_id="S#0.1"), path_id="S#0:p1.1")[0], 5.0)
+        self.assertEqual(self.compare(_imaging(path_id="S#0:p1.1"), path_id="S#0.1")[0], 5.0)
+
+    def test_a_later_crossing_is_not_compared(self):
+        comparison = self.assert_not_compared(_imaging(crossing=2), "IMAGING_CROSSING_MISMATCH")
+        self.assertEqual((comparison["path_id"], comparison["crossing_index"]), ("S#0", 2))
+        self.assertIn("'crossing_index': 0", comparison["message"])
+
+    def test_another_route_is_not_compared(self):
+        self.assert_not_compared(_imaging(path_id="S#0"), "IMAGING_PATH_MISMATCH", path_id="S#0.0")
+        self.assert_not_compared(_imaging(path_id="S#0.1"), "IMAGING_PATH_MISMATCH", path_id="S#0.0")
+        self.assert_not_compared(_imaging(path_id="S#0.0"), "IMAGING_PATH_MISMATCH", path_id="S#0.0.1")
+
+    def test_another_source_wavelength_or_plane_is_absent(self):
+        self.assert_not_compared(_imaging(source="T"), "IMAGING_LINE_ABSENT")
+        self.assert_not_compared(_imaging(wavelength=650.0), "IMAGING_LINE_ABSENT")
+        self.assert_not_compared(_imaging(plane="other"), "IMAGING_LINE_ABSENT")
+
+    def test_a_document_of_another_run_is_not_compared(self):
+        other = {"engine_input_hash": "a" * 64, "run_result_hash": "d" * 64}
+        self.assert_not_compared(_imaging(), "IMAGING_RUN_MISMATCH", run=other)
+        self.assert_not_compared(_imaging(), "IMAGING_RUN_NOT_VERIFIED", run=None)
+        check = ray_fans.imaging_run_check(_imaging(), other)
+        self.assertEqual(check["status"], "MISMATCHED")
+        self.assertEqual(check["document"], RUN_IDENTITY)
+
+    def test_a_document_without_its_run_is_compared_and_says_so(self):
+        imaging = _imaging(identity=None)
+        self.assertEqual(ray_fans.imaging_run_check(imaging, None)["status"], "NOT_STATED")
+        self.assertEqual(self.compare(imaging, run=None)[0], 5.0)
+
+    def test_an_unknown_spot_unstated_route_or_two_matches_are_not_compared(self):
+        comparison = self.assert_not_compared(_imaging(state="UNKNOWN", value=None), "IMAGING_SPOT_NOT_KNOWN")
+        self.assertEqual(comparison["state"], "UNKNOWN")
+        imaging = _imaging()
+        del imaging["arrays"]
+        self.assert_not_compared(imaging, "IMAGING_ROUTE_NOT_STATED")
+        imaging = _imaging()
+        imaging["quantities"].append(dict(imaging["quantities"][0], quantity_id="S#9.geometric_spot_rms_radius"))
+        imaging["arrays"]["S#9.rays"] = {"path_id": "S#0", "crossing_index": 0}
+        self.assert_not_compared(imaging, "IMAGING_LINE_AMBIGUOUS")
+
+    def test_the_fans_are_kept_and_the_reason_is_in_the_document(self):
+        rows = bundle()
+        for r in rows:
+            r.update(path_id="S#0", source_id="S")
+        tree = [{"path_id": "S#0", "source_id": "S", "wavelength_nm": 550.0, "children": [], "termination": "ESCAPED"}]
+        describe = {"run": {"engine_input_hash": RUN_IDENTITY["engine_input_hash"],
+                            "result_hash": RUN_IDENTITY["run_result_hash"]}}
+        runner = _runner({("rays",): (0, json.dumps(rows)),
+                          ("monitor",): (0, json.dumps({"plane": PLANE, "arrivals": []})),
+                          ("paths",): (0, json.dumps(tree)),
+                          ("wavefront",): (2, json.dumps({"status": "UNAVAILABLE", "reason": "R", "message": "m"})),
+                          ("describe",): (0, json.dumps(describe))})
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run / "project.json").write_text(json.dumps({"components": [
+                {"instance_id": "S", "optical_role": "source", "nominal_pose": SOURCE}]}), encoding="utf-8")
+            later = ray_fans.build(run, "image", imaging=_imaging(crossing=2), runner=runner)
+            same = ray_fans.build(run, "image", imaging=_imaging(), runner=runner)
+            plain = ray_fans.build(run, "image", runner=runner)
+        self.assertEqual(later["paths"][0]["fans"], same["paths"][0]["fans"])
+        self.assertEqual(later["paths"][0]["fans"], plain["paths"][0]["fans"])
+        self.assertIsNone(later["paths"][0]["engine"]["spot_rms_um"])
+        self.assertEqual(later["paths"][0]["engine"]["spot_rms_comparison"]["reason"], "IMAGING_CROSSING_MISMATCH")
+        self.assertEqual(same["paths"][0]["engine"]["spot_rms_um"], 5.0)
+        self.assertEqual(same["imaging"]["run"]["status"], "MATCHED")
+        self.assertEqual(same["imaging"]["spots"], [{"quantity_id": "S#0.geometric_spot_rms_radius", "source_id": "S",
+                                                     "wavelength_nm": 550.0, "state": "KNOWN", "path_id": "S#0",
+                                                     "crossing_index": 0}])
+        self.assertIsNone(plain["imaging"])
+        self.assertIsNone(plain["paths"][0]["engine"]["spot_rms_comparison"])
+        json.dumps(same, allow_nan=False)
 
 
 class CommandLineTests(unittest.TestCase):
