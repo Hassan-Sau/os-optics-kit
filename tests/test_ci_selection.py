@@ -97,7 +97,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(changed_cases.EVERY_CASE, {
             "baseline.json", "pyproject.toml", "alignment-checks.json", ".github/workflows/ci.yml",
             "scripts/changed_cases.py", "scripts/verified_tree.py", "scripts/check_alignment.py",
-            "scripts/requirements-alignment.txt", "tools/os_optics_kit/__init__.py",
+            "scripts/engine_gate.py", "scripts/requirements-alignment.txt", "tools/os_optics_kit/__init__.py",
             "tools/os_optics_kit/__main__.py", "tools/os_optics_kit/_version.py", "tools/os_optics_kit/cli.py",
             "tools/os_optics_kit/cases.py", "tools/os_optics_kit/case_taxonomy.py", "tools/os_optics_kit/_engine.py",
             "tools/os_optics_kit/_frontmatter.py", "tools/os_optics_kit/_resources.py"})
@@ -121,7 +121,7 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertIn(f"tools/os_optics_kit/{module}.py", changed_cases.EVERY_CASE)
         workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("python scripts/check_alignment.py --out run-alignment", workflow)
+        self.assertIn('python scripts/check_alignment.py --engine "$ENGINE" --out run-alignment', workflow)
         self.assertIn("-m os_optics_kit cases verify", workflow)
 
     def test_case_directories_are_selected_and_other_paths_are_not(self):
@@ -280,6 +280,23 @@ class LookupTests(unittest.TestCase):
                 self.assertFalse(look(FakeGitHub([artifact()], {5: value}))["verified"])
         self.assertFalse(look(FakeGitHub([artifact()], {5: record()}),
                               baseline=BASELINE | {"engine": "0.14.0"})["verified"])
+
+    def test_the_baseline_engine_is_the_engine_the_ci_job_installs(self):
+        # The engine job installs engine.candidate_version while one is set (scripts/engine_gate.py); a record made
+        # with it is current for that baseline, and one made with the previous verified engine is not.
+        document = {"engine": {"verified_version": "0.13.0", "candidate_version": "0.14.0"},
+                    "catalog": {"version": "2026-10-28.1", "sha256": "a" * 64}}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "baseline.json").write_text(json.dumps(document), encoding="utf-8")
+            self.assertEqual(verified_tree.read_baseline(root)["engine"], "0.14.0")
+            del document["engine"]["candidate_version"]
+            document["engine"]["verified_version"] = "0.14.0"
+            (root / "baseline.json").write_text(json.dumps(document), encoding="utf-8")
+            self.assertEqual(verified_tree.read_baseline(root)["engine"], "0.14.0")
+        baseline = BASELINE | {"engine": "0.14.0"}
+        self.assertTrue(look(FakeGitHub([artifact()], {5: record(engine="0.14.0")}), baseline=baseline)["verified"])
+        self.assertFalse(look(FakeGitHub([artifact()], {5: record(engine="0.13.0")}), baseline=baseline)["verified"])
 
     def test_api_errors_mean_verify(self):
         cases = {"list 500": FakeGitHub([artifact()], {5: record()}, list_status=500),

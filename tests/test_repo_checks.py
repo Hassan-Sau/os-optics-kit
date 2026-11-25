@@ -562,7 +562,9 @@ class WorkflowTests(unittest.TestCase):
     def test_ci_verifies_cases_on_one_path_once_per_tree(self):
         engine = self.job("ci.yml", "engine")
         self.assertIn("name: Engine checks (published os-optics)", engine)
-        self.assertIn("python scripts/check_alignment.py --out run-alignment --skip cases-verify", engine)
+        # exactly the engine the gate selected (scripts/engine_gate.py), never the alignment runner's default
+        self.assertIn('python scripts/check_alignment.py --engine "$ENGINE" --out run-alignment --skip cases-verify',
+                      engine)
         self.assertEqual(engine.count("check_alignment.py"), 1)
         self.assertIn("    permissions:\n      contents: read\n", engine)
         self.assertRegex(engine, r"\n      actions: read\n")
@@ -627,12 +629,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(build.index("merge-base"), build.index("python -m build"))
 
     def test_a_pull_request_moving_the_verified_baseline_fails_without_the_engine(self):
-        import textwrap
         gate = self.step(self.job("ci.yml", "engine"), "Engine candidate gate result")
         self.assertIn("BASELINE_MOVED_WITHOUT_ENGINE", gate)
-        # the comparison runs before the step reports a skip
-        self.assertLess(gate.index("BASELINE_MOVED_WITHOUT_ENGINE"), gate.index("ENGINE_CANDIDATE_NOT_PUBLISHED"))
-        script = textwrap.dedent(gate[gate.index("<<'PY'\n") + len("<<'PY'\n"):gate.index("\n          PY\n")])
+        # the comparison runs before the step reports a skip, and its failure ends the step
+        self.assertLess(gate.index('python scripts/engine_gate.py moved "$BASE"; then'),
+                        gate.index("ENGINE_CANDIDATE_NOT_PUBLISHED"))
+        self.assertIn('engine_gate.py moved "$BASE"; then\n            echo "run=false" >> "$GITHUB_OUTPUT"\n'
+                      "            exit 1\n", gate)
+        script = str(ROOT / "scripts" / "engine_gate.py")
         if shutil.which("git") is None:
             self.skipTest("git is not installed")
         with tempfile.TemporaryDirectory() as folder:
@@ -649,8 +653,11 @@ class WorkflowTests(unittest.TestCase):
                 return git("rev-parse", "HEAD")
 
             def moved(base):
-                code = subprocess.run([sys.executable, "-c", script, base], cwd=folder).returncode
-                return code != 0
+                done = subprocess.run([sys.executable, script, "moved", base], cwd=folder, capture_output=True,
+                                      text=True)
+                if done.returncode:
+                    self.assertIn("::error title=BASELINE_MOVED_WITHOUT_ENGINE::", done.stdout)
+                return done.returncode != 0
 
             git("init", "-q")
             first = commit(BASELINE)

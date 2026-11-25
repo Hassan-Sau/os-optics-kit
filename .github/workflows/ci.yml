@@ -47,6 +47,8 @@ jobs:
     outputs:
       engine_candidate: ${{ steps.gate.outputs.engine_candidate }}
       version: ${{ steps.gate.outputs.version }}
+      role: ${{ steps.gate.outputs.role }}
+      sha256: ${{ steps.gate.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,9 +60,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - name: Is the engine range of baseline.json installable from the configured index?
+      - name: Is the engine under test (baseline.json) installable from the configured index?
         id: gate
-        # Dry-run resolution only; the index is pip's configuration. Missing -> ENGINE_CANDIDATE_NOT_PUBLISHED.
+        # engine.candidate_version while one is set, else engine.verified_version; resolved exactly (==) with a
+        # dry run, the index being pip's configuration. Missing -> ENGINE_CANDIDATE_NOT_PUBLISHED.
         run: python scripts/engine_gate.py
 
   engine-skipped:
@@ -75,7 +78,7 @@ jobs:
           echo "ENGINE_CANDIDATE_NOT_PUBLISHED"
           {
             echo "### ENGINE_CANDIDATE_NOT_PUBLISHED"
-            echo "The engine range of baseline.json is not installable from the configured index. Not run:"
+            echo "The engine under test of baseline.json is not installable from the configured index. Not run:"
             echo "- engine tests and tools against the engine and the pinned catalog"
             echo "- case verification"
             echo "- render, viewer and presentation browser tests"
@@ -258,32 +261,25 @@ jobs:
         env:
           CANDIDATE: ${{ needs.engine-gate.outputs.engine_candidate }}
           VERSION: ${{ needs.engine-gate.outputs.version }}
+          ROLE: ${{ needs.engine-gate.outputs.role }}
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           if [[ "$CANDIDATE" == "present" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Engine candidate os-optics $VERSION is installable; running every engine check."
+            echo "Engine under test os-optics $VERSION (engine.${ROLE}_version) is installable; installing exactly it and running every engine check."
             exit 0
           fi
           # A pull request that moves the verified engine or the catalog of baseline.json needs this job to run
-          # (docs/engine-alignment.md, "The engine job must have run"): without the engine it fails, not passes.
-          if [[ "$EVENT" == "pull_request" ]] && ! python - "$BASE" <<'PY'
-          import json, subprocess, sys
-          def verified(ref):
-              document = json.loads(subprocess.run(["git", "show", f"{ref}:baseline.json"], capture_output=True,
-                                                   text=True, check=True).stdout)
-              return (document.get("engine") or {}).get("verified_version"), document.get("catalog")
-          sys.exit(0 if verified(sys.argv[1]) == verified("HEAD") else 1)
-          PY
-          then
+          # (docs/engine-alignment.md, "The engine job must have run"): without the engine it fails with
+          # BASELINE_MOVED_WITHOUT_ENGINE, not passes.
+          if [[ "$EVENT" == "pull_request" ]] && ! python scripts/engine_gate.py moved "$BASE"; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::error title=BASELINE_MOVED_WITHOUT_ENGINE::baseline.json moves engine.verified_version or the catalog, but the engine range is not installable; the cases cannot be verified on it"
             exit 1
           fi
           echo "run=false" >> "$GITHUB_OUTPUT"
           echo "ENGINE_CANDIDATE_NOT_PUBLISHED"
-          echo "::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::the engine requirement of baseline.json is not installable from the configured index; engine tests, case verification, browser tests and the presentation demo did not run"
+          echo "::warning title=ENGINE_CANDIDATE_NOT_PUBLISHED::os-optics $VERSION, the engine under test of baseline.json, is not installable from the configured index; engine tests, case verification, browser tests and the presentation demo did not run"
           {
             echo "### ENGINE_CANDIDATE_NOT_PUBLISHED"
             echo "Not run: engine tests and tools, case verification, render/viewer/presentation browser tests, presentation demo."
@@ -312,9 +308,21 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         # The cases are verified once, by the "Verify cases" step.
         env:
+          # exactly the engine the gate selected and resolved, never baseline.json's previous verified engine
+          ENGINE: ${{ needs.engine-gate.outputs.version }}
           # the fonts are installed above: a test that draws Chinese fails instead of skipping without one
           OS_OPTICS_KIT_REQUIRE_CJK_FONT: "1"
-        run: python scripts/check_alignment.py --out run-alignment --skip cases-verify
+        run: python scripts/check_alignment.py --engine "$ENGINE" --out run-alignment --skip cases-verify
+      - name: Installed engine (version and wheel SHA-256)
+        id: installed
+        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' }}
+        env:
+          ENGINE: ${{ needs.engine-gate.outputs.version }}
+          ENGINE_SHA256: ${{ needs.engine-gate.outputs.sha256 }}
+        # Fails (ENGINE_INSTALLED_MISMATCH) unless the environment holds the gate's version and artifact from PyPI.
+        run: |
+          python scripts/engine_gate.py installed run-alignment/report.json --expect "$ENGINE" \
+            --expect-sha256 "$ENGINE_SHA256"
       - name: Render with published engine and Chrome
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -351,7 +359,10 @@ jobs:
         run: python scripts/verified_tree.py lookup --tree "$TREE" --repository "$REPOSITORY" --repository-id "$REPOSITORY_ID"
       - name: Verify cases
         id: verify
-        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' && steps.cases.outcome == 'success' }}
+        # never on an environment that does not hold the engine the gate selected
+        if: >-
+          ${{ !cancelled() && steps.gate.outputs.run == 'true' && steps.cases.outcome == 'success'
+          && steps.installed.outcome == 'success' }}
         env:
           ALL: ${{ steps.cases.outputs.all }}
           CASES: ${{ steps.cases.outputs.cases }}

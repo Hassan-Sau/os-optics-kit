@@ -19,8 +19,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 # A change to any of these files can change the result of `cases verify` for every case, or which cases CI verifies:
-# the selection and the step summary, the environment and catalog store check_alignment.py builds for the step
-# (with the default requirements), the command path `python -m os_optics_kit cases verify` takes to its exit code
+# the selection and the step summary, the engine engine_gate.py selects, the environment and catalog store
+# check_alignment.py builds for the step (with the default requirements), the command path `python -m os_optics_kit cases verify` takes to its exit code
 # (__main__.py, __init__.py, _version.py, cli.py) and the modules cases.py uses.
 EVERY_CASE = frozenset({
     "baseline.json",
@@ -30,6 +30,7 @@ EVERY_CASE = frozenset({
     "scripts/changed_cases.py",
     "scripts/verified_tree.py",
     "scripts/check_alignment.py",
+    "scripts/engine_gate.py",
     "scripts/requirements-alignment.txt",
     "tools/os_optics_kit/__init__.py",
     "tools/os_optics_kit/__main__.py",
