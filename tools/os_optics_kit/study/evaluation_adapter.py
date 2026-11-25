@@ -59,14 +59,22 @@ least-squares solver must not use them as that objective's residuals.
 
 An invalid candidate carries ``reason`` = ``{"code", "stage", "message", ...}``, no objective or constraint entries,
 and residuals filled with ``invalid_residual`` (finite, so a least-squares solver can still step away from it); for
-``OUT_OF_BOUNDS`` each entry is ``invalid_residual * (1 + d)`` with ``d`` the largest bound violation in variable
-scales, so a farther candidate is worse. Choose ``invalid_residual`` above the largest residual a valid candidate can
+``OUT_OF_BOUNDS`` each entry is ``invalid_residual * (1 + d)`` with ``d`` the bound violation in variable scales
+(reason ``violation``; null when it overflows), so a farther candidate is worse; the growth stops at
+``sqrt(sys.float_info.max / len(residuals))`` (where the sum of the squared residuals would overflow) or at
+``invalid_residual`` when that is larger. Choose ``invalid_residual`` above the largest residual a valid candidate can
 reach (objective scales near the expected errors keep valid residuals near 1). Its ``evaluation`` is the empty scope
 when nothing ran. ``DEFAULT_IMAGING`` (``launch_grid`` 24) is the sampling of MTF readings unless ``Problem.imaging``
 sets it: the grid changes MTF values, and so the margins; an undersampled curve reads ``OUT_OF_MODEL_SCOPE``. Codes:
 ``OUT_OF_BOUNDS``, ``UNKNOWN_VARIABLE``, ``MISSING_VARIABLE``, ``EDIT_REFUSED``, ``PROJECT_REFUSED``,
 ``PLAN_REFUSED``, ``RUN_STOPPED``, ``ANALYSIS_REFUSED``, ``MTF_SOURCE_NOT_FOUND``, ``QUANTITY_UNAVAILABLE`` (a
-quantity was not computed or its value is not used under ``value_use``), ``RESIDUAL_NOT_FINITE``, ``ENGINE_ERROR``.
+quantity was not computed or its value is not used under ``value_use``), ``RESIDUAL_NOT_FINITE`` (a residual or
+margin overflowed), ``AGGREGATE_NOT_FINITE`` (every residual is finite, but ``objective`` or ``residual_objective``
+exceeds the float range: the reason names them in ``overflowed`` and keeps the finite ``residuals`` and
+``largest_residual``), ``ENGINE_ERROR``. ``residuals``, ``objective`` and ``residual_objective`` are finite numbers
+or null in every result, and so are the residuals these two reasons carry (``RESIDUAL_NOT_FINITE`` names the
+non-finite ones in ``not_finite`` and keeps them as null), so such a result serializes as strict JSON
+(``json.dumps(result.as_dict(), allow_nan=False)``).
 
 A session evaluates one candidate at a time: an :class:`Adapter` and its session are not for use from several threads
 at once. Evaluate in parallel with one Adapter per process.
@@ -78,6 +86,7 @@ import copy
 from dataclasses import dataclass, field
 import math
 import numbers
+import sys
 from typing import Any, Callable, Mapping, Sequence
 
 from ..workflow_common import VALUE_USES, target_value_use, value_usable
@@ -85,7 +94,7 @@ from ..workflow_common import VALUE_USES, target_value_use, value_usable
 AGGREGATIONS = ("sum_squares", "sum_abs", "max_abs")
 REASON_CODES = ("OUT_OF_BOUNDS", "UNKNOWN_VARIABLE", "MISSING_VARIABLE", "EDIT_REFUSED", "PROJECT_REFUSED",
                 "PLAN_REFUSED", "RUN_STOPPED", "ANALYSIS_REFUSED", "MTF_SOURCE_NOT_FOUND", "QUANTITY_UNAVAILABLE",
-                "RESIDUAL_NOT_FINITE", "ENGINE_ERROR")
+                "RESIDUAL_NOT_FINITE", "AGGREGATE_NOT_FINITE", "ENGINE_ERROR")
 USABLE_STATES = ("KNOWN", "KNOWN_ZERO")
 DEFAULT_INVALID_RESIDUAL = 1.0e3
 DEFAULT_IMAGING = {"launch_grid": 24, "include_psf_map": False}
@@ -307,9 +316,10 @@ class CandidateResult:
 
 
 class _Refused(Exception):
-    def __init__(self, code: str, stage: str, message: str, **details: Any) -> None:
+    def __init__(self, code: str, stage: str, message: str, *, grow: float = 1.0, **details: Any) -> None:
         super().__init__(message)
         self.reason = {"code": code, "stage": stage, "message": message, **details}
+        self.grow = grow  # the invalid residual's growth factor (OUT_OF_BOUNDS: 1 + the violation)
 
 
 def aggregate(errors: Sequence[float], weights: Sequence[float], how: str) -> float:
@@ -428,9 +438,10 @@ class Adapter:
             value = float(raw)
             low, high = v.bounds
             if not low <= value <= high:
-                distance = (low - value if value < low else value - high) / v.scale
+                distance = float((low - value if value < low else value - high) / v.scale)
                 raise _Refused("OUT_OF_BOUNDS", "parameters", f"{v.name}={value:g} lies outside [{low:g}, {high:g}]",
-                               variable=v.name, value=value, bounds=[low, high], violation=float(distance))
+                               grow=1.0 + distance, variable=v.name, value=value, bounds=[low, high],
+                               violation=distance if math.isfinite(distance) else None)
             try:
                 ops.extend(_substitute(copy.deepcopy(list(v.ops)), value, v.unit))
             except Exception as exc:
@@ -461,7 +472,7 @@ class Adapter:
         except _Refused as refused:
             if not result.x and isinstance(x, Mapping):
                 result.x = {str(k): v for k, v in x.items()}  # the candidate as given, for a refused variable set
-            self._invalid(result, refused.reason, grow=1.0 + float(refused.reason.get("violation") or 0.0))
+            self._invalid(result, refused.reason, grow=refused.grow)
         except Exception as exc:  # anything else the Engine raises is still a reason, never an escape
             self._invalid(result, {"code": "ENGINE_ERROR", "stage": "evaluation", "message": str(exc),
                                    "error_code": getattr(exc, "code", type(exc).__name__)})
@@ -472,7 +483,10 @@ class Adapter:
     def _invalid(self, result: CandidateResult, reason: dict[str, Any], grow: float = 1.0) -> None:
         result.reason = reason
         result.valid = False
-        result.residuals = [self.problem.invalid_residual * grow] * self.size
+        base = self.problem.invalid_residual
+        # grown (OUT_OF_BOUNDS), never below invalid_residual, and short of overflowing the sum of squares
+        ceiling = max(base, math.sqrt(sys.float_info.max / max(1, self.size)))
+        result.residuals = [min(base * grow, ceiling)] * self.size
         if result.evaluation is None:
             result.evaluation = copy.deepcopy(EMPTY_SCOPE)
         result.objective = result.residual_objective = None
@@ -591,11 +605,24 @@ class Adapter:
                 entry["members"] = [{**m, "margin": margin} for m, margin in zip(members, margins)]
             result.constraints.append(entry)
         if not all(math.isfinite(r) for r in residuals):
-            raise _Refused("RESIDUAL_NOT_FINITE", "results", "a residual is not a finite number",
-                           residuals=[float(r) for r in residuals])
-        result.objective = aggregate(errors, weights, problem.aggregation)
+            not_finite = [name for name, r in zip(problem.residual_names, residuals) if not math.isfinite(r)]
+            raise _Refused("RESIDUAL_NOT_FINITE", "results",
+                           f"a residual is not a finite number: {', '.join(not_finite)}", not_finite=not_finite,
+                           residuals=[float(r) if math.isfinite(r) else None for r in residuals])
+        objective = aggregate(errors, weights, problem.aggregation)
+        residual_objective = float(sum(r * r for r in residuals))
+        overflowed = [name for name, total in (("objective", objective), ("residual_objective", residual_objective))
+                      if not math.isfinite(total)]
+        if overflowed:
+            largest = max(abs(r) for r in residuals)
+            raise _Refused("AGGREGATE_NOT_FINITE", "results",
+                           f"{' and '.join(overflowed)} exceeds the float range (largest residual {largest:.6g}); "
+                           "larger scales or smaller weights bring the residuals into range",
+                           overflowed=overflowed, aggregation=problem.aggregation,
+                           residuals=[float(r) for r in residuals], largest_residual=float(largest))
+        result.objective = objective
         result.residuals = residuals
-        result.residual_objective = float(sum(r * r for r in residuals))
+        result.residual_objective = residual_objective
         result.dls_compatible = problem.aggregation == "sum_squares"
         result.feasible = False if False in satisfied_all else (None if None in satisfied_all else True)
         result.valid = True
