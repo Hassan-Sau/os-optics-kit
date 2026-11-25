@@ -792,6 +792,13 @@ def _slow_run(sub, folder, limits):
     import time
 
     project = sub["project"]
+    if project.get("wait_for_solve"):  # finish only once that sample's solve has started its trials
+        marker = Path(folder).parent / project["wait_for_solve"] / "compensation" / "trial"
+        deadline = time.monotonic() + 60.0
+        while not marker.is_dir() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    if Path(folder).name == "trial":
+        Path(folder).mkdir(parents=True, exist_ok=True)
     seconds = project["trial_s"] if Path(folder).name == "trial" else project["run_s"]
     limit = (limits or {}).get("time_limit_s")
     started = time.monotonic()
@@ -819,11 +826,11 @@ slow_compensated.engine_runs = cm.engine_runs  # type: ignore[attr-defined]
 SLOW = "tests.test_tolerance_compensation:slow_compensated"
 
 
-def _slow_requests(run_s=0.05, trial_s=None, samples=("s0001",)):
+def _slow_requests(run_s=0.05, trial_s=None, samples=("s0001",), nominal=None):
     from os_optics_kit.study import requests as rq
 
     project = {"offset": 0.0, "run_s": run_s, "trial_s": run_s if trial_s is None else trial_s}
-    out = [rq.make_request("s0000", {**project, "run_s": 0.01}, selected_targets=["spot"],
+    out = [rq.make_request("s0000", {**project, "run_s": 0.01, **(nominal or {})}, selected_targets=["spot"],
                            labels={"role": "nominal"})]
     for sample_id in samples:
         out.append(rq.make_request(sample_id, {**project, "id": sample_id}, selected_targets=["spot"],
@@ -877,19 +884,22 @@ def test_cancelled_compensation_in_a_worker_is_resumed(tmp_path):
     from os_optics_kit.study import execute as ex, schedulers, store
 
     study_dir = tmp_path / "s"
-    store.plan_study(study_dir, _header(), _slow_requests(run_s=0.02, trial_s=0.2, samples=("s0001", "s0002")))
+    # the nominal run ends once s0001 is in its solve; its result cancels the study
+    store.plan_study(study_dir, _header(), _slow_requests(run_s=0.02, trial_s=0.2, samples=("s0001", "s0002"),
+                                                          nominal={"wait_for_solve": "s0001"}))
     scheduler = schedulers.ProcessScheduler(2)
     try:
         summary = ex.execute_study(study_dir, evaluator=SLOW, scheduler=scheduler,
-                                   on_progress=lambda event: scheduler.cancel())  # after the nominal run
+                                   on_progress=lambda event: scheduler.cancel())
     finally:
         scheduler.close()
     assert summary.state == "CANCELLED"
-    cancelled = store.read_record(study_dir, "s0001")
-    assert cancelled["state"] == "CANCELLED"
-    if cancelled.get("compensation"):  # stopped during its solve: the as-built result stays in the record
-        assert cancelled["compensation"]["reason"]["code"] == "RUN_STOPPED"
-        assert cancelled["targets"][0]["value"] == pytest.approx(0.26)
+    cancelled = store.read_record(study_dir, "s0001")  # stopped during its solve: the as-built result stays
+    assert cancelled["state"] == "CANCELLED" and cancelled["error"] is None
+    assert cancelled["compensation"]["reason"]["code"] == "RUN_STOPPED"
+    assert cancelled["compensation"]["reason"]["problems"] == ["STUDY_CANCELLED"]
+    assert cancelled["targets"][0]["value"] == pytest.approx(0.26)
+    assert store.read_record(study_dir, "s0002")["state"] == "NOT_RUN"
     resumed = ex.execute_study(study_dir, evaluator=SLOW, resume=True)
     assert resumed.state == "COMPLETED" and (resumed.reused, resumed.ran) == (1, 2)
     for sample_id in ("s0001", "s0002"):
