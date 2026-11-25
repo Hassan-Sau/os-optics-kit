@@ -47,7 +47,7 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 | `groups` | Every element of the path in the order light meets them. A group moves rigidly along the optical axis; exactly two groups move. `travel_mm` is a moving group's allowed range, `envelope_mm` the axial extent of its mount before its first and after its last vertex. |
 | `image_plane` | An observation plane of the Project (fixed in the design frame) or a point. It must lie on the optical axis. |
 | `efl_mm` | The requested focal lengths: `{start, stop, step}` (stop included) or `{values}`. |
-| `anchors` | Known solutions: the positions of the moving groups at a focal length, given directly or read from a configuration of the base Project (`{efl_mm, configuration_id}`). They seed the solver and check its branch. |
+| `anchors` | Known solutions: the positions of the moving groups at a focal length, given directly or read from a configuration of the base Project (`{efl_mm, configuration_id}`). They seed the solver and check its branch, and may lie outside the requested range. |
 | `tolerances` | Acceptance of each sample: \|EFL error\| and \|focus error\| in mm. |
 | `clearance` | The least axial gap between envelopes, and between the last envelope and the image plane. |
 | `solver` | Optional: `tolerance_mm` (1e-7), `max_iterations` (30), `max_refinements` (8), `branch_jump_mm` (1.0), `anchor_tolerance_mm` (0.01), `derivative_step_mm` (1e-4). |
@@ -100,12 +100,20 @@ engine's paraxial analysis of `DIR/project.json`, one configuration at a time:
 | `FAIL` | solved, but a tolerance is missed (`EFL_OUT_OF_TOLERANCE`, `FOCUS_OUT_OF_TOLERANCE`) or the branch check failed (`BRANCH_MISMATCH`) |
 | `UNSOLVED` | no solution: `NOT_CONVERGED`, `SINGULAR_JACOBIAN` (a fold), `BRANCH_JUMP`, `AFOCAL`, `ENGINE_REFUSED`, or `NO_SEED` when no anchor converged |
 
+The requested range runs from the smallest to the largest requested focal length. An anchor inside it is a
+sample like the others. An anchor outside it (a 105 mm anchor with a 35-70 mm request) still seeds the continuation
+and takes part in the branch check, and is solved, written as a configuration and evaluated, but it is reported
+apart: under `anchors_outside_range` in `trajectory.json` (sample ids `a001`, ...), in its own section of
+`report.md`, and with `in_requested_range: false` on its anchor record. It never enters the counts, the coverage,
+the step statistics, the worst values, `trajectory.csv`, the `--study` samples or the status.
+
 No sample is dropped. `trajectory.json` holds every sample with its reasons (each with the values it concerns),
-the anchors with their declared and solved positions and branch checks, the coverage (`covered_fraction`: the share
-of the requested range lying between two adjacent PASS samples, `pass_intervals_mm`, the runs of samples that are
-not PASS, the largest and smallest step), the worst EFL error, focus error and clearance, the solver settings and
-the number of engine evaluations, and the engine version and build. `trajectory.csv` is the same table and
-`report.md` presents it. The command exits 0 when every sample passes and 1 otherwise.
+the anchors with their declared and solved positions, branch checks, sample id and status, the anchors outside the
+requested range, the coverage of the requested range (`covered_fraction`: the share of the requested range lying
+between two adjacent PASS samples of that range, `pass_intervals_mm`, the runs of samples that are not PASS, the
+largest and smallest step), the worst EFL error, focus error and clearance, the solver settings and the number of
+engine evaluations, and the engine version and build. `trajectory.csv` is the table of the requested range and
+`report.md` presents it. The command exits 0 when every sample of the requested range passes and 1 otherwise.
 
 ## Look at the result
 

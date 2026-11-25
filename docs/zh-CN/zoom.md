@@ -45,7 +45,7 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 | `groups` | 光路中的全部元件，按光经过的顺序。镜组沿光轴整体移动；恰好两个镜组运动。`travel_mm` 是运动组允许的范围，`envelope_mm` 是镜座在第一个顶点之前和最后一个顶点之后的轴向长度。 |
 | `image_plane` | Project 的一个观测面（固定在设计坐标系中）或一个点，必须位于光轴上。 |
 | `efl_mm` | 要求的焦距：`{start, stop, step}`（含 stop）或 `{values}`。 |
-| `anchors` | 已知解：某个焦距下运动组的位置，直接给出，或从基础 Project 的某个配置中读取（`{efl_mm, configuration_id}`）。它们作为求解起点并检查求解分支。 |
+| `anchors` | 已知解：某个焦距下运动组的位置，直接给出，或从基础 Project 的某个配置中读取（`{efl_mm, configuration_id}`）。它们作为求解起点并检查求解分支，可以位于要求范围之外。 |
 | `tolerances` | 每个样本的验收：\|EFL 误差\| 和 \|焦点误差\|，单位 mm。 |
 | `clearance` | 包络之间以及最后一个包络与像面之间允许的最小轴向间隙。 |
 | `solver` | 可选：`tolerance_mm`（1e-7）、`max_iterations`（30）、`max_refinements`（8）、`branch_jump_mm`（1.0）、`anchor_tolerance_mm`（0.01）、`derivative_step_mm`（1e-4）。 |
@@ -91,10 +91,17 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 | `FAIL` | 已求解，但未满足容差（`EFL_OUT_OF_TOLERANCE`、`FOCUS_OUT_OF_TOLERANCE`）或分支检查失败（`BRANCH_MISMATCH`） |
 | `UNSOLVED` | 无解：`NOT_CONVERGED`、`SINGULAR_JACOBIAN`（折点）、`BRANCH_JUMP`、`AFOCAL`、`ENGINE_REFUSED`，或没有锚点收敛时的 `NO_SEED` |
 
-不丢弃任何样本。`trajectory.json` 包含每个样本及其原因（各自带有相关数值）、锚点的声明位置和求解位置及分支
-检查、覆盖情况（`covered_fraction`：要求范围中位于相邻两个 PASS 样本之间的比例，`pass_intervals_mm`，非 PASS
-样本的连续段，最大和最小步长）、最大 EFL 误差、焦点误差和最小间隙、求解器设置和引擎调用次数，以及引擎版本和
-构建号。`trajectory.csv` 是同一张表，`report.md` 是它的展示版本。所有样本通过时命令退出码为 0，否则为 1。
+要求范围从最小的要求焦距到最大的要求焦距。范围内的锚点与其他样本一样处理。范围外的锚点（例如要求 35-70 mm
+时的 105 mm 锚点）仍作为延拓起点并参与分支检查，也会被求解、写成配置并评估，但单独报告：在 `trajectory.json`
+的 `anchors_outside_range` 中（样本编号 `a001` 等），在 `report.md` 的单独一节中，其锚点记录带有
+`in_requested_range: false`。它不计入样本计数、覆盖情况、步长统计、最差值、`trajectory.csv`、`--study` 的样本或
+总状态。
+
+不丢弃任何样本。`trajectory.json` 包含每个样本及其原因（各自带有相关数值）、锚点的声明位置和求解位置、分支
+检查、样本编号和状态、要求范围外的锚点、要求范围的覆盖情况（`covered_fraction`：要求范围中位于该范围内相邻两个
+PASS 样本之间的比例，`pass_intervals_mm`，非 PASS 样本的连续段，最大和最小步长）、最大 EFL 误差、焦点误差和
+最小间隙、求解器设置和引擎调用次数，以及引擎版本和构建号。`trajectory.csv` 是要求范围的样本表，`report.md` 是
+它的展示版本。要求范围内所有样本通过时命令退出码为 0，否则为 1。
 
 ## 查看结果
 

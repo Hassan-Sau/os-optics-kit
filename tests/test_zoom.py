@@ -232,6 +232,74 @@ class ClassificationTests(unittest.TestCase):
                          [(20.0, 20.0, 1), (35.0, 35.0, 1), (55.0, 60.0, 2)])
         self.assertEqual(cov["max_step_mm"], 5.0)
 
+    def test_coverage_leaves_out_samples_outside_the_requested_range(self):
+        requested = [35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0]
+        samples = [{"efl_requested_mm": e, "status": "PASS"} for e in requested + [105.0]]  # 105: an anchor
+        cov = zs.coverage(samples, requested)
+        self.assertEqual(cov["requested_range_mm"], [35.0, 70.0])
+        self.assertEqual(cov["pass_intervals_mm"], [[35.0, 70.0]])
+        self.assertEqual(cov["covered_fraction"], 1.0)
+        self.assertEqual((cov["samples"], cov["min_step_mm"], cov["max_step_mm"]), (8, 5.0, 5.0))
+        below = [{"efl_requested_mm": 20.0, "status": "INFEASIBLE"}]  # an anchor below the range, not PASS
+        statuses = {35.0: "PASS", 40.0: "PASS", 45.0: "INFEASIBLE", 50.0: "PASS", 55.0: "PASS"}
+        cov = zs.coverage(below + [{"efl_requested_mm": e, "status": s} for e, s in statuses.items()], list(statuses))
+        self.assertEqual(cov["pass_intervals_mm"], [[35.0, 40.0], [50.0, 55.0]])
+        self.assertAlmostEqual(cov["covered_fraction"], 10.0 / 20.0)
+        self.assertEqual([(r["first_mm"], r["last_mm"]) for r in cov["not_pass_runs"]], [(45.0, 45.0)])
+        self.assertEqual(cov["max_step_mm"], 5.0)
+
+    def test_requested_range_membership(self):
+        efls = [35.0, 40.0, 70.0]
+        self.assertTrue(zs.in_requested_range(35.0, efls))
+        self.assertTrue(zs.in_requested_range(52.5, efls))  # an anchor between requested samples is inside
+        self.assertTrue(zs.in_requested_range(70.0 + 1e-12, efls))
+        self.assertFalse(zs.in_requested_range(105.0, efls))
+        self.assertFalse(zs.in_requested_range(34.999, efls))
+        self.assertTrue(zs.in_requested_range(-50.0, [-70.0, -35.0]))
+        self.assertFalse(zs.in_requested_range(-20.0, [-70.0, -35.0]))
+
+    def test_report_and_summary_set_outside_anchors_apart(self):
+        def sample(sample_id, efl, status, inside, cid, label=None, reasons=()):
+            return {"sample_id": sample_id, "configuration_id": cid, "label": label, "anchor": label is not None,
+                    "in_requested_range": inside, "efl_requested_mm": efl, "status": status, "reasons": list(reasons),
+                    "solved_positions_mm": [40.0, 125.0], "positions_mm": {"variator": 40.0, "compensator": 125.0},
+                    "efl_achieved_mm": efl, "efl_error_mm": 0.0, "focus_error_mm": 0.0, "min_clearance_mm": 20.0,
+                    "min_clearance_between": ["front", "variator"], "seed": None, "substeps": 0, "iterations": 0,
+                    "study_sample_id": None, "study_outcome": None}
+
+        travel = {"code": "TRAVEL_EXCEEDED", "group_id": "compensator", "position_mm": 132.36,
+                  "travel_mm": [100.0, 130.0], "excess_mm": 2.36}
+        samples = [sample("z001", 35.0, "PASS", True, "wide", "wide"), sample("z002", 40.0, "PASS", True, "efl_040p00")]
+        outside = [sample("a001", 105.0, "INFEASIBLE", False, "tele", "tele", [travel])]
+        anchor = {"label": "tele", "efl_mm": 105.0, "declared_mm": [59.9205, 132.3609], "solved_mm": [59.9, 132.4],
+                  "shift_mm": 1e-5, "converged": True, "branch_check": None, "in_requested_range": False,
+                  "sample_id": "a001", "status": "INFEASIBLE"}
+        trajectory = {
+            "status": "PASS", "moving_groups": ["variator", "compensator"],
+            "spec": {"wavelength_nm": 633.0, "tolerances": {"efl_mm": 0.01, "focus_mm": 0.005},
+                     "clearance": {"min_mm": 1.0}},
+            "counts": {"PASS": 2, "FAIL": 0, "INFEASIBLE": 0, "UNSOLVED": 0},
+            "coverage": zs.coverage(samples + outside, [35.0, 40.0]), "worst": None,
+            "image_plane": {"position_along_axis_mm": 200.0}, "anchors": [anchor], "samples": samples,
+            "anchors_outside_range": outside, "basis": {}, "identity": {"engine_version": "0.14.0",
+                                                                        "engine_build_id": "b"},
+            "solver": {"method": "m"}, "project": {"configurations": 3}, "dropped_targets": [], "study": None,
+            "paths": {"out": "out"}}
+        self.assertEqual(trajectory["coverage"]["pass_intervals_mm"], [[35.0, 40.0]])
+        report = zs.report_markdown(trajectory)
+        main, apart = report.split("## Anchors outside the requested range")
+        self.assertIn("| z002 | efl_040p00 | PASS | 40 |", main)
+        self.assertNotIn("a001", main)
+        self.assertIn("| a001 | tele | INFEASIBLE | 105 |", apart.split("## Anchors")[0])
+        self.assertIn("outside 35-40 mm", apart)
+        self.assertIn("| tele | 105 | a001 |", apart)
+        brief = zs.compact(trajectory)
+        self.assertEqual(brief["not_pass"], [])
+        self.assertEqual(brief["anchors"][0]["in_requested_range"], False)
+        self.assertEqual(brief["anchors"][0]["status"], "INFEASIBLE")
+        rows, _ = zs.csv_rows(trajectory)
+        self.assertEqual([r["sample_id"] for r in rows], ["z001", "z002"])
+
     def test_configuration_ids_are_unique_and_valid(self):
         used = {"wide"}
         self.assertEqual(zs.configuration_id(42.5, used), "efl_042p50")
