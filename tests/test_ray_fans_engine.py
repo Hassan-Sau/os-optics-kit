@@ -423,6 +423,148 @@ class RayFansOfARealLensTurnedAboutItsAxis(unittest.TestCase):
         self.assertGreater(abs(t[max(t)] + t[min(t)]), 1.0)
 
 
+def _native(project_file: Path, class_id: str, instance_id: str, position: str, params: list[str]) -> None:
+    """Add an 'os-optics native build' component to a Project file, along +x (local z -> world +x)."""
+    argv = [sys.executable, "-m", "os_optics", "native", "build", class_id, "--into", str(project_file),
+            "--instance-id", instance_id, "--position", position, "--quaternion", "0.5,0.5,0.5,0.5"]
+    for param in params:
+        argv += ["--param", param]
+    done = subprocess.run(argv, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AssertionError(f"native build {class_id} failed: {done.stdout[-400:]} {done.stderr[-400:]}")
+
+
+def _imaging(run_dir: Path, base: Path, request: dict) -> dict:
+    (base / "imaging-request.json").write_text(json.dumps(request), encoding="utf-8")
+    done = subprocess.run([sys.executable, "-m", "os_optics", "results", "imaging", str(run_dir), "--monitor", "image",
+                           "--request", str(base / "imaging-request.json")], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AssertionError(f"results imaging failed: {done.stderr[-800:]}")
+    return json.loads(done.stdout)
+
+
+@unittest.skipUnless(HAS_ENGINE, "needs os-optics (the engine)")
+class EngineSpotOfTheSameLight(unittest.TestCase):
+    """The engine's imaging spot beside the fans only where it is of the same plane crossing, route and run.
+
+    Folded double pass: a 3 mm stop at x = 2 (it bounds the imaging pupil), the plane 'image' at x = 5, the ideal lens
+    (f = 100 mm) at x = 10 and a flat mirror at x = 35 facing back: the path crosses the plane on the way out
+    (crossing 0, unreflected: the fans) and again converging after the mirror (crossing 1). 'results imaging' reads the
+    last crossing unless its request states 'crossing_index': 0.
+    Two routes: a calcite-like beam displacer (o / e indices 1.6557 / 1.4849, 2 mm walk-off) before the lens splits the
+    line, polarized at 30 deg, into two unreflected paths to the plane, SRC#0 (ordinary) and SRC#0.0 (extraordinary);
+    the imaging analysis reads one route per line, the strongest at the plane.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        lens = json.loads((ROOT / "cases/ideal-lens-focus/project.json").read_text(encoding="utf-8"))
+        mirror_case = json.loads((ROOT / "cases/mirror-alignment/project.json").read_text(encoding="utf-8"))
+
+        fold = copy.deepcopy(lens)
+        fold["targets"] = []
+        mirror = copy.deepcopy(next(c for c in mirror_case["components"] if c["optical_role"] == "mirror"))
+        mirror["instance_id"] = "M"
+        # the mirror's face normal (its local +z) along world -x, back towards the lens
+        mirror["nominal_pose"] = {"position_mm": [35.0, 0.0, 20.0], "quaternion_wxyz": [0.5, -0.5, -0.5, 0.5]}
+        fold["components"].append(mirror)
+        fold["optical_models"] += mirror_case["optical_models"]
+        fold["model_coatings"] = mirror_case["model_coatings"]
+        plane = fold["observations"][0]
+        plane["observation_id"] = "image"
+        plane["pose"]["position_mm"] = [5.0, 0.0, 20.0]
+        plane["aperture"]["radius_mm"] = 20.0
+        (base / "fold").mkdir()
+        (base / "fold" / "project.json").write_text(json.dumps(fold), encoding="utf-8")
+        _native(base / "fold" / "project.json", "aperture.circular", "STOP", "2,0,20",
+                ["opening_diameter_mm=3", "plate_diameter_mm=25"])
+        cls.fold_run = _run(json.loads((base / "fold" / "project.json").read_text(encoding="utf-8")), base / "fold")
+
+        split = copy.deepcopy(lens)
+        split["targets"] = []
+        next(c for c in split["components"] if c["optical_role"] == "source")["source_model"]["polarization"][
+            "angle_deg"] = 30.0
+        next(c for c in split["components"] if c["optical_role"] == "lens")["nominal_pose"]["position_mm"] = [
+            40.0, 0.0, 20.0]
+        plane = split["observations"][0]
+        plane["observation_id"] = "image"
+        plane["pose"]["position_mm"] = [120.0, 0.0, 20.0]
+        plane["aperture"]["radius_mm"] = 20.0
+        (base / "split").mkdir()
+        (base / "split" / "project.json").write_text(json.dumps(split), encoding="utf-8")
+        _native(base / "split" / "project.json", "splitter.beam_displacer", "BD", "5,0,20",
+                ['material={"ordinary": {"constant_index": "1.6557"}, "extraordinary": {"constant_index": "1.4849"}, '
+                 '"valid_band_nm": [400, 1100]}', "design_wavelength_nm=532", "displacement_mm=2", "width_mm=10",
+                 "height_mm=10", 'ar_coating={"reflectance": "0", "valid_aoi_deg": [0, 30]}'])
+        cls.split_run = _run(json.loads((base / "split" / "project.json").read_text(encoding="utf-8")), base / "split")
+
+        cls.fold_last = _imaging(cls.fold_run, base / "fold", {})
+        cls.fold_first = _imaging(cls.fold_run, base / "fold", {"crossing_index": 0})
+        cls.split_imaging = _imaging(cls.split_run, base / "split", {})
+        # the engine data of each run once, as build() collects it with an imaging document that states its run
+        cls.fold = dict(ray_fans.collect(cls.fold_run, "image"), run_identity=ray_fans.load_run_identity(cls.fold_run))
+        cls.split = dict(ray_fans.collect(cls.split_run, "image"),
+                         run_identity=ray_fans.load_run_identity(cls.split_run))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    @staticmethod
+    def traced(imaging):
+        return {key: (value["path_id"], value["crossing_index"]) for key, value in imaging["arrays"].items()
+                if key.endswith(".rays")}
+
+    @staticmethod
+    def spot(imaging):
+        return next(q for q in imaging["quantities"] if q["quantity_id"] == "SRC#0.geometric_spot_rms_radius")
+
+    def test_a_later_crossing_of_a_folded_path_is_not_compared(self):
+        self.assertEqual(self.traced(self.fold_last), {"SRC#0.rays": ("SRC#0", 1)})
+        self.assertEqual(self.spot(self.fold_last)["state"], "KNOWN")
+        document = ray_fans.assemble(self.fold, imaging=self.fold_last)
+        path = document["paths"][0]
+        self.assertEqual(path["path_id"], "SRC#0")
+        self.assertEqual(len(path["fans"]["tangential"]), 16)
+        self.assertIsNone(path["engine"]["spot_rms_um"])
+        comparison = path["engine"]["spot_rms_comparison"]
+        self.assertEqual((comparison["status"], comparison["reason"], comparison["crossing_index"]),
+                         ("NOT_COMPARED", "IMAGING_CROSSING_MISMATCH", 1))
+        self.assertEqual(document["imaging"]["run"]["status"], "MATCHED")
+        self.assertEqual(document["imaging"]["run"]["run"], self.fold["run_identity"])
+
+    def test_the_same_crossing_is_compared(self):
+        self.assertEqual(self.traced(self.fold_first), {"SRC#0.rays": ("SRC#0", 0)})
+        spot = self.spot(self.fold_first)
+        self.assertEqual(spot["state"], "KNOWN")
+        path = ray_fans.assemble(self.fold, imaging=self.fold_first)["paths"][0]
+        self.assertEqual(path["engine"]["spot_rms_um"], spot["value"])
+        self.assertEqual(path["engine"]["spot_rms_comparison"]["status"], "COMPARED")
+        self.assertNotEqual(spot["value"], self.spot(self.fold_last)["value"])
+
+    def test_another_route_is_not_compared(self):
+        self.assertEqual(self.traced(self.split_imaging), {"SRC#0.rays": ("SRC#0", 0)})
+        document = ray_fans.assemble(self.split, imaging=self.split_imaging)
+        paths = {p["path_id"]: p for p in document["paths"]}
+        self.assertEqual(sorted(paths), ["SRC#0", "SRC#0.0"])
+        self.assertEqual(paths["SRC#0"]["engine"]["spot_rms_um"], self.spot(self.split_imaging)["value"])
+        self.assertEqual(paths["SRC#0"]["engine"]["spot_rms_comparison"]["status"], "COMPARED")
+        other = paths["SRC#0.0"]
+        self.assertEqual(len(other["fans"]["tangential"]), 16)
+        self.assertIsNone(other["engine"]["spot_rms_um"])
+        self.assertEqual(other["engine"]["spot_rms_comparison"]["reason"], "IMAGING_PATH_MISMATCH")
+
+    def test_a_document_of_another_run_is_not_compared(self):
+        # the same source, wavelength, plane, path and crossing 0, but of the beam-displacer run
+        document = ray_fans.assemble(self.fold, imaging=self.split_imaging)
+        self.assertEqual(document["imaging"]["run"]["status"], "MISMATCHED")
+        path = document["paths"][0]
+        self.assertIsNone(path["engine"]["spot_rms_um"])
+        self.assertEqual(path["engine"]["spot_rms_comparison"]["reason"], "IMAGING_RUN_MISMATCH")
+
+
 SPOT_TOL_REL = 0.10
 SPOT_MIN_UM = 4.0
 

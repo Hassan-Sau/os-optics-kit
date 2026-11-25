@@ -11,9 +11,9 @@ kind: tool
 
 ## When to use
 
-- A run directory exists and you need ray-fan curves at an image plane: transverse aberration versus pupil
-  coordinate, longitudinal aberration, or OPD, per field and wavelength.
-- You want those curves checked against the engine's own geometric spot radius and wavefront RMS.
+- You need ray fans of a run at an image plane: transverse and longitudinal aberration or OPD versus
+  pupil coordinate, per field and wavelength.
+- To check them against the engine's spot radius and wavefront RMS.
 
 ## When not to use
 
@@ -23,11 +23,11 @@ kind: tool
 
 ## Inputs
 
-- `RUN`: a run directory saved with `--ray-data full` (the default). Never modified; nothing is traced.
-- `--monitor PLANE`: the observation plane (an image plane).
-- `--path ID` (repeatable): limit to these paths; default: all reaching the plane.
+- `RUN`: a run saved with `--ray-data full` (the default); never modified, nothing traced.
+- `--monitor PLANE`: the image plane.
+- `--path ID` (repeatable): only these paths (default: all reaching the plane).
 - `--zones N` (N >= 1): keep N rings per fan, the outermost always.
-- `--imaging FILE`: a `results imaging` document (spot radius per source, wavelength, plane).
+- `--imaging FILE`: `results imaging` of this run, its request with `"crossing_index": 0`.
 - `--out FILE`: write the JSON there.
 
 ## Outputs
@@ -35,11 +35,13 @@ kind: tool
 JSON. Per path: `path_id`, `source_id`, `wavelength_nm`, `chief_uv_mm`, `tangential_axis_uv`,
 `sagittal_axis_uv`, `pupil_frame`, `rho_max`, `fan_rho_max`, `rings`, `vignetted_rays`, `zones`;
 `fans.tangential` / `fans.sagittal` rows (`rho`, `zone`, `sampled`, `fit_residual_um`, `transverse_um`,
-`longitudinal_mm`, `opd_waves`); `spot_rms_um`, `opd_rms_waves`; `engine` (spot, OPD RMS/PV, wavefront
-status and reason). `unreached`: paths without counted rays at the plane, with their termination;
-`refused`: paths without fans, with the code and reason. Exit 0, or 4 with a JSON error on stderr
+`longitudinal_mm`, `opd_waves`); `spot_rms_um`, `opd_rms_waves`; `engine` (OPD RMS/PV, wavefront
+status and reason; spot only for the same run, plane, line, route and crossing: `spot_rms_comparison`
+says `COMPARED` or why not). `imaging`: the run check.
+`unreached`: paths without counted rays at the plane, with their termination; `refused`: paths without
+fans, with the code and reason. Exit 0, or 4 with a JSON error on stderr
 (`BAD_ARGUMENT`, `PATH_NOT_FOUND`, `NO_FANS`, `FAN_AXIS_NOT_SAMPLED`, `PUPIL_FRAME_UNRESOLVED`,
-`IMAGING_INVALID`, `OUTPUT_NOT_WRITABLE`, `ENGINE_RESULTS_FAILED`, ...).
+`IMAGING_INVALID`, `ENGINE_RESULTS_FAILED`, ...).
 
 ## Conventions
 
@@ -63,7 +65,7 @@ os-optics-kit fans run --monitor image_plane --imaging imaging.json --out fans.j
 ## Limits
 
 - Geometric optics only; no diffraction.
-- `spot_rms_um` uses the saved pupil rays; the engine's imaging spot re-traces a denser grid.
+- `spot_rms_um` uses the saved pupil rays; the engine's spot re-traces a denser grid.
 - The first arrival at the plane only (crossing index 0).
 - Paths reflected before the plane are refused (`PUPIL_FRAME_UNRESOLVED`).
 - A ring with missing rays gives only its rays on a fan azimuth (`fan_rho_max` per fan); a fan without

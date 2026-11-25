@@ -36,9 +36,20 @@ wavelength. For each path:
   waves; when the engine refuses the wavefront, its status, reason and message are kept and OPD is null.
 
 Every result also records: the RMS spot radius of all pupil rays about their centroid, beside the engine's
-'geometric_spot_rms_radius' when an imaging document is given (--imaging FILE, from 'results imaging', matched by source,
-wavelength and plane); the RMS of the per-ray OPD beside the engine's 'rms_waves' of the same path (a consistency check:
-both come from the same per-ray data); the pupil rays launched and arrived, and the rings present and partial.
+'geometric_spot_rms_radius' when an imaging document is given (--imaging FILE, from 'results imaging'); the RMS of the
+per-ray OPD beside the engine's 'rms_waves' of the same path (a consistency check: both come from the same per-ray
+data); the pupil rays launched and arrived, and the rings present and partial.
+
+The engine's spot is set beside a path's fans (engine.spot_rms_um) only when it is the spot of the same light: the
+document states this run (its identity.physical engine_input_hash and run_result_hash equal the run's, from 'results
+describe'; a document that states no run is not checked, and says so in imaging.run), and its quantity is of the same
+plane, source and wavelength, of the path's route (the path id, either polarization component of the source) and of the
+crossing the fans read (0, the first arrival: the engine's imaging analysis reads the last crossing unless its request
+states 'crossing_index': 0), and is KNOWN. Otherwise engine.spot_rms_um is null, the fans are kept, and
+engine.spot_rms_comparison gives the reason: IMAGING_RUN_MISMATCH, IMAGING_RUN_NOT_VERIFIED, IMAGING_LINE_ABSENT,
+IMAGING_LINE_AMBIGUOUS, IMAGING_ROUTE_NOT_STATED, IMAGING_PATH_MISMATCH, IMAGING_CROSSING_MISMATCH or
+IMAGING_SPOT_NOT_KNOWN.
+
 Paths that do not reach the plane with counted rays are listed in 'unreached' (with the engine's termination), paths
 whose fans cannot be built in 'refused' (with the code, the reason and, where there are any, details); when no path
 gives fans the result is the error NO_FANS. --zones N keeps, per fan, N of the rings that carry its points (its
@@ -51,6 +62,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -526,6 +538,19 @@ def path_fans(rays: list[dict], frame: dict, wavefront: dict | None = None, zone
 
 # ------------------------------------------------------------------------------------------------- imaging document
 
+# The fans are those of the first arrival at the plane.
+FAN_CROSSING_INDEX = 0
+SPOT_QUANTITY = "geometric_spot_rms_radius"
+# A path id: <source>#<spectral index>, then the mark of a source's second polarization component, then its branches.
+_PATH_ID = re.compile(r"^(?P<line>.*#\d+)(?::p1)?(?P<branch>(?:~[0-9a-f]{32})?(?:\.\d+)*)$")
+
+
+def _route(path_id: str) -> str:
+    """The route of a path: its id without the mark of the source's second polarization component (the engine's imaging
+    analysis reads a line's two components together, along one route)."""
+    match = _PATH_ID.match(path_id)
+    return match.group("line") + match.group("branch") if match else path_id
+
 
 def check_imaging(imaging: Any) -> None:
     """Refuse an imaging document that is not the JSON output of 'os-optics results imaging'."""
@@ -542,27 +567,123 @@ def check_imaging(imaging: Any) -> None:
                 raise FanError("IMAGING_INVALID", f"{hint}: {quantity.get('quantity_id')} has no source scope or value")
 
 
-def engine_spot_rms(imaging: dict, monitor: str | None = None) -> dict[tuple[str, float | None], float]:
-    """(source_id, wavelength_nm) -> the engine's geometric RMS spot radius (um) from a 'results imaging' document,
-    for the plane ``monitor`` when given."""
+def _object(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _number(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def imaging_spots(imaging: dict, monitor: str) -> list[dict]:
+    """The engine's geometric RMS spot radii on the plane ``monitor`` in a 'results imaging' document, one entry per
+    quantity: its id, source, wavelength, state and reason, its value (um; only for state KNOWN) and the route and plane
+    crossing the engine traced for it (path_id and crossing_index of the document's array '<line>.rays'; null where the
+    document does not state them). A quantity's plane is its scope's observation_id, else the document's monitor."""
     check_imaging(imaging)
-    out: dict[tuple[str, float | None], float] = {}
+    settings = _object(imaging.get("settings"))
+    arrays = _object(imaging.get("arrays"))
+    out = []
     for quantity in imaging.get("quantities", []):
-        if str(quantity.get("quantity_id", "")).endswith(".geometric_spot_rms_radius") and quantity.get("state") == "KNOWN":
-            scope = quantity["scope"]
-            if monitor is not None and scope.get("observation_id") not in (None, monitor):
-                continue
-            wavelength = scope.get("wavelength_nm")
-            out[(scope["source_id"], float(wavelength) if isinstance(wavelength, (int, float)) else None)] = \
-                float(quantity["value"])
+        quantity_id = str(quantity.get("quantity_id", ""))
+        if not quantity_id.endswith("." + SPOT_QUANTITY):
+            continue
+        scope = _object(quantity.get("scope"))
+        if (scope.get("observation_id") or settings.get("monitor")) != monitor:
+            continue
+        rays = _object(arrays.get(quantity_id[:-len(SPOT_QUANTITY)] + "rays"))
+        crossing = rays.get("crossing_index")
+        crossing = crossing if isinstance(crossing, int) and not isinstance(crossing, bool) else None
+        out.append({"quantity_id": quantity_id, "source_id": scope.get("source_id"),
+                    "wavelength_nm": _number(scope.get("wavelength_nm")),
+                    "state": quantity.get("state"), "reason": quantity.get("reason"),
+                    "value": _number(quantity.get("value")) if quantity.get("state") == "KNOWN" else None,
+                    "path_id": rays.get("path_id") if isinstance(rays.get("path_id"), str) else None,
+                    "crossing_index": crossing})
     return out
 
 
-def _spot_for(spots: dict[tuple[str, float | None], float], source_id: str | None, wavelength_nm: float) -> float | None:
-    for (source, wavelength), value in spots.items():
-        if source == source_id and (wavelength is None or math.isclose(wavelength, wavelength_nm, rel_tol=1e-12)):
-            return value
-    return None
+def _hashes(identity: Any, keys: tuple[str, ...]) -> dict[str, str]:
+    return {key: identity[key] for key in keys if isinstance(identity, dict) and isinstance(identity.get(key), str)}
+
+
+def load_run_identity(run_dir: Path, runner=subprocess.run) -> dict[str, str]:
+    """The run's engine_input_hash and run_result_hash, from 'os-optics results describe'."""
+    run = _engine_json(["results", "describe", str(run_dir)], runner)
+    run = run.get("run") if isinstance(run, dict) else None
+    identity = _hashes(run, ("engine_input_hash", "result_hash"))
+    if "result_hash" in identity:
+        identity["run_result_hash"] = identity.pop("result_hash")
+    return identity
+
+
+def imaging_run_check(imaging: dict, run_identity: dict[str, str] | None) -> dict:
+    """Whether an imaging document was computed from the run: its identity.physical engine_input_hash and
+    run_result_hash against the run's. status MATCHED, MISMATCHED, NOT_VERIFIED (the document states its run, the
+    run's identity is not known) or NOT_STATED (the document does not state its run: not checked)."""
+    stated = _hashes(_object(imaging.get("identity")).get("physical"), ("engine_input_hash", "run_result_hash"))
+    run = dict(run_identity or {})
+    if not stated:
+        status = "NOT_STATED"
+    elif any(key not in run for key in stated):
+        status = "NOT_VERIFIED"
+    else:
+        status = "MATCHED" if all(run[key] == value for key, value in stated.items()) else "MISMATCHED"
+    return {"status": status, "document": stated, "run": {key: run[key] for key in stated if key in run}}
+
+
+def _not_compared(reason: str, message: str, entry: dict | None = None) -> tuple[None, dict]:
+    keys = ("quantity_id", "path_id", "crossing_index", "state")
+    return None, {"status": "NOT_COMPARED", "reason": reason, "message": message,
+                  **{key: entry[key] if entry else None for key in keys}}
+
+
+def spot_comparison(spots: list[dict], run_check: dict, monitor: str, path_id: str, source_id: str | None,
+                    wavelength_nm: float) -> tuple[float | None, dict]:
+    """The engine spot radius (um) to set beside the fans of one path, or None, and why: status COMPARED (with its
+    quantity and the engine's route and crossing) only when the document is of this run (or does not state its run),
+    and its spot is of the same plane, source, wavelength, route (path_id, either polarization component) and crossing
+    (the first, FAN_CROSSING_INDEX) and is KNOWN; otherwise NOT_COMPARED with a reason code and message."""
+    if run_check["status"] in ("MISMATCHED", "NOT_VERIFIED"):
+        reason = "IMAGING_RUN_MISMATCH" if run_check["status"] == "MISMATCHED" else "IMAGING_RUN_NOT_VERIFIED"
+        return _not_compared(reason, "the imaging document is of another run (its "
+                             + " and ".join(sorted(run_check["document"])) + " differ from this run's; imaging.run)"
+                             if reason == "IMAGING_RUN_MISMATCH" else
+                             "the imaging document states the run it was computed from, and this run's identity is "
+                             "not known (imaging.run): not checked, so not compared")
+    line = [s for s in spots if s["source_id"] == source_id
+            and (s["wavelength_nm"] is None or math.isclose(s["wavelength_nm"], wavelength_nm, rel_tol=1e-12))]
+    if not line:
+        return _not_compared("IMAGING_LINE_ABSENT", f"the imaging document has no {SPOT_QUANTITY} of source "
+                             f"{source_id} at {wavelength_nm:g} nm on plane {monitor}")
+    route = _route(path_id)
+    same = [s for s in line if s["path_id"] is not None and _route(s["path_id"]) == route
+            and s["crossing_index"] == FAN_CROSSING_INDEX]
+    if len(same) > 1:
+        return _not_compared("IMAGING_LINE_AMBIGUOUS", f"the imaging document has {len(same)} {SPOT_QUANTITY} "
+                             f"quantities of path {path_id} at crossing {FAN_CROSSING_INDEX} on plane {monitor}: "
+                             + ", ".join(s["quantity_id"] for s in same))
+    if same:
+        entry = same[0]
+        if entry["state"] != "KNOWN" or entry["value"] is None:
+            return _not_compared("IMAGING_SPOT_NOT_KNOWN", f"the engine's {entry['quantity_id']} of the same route and "
+                                 f"crossing is {entry['state']} (reason {entry['reason']})", entry)
+        return entry["value"], {"status": "COMPARED", "reason": None, "message": None,
+                                "quantity_id": entry["quantity_id"], "path_id": entry["path_id"],
+                                "crossing_index": entry["crossing_index"], "state": entry["state"]}
+    single = line[0] if len(line) == 1 else None
+    traced = "; ".join(f"{s['quantity_id']}: path {s['path_id']}, crossing {s['crossing_index']}" for s in line)
+    if any(s["path_id"] is None or s["crossing_index"] is None for s in line):
+        return _not_compared("IMAGING_ROUTE_NOT_STATED", "the imaging document does not state the path and crossing "
+                             f"of its spot of source {source_id} at {wavelength_nm:g} nm ({traced})", single)
+    if any(_route(s["path_id"]) == route for s in line):
+        return _not_compared("IMAGING_CROSSING_MISMATCH", f"the engine's spot is of another crossing of plane "
+                             f"{monitor} ({traced}); the fans are of crossing {FAN_CROSSING_INDEX} (the first "
+                             f"arrival). Request it with 'crossing_index': {FAN_CROSSING_INDEX} in the imaging request",
+                             single)
+    return _not_compared("IMAGING_PATH_MISMATCH", f"the engine's spot is of another route to plane {monitor} "
+                         f"({traced}); the fans are of path {path_id}. The imaging analysis reads one route per source "
+                         "and wavelength: the run's strongest at the plane", single)
 
 
 # ------------------------------------------------------------------------------------------------------------ build
@@ -640,7 +761,10 @@ def assemble(collected: dict, zones: int | None = None, imaging: dict | None = N
     """The fans document from collect()'s data (no engine call)."""
     if zones is not None and zones < 1:
         raise FanError("BAD_ARGUMENT", f"--zones must be at least 1 (got {zones})")
-    spots = engine_spot_rms(imaging, collected["monitor"]) if imaging is not None else {}
+    spots, run_check = [], None
+    if imaging is not None:
+        spots = imaging_spots(imaging, collected["monitor"])
+        run_check = imaging_run_check(imaging, collected.get("run_identity"))
     results, refused = [], []
     for path_id in collected["selected"]:
         rays = collected["rays"][path_id]
@@ -660,7 +784,12 @@ def assemble(collected: dict, zones: int | None = None, imaging: dict | None = N
                 entry["details"] = exc.details
             refused.append(entry)
             continue
-        fan["engine"]["spot_rms_um"] = _spot_for(spots, fan["source_id"], fan["wavelength_nm"])
+        value, comparison = None, None
+        if run_check is not None:
+            value, comparison = spot_comparison(spots, run_check, collected["monitor"], fan["path_id"],
+                                                fan["source_id"], fan["wavelength_nm"])
+        fan["engine"]["spot_rms_um"] = value
+        fan["engine"]["spot_rms_comparison"] = comparison
         results.append(fan)
     if not results:
         reasons = [f"{item['path_id']}: {item['code']}" for item in refused]
@@ -684,7 +813,14 @@ def assemble(collected: dict, zones: int | None = None, imaging: dict | None = N
                 "longitudinal_mm": "where a fan ray crosses the chief ray, from the plane along its normal in the "
                                    "direction of the light; positive behind the plane",
                 "opd_rms_waves": "RMS of the engine's per-ray OPD; equals engine.opd_rms_waves by construction "
-                                 "(consistency check)"},
+                                 "(consistency check)",
+                "engine_spot": "engine.spot_rms_um is set only where the imaging document is of this run and its "
+                               "spot is of the same plane, source, wavelength, route and crossing (the first) and "
+                               "KNOWN; engine.spot_rms_comparison states the match or the reason code"},
+            "imaging": None if run_check is None else {
+                "run": run_check, "crossing_index": FAN_CROSSING_INDEX,
+                "spots": [{key: spot[key] for key in ("quantity_id", "source_id", "wavelength_nm", "state", "path_id",
+                                                     "crossing_index")} for spot in spots]},
             "paths": results, "unreached": collected["unreached"], "refused": refused}
 
 
@@ -694,7 +830,10 @@ def build(run_dir: Path, monitor: str, paths: list[str] | None = None, zones: in
         raise FanError("BAD_ARGUMENT", f"--zones must be at least 1 (got {zones})")
     if imaging is not None:
         check_imaging(imaging)
-    return assemble(collect(run_dir, monitor, paths, runner), zones, imaging)
+    collected = collect(run_dir, monitor, paths, runner)
+    if imaging is not None and imaging_run_check(imaging, None)["status"] != "NOT_STATED":
+        collected["run_identity"] = load_run_identity(run_dir, runner)
+    return assemble(collected, zones, imaging)
 
 
 def _error(code: str, message: str, engine_code: str | None = None, details: dict | None = None) -> int:
@@ -714,7 +853,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--monitor", required=True)
     parser.add_argument("--path", action="append", dest="paths")
     parser.add_argument("--zones", type=int, help="keep, per fan, N (>= 1) of the rings that carry its points")
-    parser.add_argument("--imaging", type=Path, help="a 'results imaging' document for the engine's spot radius")
+    parser.add_argument("--imaging", type=Path,
+                        help="a 'results imaging' document of this run for the engine's spot radius; compared "
+                             "only for the same plane, source, wavelength, route and crossing 0 (request "
+                             "'crossing_index': 0)")
     parser.add_argument("--out", type=Path)
     try:
         args = parser.parse_args(argv)
