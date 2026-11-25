@@ -72,7 +72,9 @@ def artifact_name(tree: str) -> str:
 
 def read_baseline(root: Path = ROOT) -> dict:
     baseline = json.loads((root / "baseline.json").read_text(encoding="utf-8"))
-    return {"engine": baseline["engine"]["verified_version"], "catalog_version": baseline["catalog"]["version"],
+    # The engine the CI job installs (scripts/engine_gate.py): the candidate while one is set, else the verified one.
+    engine = baseline["engine"].get("candidate_version") or baseline["engine"]["verified_version"]
+    return {"engine": engine, "catalog_version": baseline["catalog"]["version"],
             "catalog_sha256": baseline["catalog"]["sha256"]}
 
 
