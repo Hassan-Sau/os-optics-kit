@@ -5,13 +5,19 @@ os-optics-kit field RUN --monitor PLANE [--efl MM] [--stop-tolerance-mm MM] [--o
 Nothing is traced here. Inputs: the run's project.json (source poses), its simulation_result.json (chief-ray segments)
 and optical_scene.json (aperture-stop surfaces), and 'os-optics results rays' at the plane (through the ray fans of this
 kit). Each path is one field point at one wavelength. The engine's chief ray of a path is its source's beam-centre ray;
-it is the optical chief ray when it passes through the centre of the aperture stop, so every source should be aimed
-at the stop centre. For each path:
+it is the optical chief ray when it passes through the centre of the aperture stop's opening, so every source should
+be aimed at that centre. Paths reflected before the plane are not supported: when every path at the plane is reflected
+the command refuses (REFLECTED_PATH_UNSUPPORTED, with each path's reflection count), and a reflected path beside
+unreflected ones is listed in unreached_fields (PUPIL_FRAME_UNRESOLVED). For each path:
 
-* chief ray: where it crosses the aperture stop, as stop_offset_mm from the stop centre. Within --stop-tolerance-mm
-  of the centre it is WITHIN_STOP_TOLERANCE (the row repeats the tolerance); further out (CHIEF_RAY_OFF_STOP), or when
-  it misses the stop, distortion and focus are null with that reason. A run without an aperture stop reports the
-  beam-centre ray's values (NO_APERTURE_STOP);
+* chief ray: where it crosses the aperture stop, as stop_offset_mm from the centre of the stop's opening (the stop's
+  opening_center_mm in its plane, carried to the design frame; aperture_stops lists each stop with that centre). The
+  crossing is the chief-ray segment that ends on the stop's Engine surface id (stop_id), whatever its event (a sampled
+  stop ends it with complex_transmission). Within --stop-tolerance-mm of the centre it is WITHIN_STOP_TOLERANCE (the
+  row repeats the tolerance); further out (CHIEF_RAY_OFF_STOP), when it misses the stop (CHIEF_RAY_STOP_NOT_CROSSED),
+  or when the crossing or the stop geometry is not resolved (CHIEF_RAY_STOP_UNRESOLVED, with the detail), distortion
+  and focus are null with that reason. A run without an aperture stop reports the beam-centre ray's values
+  (NO_APERTURE_STOP);
 * field angle: the angle between the source's emission axis and that of the on-axis field (the source whose chief ray
   lands on the plane's origin, within 1e-3 mm), in degrees;
 * image height: the chief ray's distance from the plane's origin in (u, v), in mm;
@@ -62,6 +68,8 @@ STOP_NOT_CROSSED = "CHIEF_RAY_STOP_NOT_CROSSED"
 STOP_UNRESOLVED = "CHIEF_RAY_STOP_UNRESOLVED"
 NO_APERTURE_STOP = "NO_APERTURE_STOP"
 STOP_NOT_CHECKED = "STOP_NOT_CHECKED"
+# The refusal of a plane that only reflected paths reach.
+REFLECTED_PATH_UNSUPPORTED = "REFLECTED_PATH_UNSUPPORTED"
 # Chief-ray states whose distortion and focus are reported.
 _REPORTED = (WITHIN_STOP_TOLERANCE, NO_APERTURE_STOP, STOP_NOT_CHECKED)
 # A chief ray whose direction makes a smaller cosine with the outgoing axis is not carried to the focal plane.
@@ -72,9 +80,10 @@ EflFor = Callable[[str, float], dict]
 
 
 class FieldError(RuntimeError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, details: dict | None = None):
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 def _rotate(q: list[float], v: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -154,11 +163,12 @@ def _chief_state(path_id: str, stops: dict[str, dict] | None, tolerance: float) 
 def _chief_reason(state: dict, tolerance: float) -> str:
     if state["status"] == OFF_STOP_CENTRE:
         return (f"{OFF_STOP_CENTRE}: the beam-centre ray crosses the aperture stop {state['stop_offset_mm']:.6g} mm from "
-                f"its centre (tolerance {tolerance:g} mm), so it is not the field's chief ray; aim the source at the "
-                f"stop centre")
+                f"the centre of its opening (tolerance {tolerance:g} mm), so it is not the field's chief ray; aim the "
+                f"source at the centre of the stop's opening")
     if state["status"] == STOP_NOT_CROSSED:
         return f"{STOP_NOT_CROSSED}: the run has an aperture stop and this path's beam-centre ray does not cross it"
-    return f"{STOP_UNRESOLVED}: the stop crossing of this path's beam-centre ray matches no aperture stop of the scene"
+    detail = state.get("detail") or "it matches no aperture stop of the scene"
+    return f"{STOP_UNRESOLVED}: the stop crossing of this path's beam-centre ray is not resolved: {detail}"
 
 
 def _sub(a, b) -> list[float]:
@@ -396,62 +406,145 @@ def paraxial_reference(project_file: Path, project: dict, axis_source_id: str, m
 
 # ------------------------------------------------------------------------------------------ aperture stops
 
+def _opening_centre(surface: dict) -> tuple[float, float] | None:
+    """The centre of a stop surface's opening in its plane (local X, Y; mm): its aperture_center_mm, (0, 0) when the
+    scene states none; None when the value is not two finite numbers."""
+    centre = surface.get("aperture_center_mm")
+    if centre is None:
+        return 0.0, 0.0
+    if isinstance(centre, (list, tuple)) and len(centre) == 2 and all(_finite(c) for c in centre):
+        return float(centre[0]), float(centre[1])
+    return None
+
+
 def scene_stops(scene: dict) -> list[dict]:
-    """Every aperture-stop surface of a run's optical scene: id, centre and unit normal (design frame, mm)."""
+    """Every aperture-stop surface of a run's optical scene. stop_id: the Engine surface id the run's segments name
+    (``<element>/<surface>``; a unit member's ``<element>/<member>-<surface>``); centre_mm: the centre of the stop's
+    opening (its aperture_center_mm in the stop plane's local X, Y, carried to the design frame); normal: the unit plane
+    normal; opening_center_mm: that centre in the plane's local X, Y. A stop whose plane or opening centre the scene
+    does not give has centre_mm None and the reason in geometry_issue."""
     stops: list[dict] = []
 
-    def walk(node: dict, position: list[float], quaternion: list[float], label: str) -> None:
+    def walk(node: dict, position: list[float], quaternion: list[float], element: str, members: list[str]) -> None:
         for surface in node.get("surfaces") or []:
-            if surface.get("role") == "APERTURE_STOP":
-                offset = _rotate(quaternion, (0.0, 0.0, float(surface.get("vertex_z_mm") or 0.0)))
-                stops.append({"stop_id": f"{label}-{surface.get('surface_id')}",
-                              "centre_mm": [position[k] + offset[k] for k in range(3)],
-                              "normal": _rotate(quaternion, (0.0, 0.0, 1.0)),
-                              "clear_radius_mm": surface.get("clear_radius_mm")})
+            if surface.get("role") != "APERTURE_STOP":
+                continue
+            surface_id = str(surface.get("surface_id"))
+            stop_id: str | None
+            if not members:
+                stop_id = f"{element}/{surface_id}"
+            elif len(members) == 1:
+                stop_id = f"{element}/{members[0]}-{surface_id}"
+            else:  # the Engine names the surfaces of one member level only
+                stop_id = None
+            label = "/".join([element, *members, surface_id])
+            entry: dict = {"stop_id": stop_id, "label": label, "centre_mm": None, "normal": None,
+                           "opening_center_mm": None, "clear_radius_mm": surface.get("clear_radius_mm"),
+                           "geometry_issue": None}
+            opening = _opening_centre(surface)
+            vertex = surface.get("vertex_z_mm", 0.0)
+            if surface.get("origin_mm") is not None or not (vertex is None or _finite(vertex)):
+                entry["geometry_issue"] = (f"the scene does not place the stop surface {label} by a finite vertex_z_mm "
+                                           f"on its element axis (vertex_z_mm {vertex!r}, origin_mm "
+                                           f"{surface.get('origin_mm')!r})")
+            elif opening is None:
+                entry["geometry_issue"] = (f"the opening centre of the stop surface {label} "
+                                           f"({surface.get('aperture_center_mm')!r}) is not two finite lengths")
+            else:
+                offset = _rotate(quaternion, (opening[0], opening[1], float(vertex or 0.0)))
+                entry.update(centre_mm=[position[k] + offset[k] for k in range(3)],
+                             normal=list(_rotate(quaternion, (0.0, 0.0, 1.0))), opening_center_mm=list(opening))
+            stops.append(entry)
         for member in node.get("members") or []:
             pose = member.get("pose") or {}
             shift = _rotate(quaternion, tuple(pose.get("position_mm", (0.0, 0.0, 0.0))))  # type: ignore[arg-type]
             walk(member.get("body") or {}, [position[k] + shift[k] for k in range(3)],
-                 _qmul(quaternion, pose.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])),
-                 f"{label}/{member.get('member_id')}")
+                 _qmul(quaternion, pose.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])), element,
+                 [*members, str(member.get("member_id"))])
 
     for element in scene.get("elements") or []:
         pose = element.get("pose") or {}
         walk(element.get("geometry") or {}, list(pose.get("position_mm", [0.0, 0.0, 0.0])),
-             list(pose.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])), str(element.get("element_id")))
+             list(pose.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])), str(element.get("element_id")), [])
     return stops
 
 
-def _stop_crossing(point: list[float], stops: list[dict]) -> tuple[str, float] | None:
-    best = None
-    for stop in stops:
-        d = [point[k] - stop["centre_mm"][k] for k in range(3)]
-        normal = sum(d[k] * stop["normal"][k] for k in range(3))
-        if abs(normal) > 1e-6 * max(1.0, math.sqrt(sum(c * c for c in stop["centre_mm"]))):
-            continue
-        offset = math.sqrt(max(0.0, sum(c * c for c in d) - normal * normal))
-        if best is None or offset < best[1]:
-            best = (stop["stop_id"], offset)
-    return best
+def _plane_distance(point: list[float], stop: dict) -> float:
+    return _dot3(_sub(point, stop["centre_mm"]), stop["normal"])
+
+
+def _in_plane(point: list[float], stop: dict) -> bool:
+    return abs(_plane_distance(point, stop)) <= 1e-6 * max(1.0, math.sqrt(_dot3(stop["centre_mm"], stop["centre_mm"])))
+
+
+def _offset(point: list[float], stop: dict) -> float:
+    """Distance of a point of the stop plane from the centre of the stop's opening, in that plane."""
+    d = _sub(point, stop["centre_mm"])
+    normal = _dot3(d, stop["normal"])
+    return math.sqrt(max(0.0, _dot3(d, d) - normal * normal))
+
+
+def _crossing(segment: dict, by_id: dict[str, dict], stops: list[dict]) -> tuple[dict | None, str | None, str | None]:
+    """The stop a segment ends on: (stop, identified_by, None); (None, None, why) when it ends on a stop that is not
+    resolved; (None, None, None) when it does not end on a stop."""
+    surface_id = segment.get("end_surface_id")
+    event = segment.get("end_event")
+    if isinstance(surface_id, str) and surface_id:
+        stop = by_id.get(surface_id)
+        if stop is not None:
+            return stop, "ENGINE_SURFACE_ID", None
+        if event == "aperture_stop":
+            return None, None, (f"the segment ends at an aperture stop ({surface_id}) that is not an aperture-stop "
+                                f"surface of the run's optical scene")
+        return None, None, None
+    if event != "aperture_stop":
+        return None, None, None
+    point = _point(segment.get("end_mm"))
+    if point is None:
+        return None, None, "the segment ends at an aperture stop without a surface id or an end point"
+    planes = [stop for stop in stops if stop["centre_mm"] is not None and _in_plane(point, stop)]
+    if len(planes) == 1:
+        return planes[0], "STOP_PLANE", None
+    return None, None, (f"the segment ends at an aperture stop without a surface id, and its end point lies in the plane "
+                        f"of {len(planes)} aperture stops of the scene, not exactly one")
 
 
 def chief_ray_stops(result: dict, scene: dict) -> dict[str, dict]:
-    """path_id -> where the path's chief ray crosses the aperture stop: status, stop_id and stop_offset_mm (its distance
-    from the stop centre in the stop plane; the largest one when it crosses several)."""
+    """path_id -> where the path's chief ray crosses the aperture stop: status, stop_id, stop_offset_mm (its distance
+    from the centre of the stop's opening, in the stop plane; the largest one when it crosses several), identified_by
+    (ENGINE_SURFACE_ID: the segment's end surface is the stop's Engine surface id, whatever its event, e.g. a sampled
+    stop's complex_transmission; STOP_PLANE: a segment without a surface id whose aperture_stop end lies in exactly one
+    stop plane) and detail (why a crossing is CHIEF_RAY_STOP_UNRESOLVED)."""
     stops = scene_stops(scene)
+    by_id = {stop["stop_id"]: stop for stop in stops if stop["stop_id"] is not None}
     states: dict[str, dict] = {}
     for path in result.get("paths") or []:
-        state: dict = {"status": NO_APERTURE_STOP, "stop_id": None, "stop_offset_mm": None}
+        state: dict = {"status": NO_APERTURE_STOP, "stop_id": None, "stop_offset_mm": None, "identified_by": None,
+                       "detail": None}
         if stops:
-            crossings = [s["end_mm"] for s in path.get("segments") or [] if s.get("end_event") == "aperture_stop"]
-            state["status"] = STOP_NOT_CROSSED if not crossings else STOP_CROSSED
-            for point in crossings:
-                found = _stop_crossing(point, stops)
-                if found is None:
-                    state.update(status=STOP_UNRESOLVED, stop_id=None, stop_offset_mm=None)
+            state["status"] = STOP_NOT_CROSSED
+            for segment in path.get("segments") or []:
+                stop, identified_by, problem = _crossing(segment, by_id, stops)
+                if stop is None and problem is None:
+                    continue
+                point = _point(segment.get("end_mm"))
+                if stop is not None:
+                    if stop["centre_mm"] is None:
+                        problem = stop["geometry_issue"]
+                    elif point is None:
+                        problem = f"the segment ending at {stop['stop_id']} has no end point"
+                    elif not _in_plane(point, stop):
+                        problem = (f"the segment ends at {stop['stop_id']} {_plane_distance(point, stop):.6g} mm off "
+                                   f"the stop plane the scene gives")
+                if problem is not None or stop is None or point is None:
+                    state.update(status=STOP_UNRESOLVED, stop_id=None if stop is None else stop["stop_id"],
+                                 stop_offset_mm=None, identified_by=identified_by,
+                                 detail=problem or "the stop crossing is not resolved")
                     break
-                if state["stop_offset_mm"] is None or found[1] > state["stop_offset_mm"]:
-                    state.update(stop_id=found[0], stop_offset_mm=found[1])
+                offset = _offset(point, stop)
+                if state["stop_offset_mm"] is None or offset > state["stop_offset_mm"]:
+                    state.update(status=STOP_CROSSED, stop_id=stop["stop_id"], stop_offset_mm=offset,
+                                 identified_by=identified_by)
         states[path["path_id"]] = state
     return states
 
@@ -506,6 +599,24 @@ def chief_rays(collected: dict) -> dict[str, dict]:
     return chiefs
 
 
+def reflected_refusal(collected: dict) -> FieldError | None:
+    """The refusal of a plane that only reflected paths reach (REFLECTED_PATH_UNSUPPORTED, with each path's reflection
+    count before the plane), from ray_fans.collect()'s data; None when a path reaching the plane is not reflected."""
+    selected = list(collected.get("selected") or [])
+    arrivals = collected.get("arrivals") or {}
+    counts = {path_id: ray_fans._reflections(arrivals.get(path_id) or {}) for path_id in selected}
+    if not selected or not all(counts.values()):
+        return None
+    listed = ", ".join(f"{path_id} ({count})" for path_id, count in counts.items())
+    return FieldError(
+        REFLECTED_PATH_UNSUPPORTED,
+        f"every path reaching {collected.get('monitor')} is reflected before it (path, reflections: {listed}); field "
+        f"rows need the pupil orientation at the plane, which is not resolved for reflected paths, so the field "
+        f"analysis supports paths without a reflection before the plane only",
+        details={"monitor": collected.get("monitor"),
+                 "reflected_paths": [{"path_id": path_id, "reflections": count} for path_id, count in counts.items()]})
+
+
 def _read_json(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -525,7 +636,13 @@ def build(run_dir: Path, monitor: str, efl_mm: float | None = None,
     result = _read_json(run_dir / "simulation_result.json")
     scene = _read_json(run_dir / "optical_scene.json")
     collected = ray_fans.collect(run_dir, monitor, runner=runner)
-    fans = ray_fans.assemble(collected)
+    try:
+        fans = ray_fans.assemble(collected)
+    except ray_fans.FanError as exc:
+        refusal = reflected_refusal(collected) if exc.code == "NO_FANS" else None
+        if refusal is not None:
+            raise refusal from None
+        raise
 
     def efl_for(axis_source_id: str, wavelength_nm: float) -> dict:
         return paraxial_reference(project_file, project, axis_source_id, monitor, wavelength_nm, runner)
@@ -534,12 +651,12 @@ def build(run_dir: Path, monitor: str, efl_mm: float | None = None,
     document = analyze(fans["paths"], axes, efl_mm, axis_tolerance_mm, efl_for=efl_for,
                        stops=chief_ray_stops(result, scene), stop_tolerance_mm=stop_tolerance_mm,
                        chiefs=chief_rays(collected), plane=collected["plane"])
-    has_stop = bool(scene_stops(scene))
+    stops = scene_stops(scene)
     return {"schema": "os-optics-kit.field-aberrations", "schema_version": 1, "run": str(run_dir), "monitor": monitor,
             "basis": "published engine ray data at the plane, the run's chief-ray segments and aperture-stop surfaces; "
                      "field angle from source poses; geometric optics",
-            "chief_ray": ("the beam-centre ray of each source, checked against the aperture-stop centre "
-                          f"(stop_tolerance_mm {stop_tolerance_mm:g})" if has_stop else
+            "chief_ray": ("the beam-centre ray of each source, checked against the centre of the aperture stop's "
+                          f"opening (stop_tolerance_mm {stop_tolerance_mm:g})" if stops else
                           "the beam-centre ray of each source: the run has no aperture stop, so it is the field's "
                           "chief ray only for a source aimed at the entrance-pupil centre"),
             "conventions": {"distortion_pct": "(h - EFL tan(theta)) / (EFL tan(theta)), h (distortion_height_mm) and "
@@ -550,6 +667,8 @@ def build(run_dir: Path, monitor: str, efl_mm: float | None = None,
                             "focus_mm": "along the plane normal from the plane, positive behind it; innermost pupil "
                                         "zone (focus_zone_rho names it: its focus differs from the paraxial focus "
                                         "by terms of order rho^2)"},
+            "aperture_stops": [{key: stop[key] for key in ("stop_id", "label", "opening_center_mm", "centre_mm",
+                                                           "normal", "geometry_issue")} for stop in stops],
             **document,
             "unreached_fields": unreached_fields(fans, result, sorted(axes),
                                                  {row["source_id"] for row in document["fields"]})}
@@ -563,7 +682,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--efl", type=float, help="effective focal length (mm, > 0) for the distortion reference; "
                                                     "default: the engine's paraxial EFL")
     parser.add_argument("--stop-tolerance-mm", type=float, default=STOP_TOLERANCE_MM,
-                        help="how far a chief ray may cross the aperture stop from its centre (default %(default)s)")
+                        help="how far a chief ray may cross the aperture stop from the centre of its opening "
+                             "(default %(default)s)")
     parser.add_argument("--out", type=Path)
     try:
         args = parser.parse_args(argv)
@@ -575,7 +695,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         document = build(args.run, args.monitor, args.efl, stop_tolerance_mm=args.stop_tolerance_mm)
     except (FieldError, ray_fans.FanError) as exc:
-        print(json.dumps({"error": {"code": exc.code, "message": str(exc)}}), file=sys.stderr)
+        error: dict = {"code": exc.code, "message": str(exc)}
+        if exc.details is not None:
+            error["details"] = exc.details
+        print(json.dumps({"error": error}), file=sys.stderr)
         return 4
     text = json.dumps(document, indent=2, allow_nan=False)
     if args.out:
