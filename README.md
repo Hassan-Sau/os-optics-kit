@@ -20,7 +20,7 @@ which any coding agent can load.
 | --- | --- | --- |
 | [`os-optics`](https://pypi.org/project/os-optics/) | PyPI | The engine: optical catalog, simulation, results and 3D view |
 | [`os-optics-kit`](https://pypi.org/project/os-optics-kit/) | PyPI | Tools, cases and agent skills built on the engine |
-| [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | Engine source, documentation and feedback |
+| [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | Engine source, tests, documentation and discussions |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | This repository: tools, cases, skills and contributions |
 
 **[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Local viewer](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/viewer.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
@@ -28,7 +28,7 @@ which any coding agent can load.
 ## Install
 
 ```bash
-python -m pip install "os-optics[protected]" os-optics-kit
+python -m pip install os-optics os-optics-kit
 os-optics doctor
 ```
 
@@ -181,5 +181,4 @@ pull request, or stop at a bundle with the patch to submit later. See [CONTRIBUT
 
 ## License
 
-os-optics-kit is released under the [MIT License](https://github.com/JunLin615/os-optics-kit/blob/main/LICENSE). The engine, os-optics, is released under the MIT License from 0.14.0, with its source in
-[JunLin615/os-optics](https://github.com/JunLin615/os-optics); earlier releases keep the license they were published with.
+os-optics-kit is released under the [MIT License](https://github.com/JunLin615/os-optics-kit/blob/main/LICENSE). The engine, [os-optics](https://github.com/JunLin615/os-optics), is also released under the MIT License (starting from 0.14.0).
