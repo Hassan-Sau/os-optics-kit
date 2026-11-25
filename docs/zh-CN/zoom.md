@@ -115,7 +115,7 @@ os-optics results configurations zoom/run                            # 并列比
 加 `--study` 时，命令还会通过扫描机制运行每个配置（参数 `efl_mm`；未求解的样本记为被拒绝的样本），因此研究
 工具都可以使用：`--workers`、`--resume`、`os-optics-kit plot sweep zoom/study --y target:axis_spot`、
 `os-optics-kit compare zoom/study`、`os-optics-kit report zoom/study --project zoom/project.json`，以及用
-`present init RUN zoom/study --animate` 回放各样本。示例中像面上轴上光斑半径按 λf / (πw₀) 从 35 mm 时的
+`present init RUN zoom/study --animate --set assets.playback-study.y=target:axis_spot` 回放各样本并绘出光斑半径。示例中像面上轴上光斑半径按 λf / (πw₀) 从 35 mm 时的
 0.00705 mm 增大到 105 mm 时的 0.02115 mm：追迹光束始终聚焦在固定像面上。
 
 ## 限制

@@ -127,8 +127,8 @@ os-optics results configurations zoom/run                            # the confi
 With `--study` the command also runs every configuration through the sweep machinery (parameter `efl_mm`; an
 unsolved sample is a refused sample), so the study tools apply: `--workers`, `--resume`,
 `os-optics-kit plot sweep zoom/study --y target:axis_spot`, `os-optics-kit compare zoom/study`,
-`os-optics-kit report zoom/study --project zoom/project.json`, and `present init RUN zoom/study --animate` for a
-playback of the samples. In the example the on-axis spot radius on the image plane grows as λf / (πw₀) from
+`os-optics-kit report zoom/study --project zoom/project.json`, and `present init RUN zoom/study --animate
+--set assets.playback-study.y=target:axis_spot` for a playback of the samples that plots the spot radius. In the example the on-axis spot radius on the image plane grows as λf / (πw₀) from
 0.00705 mm at 35 mm to 0.02115 mm at 105 mm: the traced beam stays focused on the fixed plane.
 
 ## Limits

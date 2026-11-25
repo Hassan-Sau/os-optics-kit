@@ -38,10 +38,10 @@ JSON. Per path: `path_id`, `source_id`, `wavelength_nm`, `chief_uv_mm`, `tangent
 `longitudinal_mm`, `opd_waves`); `spot_rms_um`, `opd_rms_waves`; `engine` (OPD RMS/PV, wavefront
 status and reason; spot only for the same run, plane, line, route and crossing: `spot_rms_comparison`
 says `COMPARED` or why not). `imaging`: the run check.
-`unreached`: paths without counted rays at the plane, with their termination; `refused`: paths without
-fans, with the code and reason. Exit 0, or 4 with a JSON error on stderr
+`unreached`: paths with no counted rays at the plane, with termination; `refused`: paths without
+fans, with code and reason. Exit 0, or 4 with JSON on stderr
 (`BAD_ARGUMENT`, `PATH_NOT_FOUND`, `NO_FANS`, `FAN_AXIS_NOT_SAMPLED`, `PUPIL_FRAME_UNRESOLVED`,
-`IMAGING_INVALID`, `ENGINE_RESULTS_FAILED`, ...).
+`IMAGING_INVALID`, `ENGINE_RESULTS_FAILED`, `OUTPUT_NOT_WRITABLE`, ...).
 
 ## Conventions
 
