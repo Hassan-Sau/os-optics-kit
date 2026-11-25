@@ -85,8 +85,11 @@ it, and `feasible` is `null` when a constraint is not established.
 | `reason` | for an invalid candidate: `code`, `stage`, `message` and details |
 
 An invalid candidate keeps the residual length: each entry is `invalid_residual` (1000 by default; choose it above
-any residual a valid candidate reaches), and for `OUT_OF_BOUNDS` it grows with the distance outside the bounds.
-`evaluate` never raises for a candidate. Reason codes:
+any residual a valid candidate reaches), and for `OUT_OF_BOUNDS` it grows with the distance outside the bounds, up
+to `sqrt(sys.float_info.max / (2 * len(residuals)))` so that the sum of the squared residuals stays within half the float range (`violation`
+is `null` when the distance itself overflows). `residuals`, `objective` and `residual_objective` are finite or
+`null` in every result, so `json.dumps(result.as_dict(), allow_nan=False)` accepts them. `evaluate` never raises
+for a candidate. Reason codes:
 
 | Code | When |
 | --- | --- |
@@ -97,7 +100,8 @@ any residual a valid candidate reaches), and for `OUT_OF_BOUNDS` it grows with t
 | `ANALYSIS_REFUSED` | the imaging analysis refused the request |
 | `MTF_SOURCE_NOT_FOUND` | an MTF selection matches no curve |
 | `QUANTITY_UNAVAILABLE` | a quantity was not computed, or its value is not used under `value_use` |
-| `RESIDUAL_NOT_FINITE` | a residual or margin overflowed |
+| `RESIDUAL_NOT_FINITE` | a residual or margin overflowed (for residuals, `not_finite` names them and `residuals` holds `null` in their place) |
+| `AGGREGATE_NOT_FINITE` | every residual is finite, but `objective` or `residual_objective` exceeds the float range (a residual near 1e154 or above squares past it); `overflowed` names which, `residuals` and `largest_residual` keep the finite values. Larger scales or smaller weights bring them into range |
 | `ENGINE_ERROR` | any other Engine error |
 
 A session evaluates one candidate at a time: do not call one `Adapter`, or adapters that share a session, from

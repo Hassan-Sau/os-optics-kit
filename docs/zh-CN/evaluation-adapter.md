@@ -78,7 +78,10 @@ result = adapter.evaluate({"refocus": 0.3})   # 或 adapter.evaluate([0.3])，�
 | `reason` | 候选无效时：`code`、`stage`、`message` 及细节 |
 
 无效候选保持残差长度：每项为 `invalid_residual`（默认 1000；应取大于有效候选可能达到的任何残差），
-`OUT_OF_BOUNDS` 时随超出边界的距离增大。`evaluate` 对任何候选都不抛出异常。原因代码：
+`OUT_OF_BOUNDS` 时随超出边界的距离增大，上限为 `sqrt(sys.float_info.max / (2 * len(residuals)))`，使残差平方和不超过浮点范围的一半
+（距离本身溢出时 `violation` 为 `null`）。每个结果的 `residuals`、`objective` 和 `residual_objective` 都是有限数
+或 `null`，因此 `json.dumps(result.as_dict(), allow_nan=False)` 可以接受它们。`evaluate` 对任何候选都不抛出异常。
+原因代码：
 
 | 代码 | 何时 |
 | --- | --- |
@@ -89,7 +92,8 @@ result = adapter.evaluate({"refocus": 0.3})   # 或 adapter.evaluate([0.3])，�
 | `ANALYSIS_REFUSED` | 成像分析拒绝了请求 |
 | `MTF_SOURCE_NOT_FOUND` | MTF 选择没有匹配任何曲线 |
 | `QUANTITY_UNAVAILABLE` | 某个量未计算，或其数值在 `value_use` 下不被使用 |
-| `RESIDUAL_NOT_FINITE` | 某个残差或裕量溢出 |
+| `RESIDUAL_NOT_FINITE` | 某个残差或裕量溢出（残差溢出时，`not_finite` 列出这些残差，`residuals` 中对应位置为 `null`） |
+| `AGGREGATE_NOT_FINITE` | 每个残差都有限，但 `objective` 或 `residual_objective` 超出浮点范围（约 1e154 及以上的残差平方后即超出）；`overflowed` 指明是哪一个，`residuals` 和 `largest_residual` 保留有限值。增大尺度或减小权重可使其回到范围内 |
 | `ENGINE_ERROR` | 引擎的其他错误 |
 
 一个会话一次只评估一个候选：不要从多个线程调用同一个 `Adapter`，或共享同一会话的多个适配器。并行评估时，
