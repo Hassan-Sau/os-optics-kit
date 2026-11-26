@@ -12,8 +12,7 @@ kind: tool
 ## When to use
 
 - A coaxial design has a fixed group, a variator and a compensator, and you need their positions over a focal-length
-  range with the image on one plane: a cam table, a check of known zoom positions, or the range limits that travel
-  and mount clearance allow.
+  range with the image on one plane: a cam table, a check of known zoom positions, or the travel and clearance limits.
 
 ## When not to use
 
@@ -35,16 +34,15 @@ kind: tool
 
 ## Outputs
 
-`DIR/project.json` (one configuration per solved sample: anchors keep their id, others `efl_042p50`),
-`trajectory.json`, `trajectory.csv` and a Markdown report of the same table; with `--study`, `DIR/study` (a sweep
-study, parameter `efl_mm`, for `compare`, `plot sweep`, `report`, `present`). Per sample: requested and achieved EFL, positions, focus error
+`DIR/project.json` (one configuration per sample: anchors keep their id, others `efl_042p50`), `trajectory.json`,
+`trajectory.csv` and a Markdown report of the same table; with `--study`, `DIR/study` (a sweep study, parameter
+`efl_mm`, for `compare`, `plot sweep`, `report`, `present`). Per sample: requested and achieved EFL, positions, focus error
 (rear focal point minus image plane along the axis), clearances, `status` (`PASS`, `FAIL`, `INFEASIBLE`,
 `UNSOLVED`, `UNVERIFIED`) and `reasons` (`TRAVEL_EXCEEDED`, `CLEARANCE_VIOLATED`, `EFL_OUT_OF_TOLERANCE`,
 `FOCUS_OUT_OF_TOLERANCE`, `BRANCH_MISMATCH`, `CONTINUITY_UNVERIFIED`, solver codes). Stdout: compact JSON with counts, coverage
-(`covered_fraction`, `pass_intervals_mm`), worst values, anchors and the samples that are not PASS, all over the
-requested samples, `continuity` breaks; an anchor outside the requested range is reported apart under
-`anchors_outside_range`. Exit 0 all PASS, 1 otherwise, 4 refused (`SPEC_INVALID`, `UNKNOWN_ID`, `OUTPUT_EXISTS`,
-`AXIS_FOLDED`, `IMAGE_PLANE_OFF_AXIS`, `IMAGE_PLANE_MISMATCH`, `UNGROUPED_PATH_ELEMENT`).
+(`covered_fraction`, `pass_intervals_mm`), worst values, anchors, the samples that are not PASS and `continuity`
+breaks; an anchor outside the requested range is reported under `anchors_outside_range`. Exit 0 all PASS, 1 otherwise, 4 refused (`SPEC_INVALID`, `UNKNOWN_ID`, `OUTPUT_EXISTS`,
+`AXIS_FOLDED`, `IMAGE_PLANE_OFF_AXIS`, `IMAGE_PLANE_MISMATCH`, `UNGROUPED_PATH_ELEMENT`). Summary `image_plane`: the plane the focus is held on; if the targets measure on another, its `note` says so: tell the user.
 
 ## Minimal example
 
@@ -58,11 +56,10 @@ os-optics-kit zoom studies/zoom_constrained.json --out constrained
 
 ## Limits
 
-- Paraxial: object at infinity, image of the rear focal point; aberrations are not part of the solve (run the
-  configurations, `--study`, for traced beams).
+- Paraxial: object at infinity, image of the rear focal point; no aberrations in the solve (`--study` traces them).
 - Travel and clearance are checked, never imposed: violations are reported with the solved position.
 - One branch, followed from the anchors: past a fold UNSOLVED; between disagreeing anchors UNVERIFIED.
-- Clearance is axial, from vertices plus declared envelopes.
+- Clearance is axial: vertices plus envelopes.
 
 ## Version
 

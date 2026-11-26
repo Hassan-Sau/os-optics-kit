@@ -337,6 +337,18 @@ def solver_base(base):
     return document
 
 
+#: The Engine's paraxial analysis answers PARAXIAL_ELEMENT_UNSUPPORTED for a component that is not an optical element with
+#: a simulation model (a detector, an aperture) and, with the same code, for an optical element it cannot take alone (a
+#: cylindrical, biconic or toroidal surface without a section axis; a surface set or facet solid). Only the first kind may
+#: be left out of the path check: the second kind is an optical element in the light's path (os-optics-kit#50).
+_NOT_AN_OPTICAL_ELEMENT = "is not an optical element with a simulation model"
+
+
+def _is_not_an_optical_element(problem) -> bool:
+    return (isinstance(problem, dict) and problem.get("code") == "PARAXIAL_ELEMENT_UNSUPPORTED"
+            and _NOT_AN_OPTICAL_ELEMENT in str(problem.get("message") or ""))
+
+
 def _covers_axis(offset_mm: float, reach_mm: float | None) -> bool:
     """An element or plane whose origin lies ``offset_mm`` off the axis meets the axis when its aperture reaches that
     far; when the reach is not known it counts as meeting it (a refusal rather than a result the Project does not hold)."""
@@ -402,6 +414,7 @@ class EngineModel:
         self.nominal = {g["group_id"]: self.group_position(g, self.base) for g in self.moving}
         self.check_image_plane(base, reply)
         self.check_full_path(reply)
+        self.plane = self.describe_image_plane(base)
 
     def _paraxial(self, document, components):
         from os_optics.local import json_api
@@ -439,6 +452,46 @@ class EngineModel:
                 "plane its runs and targets measure on. Name that plane with image_plane.observation_id, or move the "
                 "observation to the requested plane", requested_mm=self.image_s, observations=behind)
 
+    def describe_image_plane(self, base):
+        """Which observation the solve holds the focus on, and whether the Project's targets measure there (#58).
+
+        ``image_plane`` is an observation id or a position; a position that coincides with an observation of the
+        Project names it. The Project's targets name the observations they measure on: when none of them is the plane
+        the solve uses, a PASS of the study applies to the solve's plane and not to the plane the targets read, and the
+        record says so (``note``)."""
+        planes = {}
+        for plane in base.get("observations") or []:
+            if not isinstance(plane, dict) or plane.get("device_instance_id") or not plane.get("observation_id"):
+                continue
+            point = [float(v) for v in ((plane.get("pose") or {}).get("position_mm") or [])]
+            if len(point) == 3:
+                planes[plane["observation_id"]] = {"along": _dot(point, self.axis),
+                                                   "off_axis": _off_axis(point, self.origin, self.axis),
+                                                   "reach": _plane_reach(plane)}
+        used = self.normalized["image_plane"]["observation_id"]
+        if used is None:
+            near = sorted(oid for oid, p in planes.items() if abs(p["along"] - self.image_s) <= AXIS_TOLERANCE_MM
+                          and _covers_axis(p["off_axis"], p["reach"]))
+            used = near[0] if near else None
+        targeted = sorted({t.get("observation_id") for t in base.get("targets") or []
+                           if isinstance(t, dict) and t.get("observation_id") in planes})
+        record = {"observation_id": used, "targets_observation_ids": targeted,
+                  "targets_measure_on_this_plane": None if not targeted else used in targeted, "note": None}
+        where = f"{self.image_s:g} mm along the axis"
+        if used is None:
+            record["note"] = (f"image_plane.position_mm lies at {where} and matches no observation of the Project: the "
+                              "focus is held on that plane only, not on an observation of the exported Project")
+            if targeted:
+                record["note"] += ("; the Project's targets measure on "
+                                   + ", ".join(f"{t!r} at {planes[t]['along']:g} mm" for t in targeted)
+                                   + ", so a PASS of this study does not apply to that plane")
+        elif targeted and used not in targeted:
+            record["note"] = (f"the focus is held on observation {used!r} ({where}), but the Project's targets measure "
+                              "on " + ", ".join(f"{t!r} at {planes[t]['along']:g} mm" for t in targeted)
+                              + f": a PASS of this study applies to {used!r}, not to the plane the targets read. Name "
+                              "that plane with image_plane.observation_id to hold the focus there")
+        return record
+
     def check_full_path(self, reply):
         """Refuse an optical element on the axis before the image plane that is in no group (UNGROUPED_PATH_ELEMENT).
 
@@ -457,8 +510,8 @@ class EngineModel:
                 continue
             alone = self._paraxial(self.base, [iid])
             if not alone.get("ok"):
-                codes = {p.get("code") for p in ((alone.get("error") or {}).get("problems") or [])}
-                if not codes or codes <= {"PARAXIAL_ELEMENT_UNSUPPORTED"}:
+                problems = (alone.get("error") or {}).get("problems") or []
+                if not problems or all(_is_not_an_optical_element(p) for p in problems):
                     continue  # not an optical element with a simulation model (a detector, an aperture...)
                 # an optical element the paraxial analysis cannot take alone (tilted, decentred beyond its tolerance,
                 # cylindrical without a section axis): its declared pose decides whether it lies in the light's path
@@ -1044,6 +1097,20 @@ def _sci(value):
     return "-" if value is None else f"{value:.2e}"
 
 
+def _plane_phrase(plane):
+    """The report's words for the plane the focus is held on: its observation and whether the targets read it."""
+    where = f"{plane['position_along_axis_mm']:g} mm along the axis"
+    if plane.get("observation_id") is None:
+        return f"the focus is held on a plane at {where} that is no observation of the Project"
+    phrase = f"the focus is held on observation '{plane['observation_id']}' ({where})"
+    measured = plane.get("targets_measure_on_this_plane")
+    if measured:
+        return phrase + ", the plane the Project's targets measure on"
+    if measured is False:
+        return phrase + ", not the plane the Project's targets measure on"
+    return phrase + "; the Project's targets name no observation"
+
+
 def _report_row(s, moving):
     positions = s.get("positions_mm") or (dict(zip(moving, s["solved_positions_mm"]))
                                           if s.get("solved_positions_mm") else {})
@@ -1066,10 +1133,11 @@ def report_markdown(trajectory):
         "",
         f"Requested EFL {cov['requested_range_mm'][0]:g} to {cov['requested_range_mm'][1]:g} mm in "
         f"{cov['samples']} samples (step {_fmt(cov['min_step_mm'], 3)} to {_fmt(cov['max_step_mm'], 3)} mm) at "
-        f"{trajectory['spec']['wavelength_nm']:g} nm; image plane at {trajectory['image_plane']['position_along_axis_mm']:g}"
-        f" mm along the axis. Tolerances: EFL ±{tol['efl_mm']:g} mm, focus ±{tol['focus_mm']:g} mm; least clearance "
+        f"{trajectory['spec']['wavelength_nm']:g} nm; {_plane_phrase(trajectory['image_plane'])}. Tolerances: EFL ±{tol['efl_mm']:g} mm, focus ±{tol['focus_mm']:g} mm; least clearance "
         f"{trajectory['spec']['clearance']['min_mm']:g} mm.",
         "",
+        *([f"**Check the plane:** {trajectory['image_plane']['note']}.", ""]
+          if trajectory["image_plane"].get("note") else []),
         "| Status | Samples |",
         "| --- | ---: |",
         *[f"| {status} | {counts[status]} of {cov['samples']} |" for status in STATUSES],
@@ -1226,7 +1294,8 @@ def run_zoom(spec, out, *, base, base_path=None, overwrite=False, study=False, w
         "status": "PASS" if counts["PASS"] == len(samples) else "FAIL",
         "spec": {key: normalized[key] for key in ("wavelength_nm", "groups", "tolerances", "clearance", "solver")},
         "moving_groups": normalized["moving_groups"],
-        "image_plane": {**normalized["image_plane"], "position_along_axis_mm": model.image_s},
+        "image_plane": {**normalized["image_plane"], **{k: v for k, v in model.plane.items() if k != "observation_id"},
+                        "observation_id": model.plane["observation_id"], "position_along_axis_mm": model.image_s},
         "optical_axis": model.axis,
         "base_project": {"file": None if base_path is None else Path(base_path).as_posix(),
                          "document_sha256": wc.canonical_digest(base)},
@@ -1311,6 +1380,9 @@ def compact(trajectory, limit=6):
             "coverage": {k: trajectory["coverage"][k] for k in ("requested_range_mm", "samples", "max_step_mm",
                                                                  "covered_fraction", "pass_intervals_mm")},
             "worst": trajectory["worst"],
+            "image_plane": {k: trajectory["image_plane"].get(k) for k in (
+                "observation_id", "position_along_axis_mm", "targets_observation_ids", "targets_measure_on_this_plane",
+                "note")},
             "anchors": [{k: a.get(k) for k in ("label", "efl_mm", "shift_mm", "converged", "in_requested_range",
                                                "sample_id", "status")} |
                         {"branch_ok": None if a["branch_check"] is None else a["branch_check"]["ok"]}

@@ -58,7 +58,10 @@ is re-recorded on os-optics 0.14.0.
 - `zoom`: the solved model is the exported Project. An optical element before the image plane that is in no group and
   whose aperture reaches the axis is refused with `UNGROUPED_PATH_ELEMENT` (with the groups' and the full path's EFL),
   and an `image_plane.position_mm` that misses the Project's observation behind the last group is refused with
-  `IMAGE_PLANE_MISMATCH`, both before anything is written.
+  `IMAGE_PLANE_MISMATCH`, both before anything is written. A cylindrical, biconic or toroidal element the paraxial
+  analysis takes only with a section axis counts as an element on the path (it was skipped with the detectors and
+  apertures, #50). The summary, `trajectory.json` and `report.md` name the observation the focus is held on and the
+  observations the Project's targets measure on, and say so when they differ (#58).
 - CI: the engine job installs exactly the engine the gate selects from `baseline.json` (pinned with `==`) and shows
   the installed os-optics version, wheel and SHA-256 in its summary; a change to `scripts/engine_gate.py` verifies
   every case.

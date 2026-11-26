@@ -43,7 +43,7 @@ os-optics-kit zoom studies/zoom.json --out zoom --study
 | 键 | 含义 |
 | --- | --- |
 | `groups` | 像面之前位于光轴上的全部光学元件，按光经过的顺序（不在任何镜组中的元件会被拒绝，`UNGROUPED_PATH_ELEMENT`：求解会漏掉它，而写出的 Project 包含它）。镜组沿光轴整体移动；恰好两个镜组运动。`travel_mm` 是运动组允许的范围，`envelope_mm` 是镜座在第一个顶点之前和最后一个顶点之后的轴向长度。 |
-| `image_plane` | Project 的一个观测面（固定在设计坐标系中）或一个点，必须位于光轴上。若 Project 在最后一个镜组之后有观测面，给出的点必须与它重合（否则为 `IMAGE_PLANE_MISMATCH`：写出的 Project 的运行和目标都在该观测面上测量）。 |
+| `image_plane` | Project 的一个观测面（固定在设计坐标系中）或一个点，必须位于光轴上。若 Project 在最后一个镜组之后有观测面，给出的点必须与它重合（否则为 `IMAGE_PLANE_MISMATCH`：写出的 Project 的运行和目标都在该观测面上测量）。摘要、`trajectory.json` 和 `report.md` 会写出保持对焦的观测面（`image_plane.observation_id`）和 Project 目标所测量的观测面（`targets_observation_ids`）。两者不同时（例如目标所测面之后 5 mm 处另有一个观测面），`targets_measure_on_this_plane` 为 `false`，`image_plane.note` 和报告会说明 PASS 适用于哪个面；用 `observation_id` 指定目标所测的面即可把对焦保持在该面上。 |
 | `efl_mm` | 要求的焦距：`{start, stop, step}`（含 stop）或 `{values}`。 |
 | `anchors` | 已知解：某个焦距下运动组的位置，直接给出，或从基础 Project 的某个配置中读取（`{efl_mm, configuration_id}`）。它们作为求解起点并检查求解分支，可以位于要求范围之外。 |
 | `tolerances` | 每个样本的验收：\|EFL 误差\| 和 \|焦点误差\|，单位 mm。 |

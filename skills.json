@@ -238,7 +238,7 @@
       "requires": "os-optics>=0.14,<0.15",
       "path": "skills/zoom/SKILL.md",
       "tokens": 898,
-      "sha256": "4f4489a8325c84a445f22e41a33ad1a402fd44b407a11ea07be7e685b58eecde"
+      "sha256": "d3b4d5f1c4777a7710da64f334a81750e84577f8d41f6eabe4c15209a927f34c"
     }
   ]
 }

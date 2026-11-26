@@ -441,6 +441,25 @@ def _with_extra_lens(position_mm, focal_mm="50"):
     return project
 
 
+def _with_cylindrical_lens(position_mm):
+    """The case Project with the light-sheet case's cylindrical singlet CYL (native model, cylindrical surfaces: the
+    paraxial analysis takes it only with a section axis) in no group of the spec, on the same axis as the groups."""
+    project = json.loads((CASE / "project.json").read_text(encoding="utf-8"))
+    sheet = json.loads((CASE.parent / "cylindrical-light-sheet" / "project.json").read_text(encoding="utf-8"))
+    cyl = copy.deepcopy(next(c for c in sheet["components"] if c.get("instance_id") == "CYL"))
+    cyl["nominal_pose"] = {"position_mm": list(position_mm),
+                           "quaternion_wxyz": next(c for c in project["components"]
+                                                   if c.get("instance_id") == "G1")["nominal_pose"]["quaternion_wxyz"]}
+    project["components"].append(cyl)
+    project["optical_models"].append(copy.deepcopy(next(m for m in sheet["optical_models"] if m.get("model_id") == "CYL")))
+    for key in ("model_materials", "model_coatings", "materials"):
+        held = {json.dumps(m, sort_keys=True) for m in project.get(key, [])}
+        for item in sheet.get(key, []):
+            if json.dumps(item, sort_keys=True) not in held:
+                project.setdefault(key, []).append(copy.deepcopy(item))
+    return project
+
+
 def _refused(tmp, spec, project):
     (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
     (tmp / "base.json").write_text(json.dumps(project), encoding="utf-8")
@@ -524,6 +543,67 @@ class ExportedProjectTests(unittest.TestCase):
                 code, summary, error = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}), project)
                 self.assertEqual((code, error["code"], error["components"]), (4, "UNGROUPED_PATH_ELEMENT", ["EXTRA"]),
                                  degrees)
+
+    def _with_monitor(self, x=205.0):
+        project = json.loads((CASE / "project.json").read_text(encoding="utf-8"))
+        monitor = copy.deepcopy(project["observations"][0])
+        monitor["observation_id"] = "monitor"
+        monitor["pose"]["position_mm"] = [x, 0.0, 0.0]
+        project["observations"].append(monitor)
+        return project
+
+    def test_the_report_names_the_observation_the_focus_is_held_on(self):
+        # os-optics-kit#58: the plane of the solve is named, and the Project's targets measure on it
+        for plane in ({"observation_id": "image"}, {"position_mm": [200.0, 0.0, 0.0]}):
+            with TempDir() as tmp:
+                code, summary, stderr = _refused(tmp, _case_spec(image_plane=plane, efl_mm={"values": [35, 70, 105]}),
+                                                 json.loads((CASE / "project.json").read_text(encoding="utf-8")))
+                self.assertEqual((code, summary["status"]), (0, "PASS"), stderr)
+                self.assertEqual(summary["image_plane"], {
+                    "observation_id": "image", "position_along_axis_mm": 200.0, "targets_observation_ids": ["image"],
+                    "targets_measure_on_this_plane": True, "note": None})
+                report = (tmp / "out" / "report.md").read_text(encoding="utf-8")
+                self.assertIn("the focus is held on observation 'image' (200 mm along the axis), the plane the "
+                              "Project's targets measure on", report)
+                self.assertNotIn("Check the plane", report)
+
+    def test_a_plane_other_than_the_one_the_targets_measure_on_is_named_in_the_report(self):
+        # a second observation 5 mm behind 'image' (where the targets measure): a position on it is accepted (the
+        # exported Project keeps both planes) and the PASS says which plane it applies to
+        for plane in ({"position_mm": [205.0, 0.0, 0.0]}, {"observation_id": "monitor"}):
+            with TempDir() as tmp:
+                code, summary, stderr = _refused(tmp, _case_spec(image_plane=plane, efl_mm={"values": [35, 70, 105]}),
+                                                 self._with_monitor())
+                self.assertEqual((code, summary["status"]), (0, "PASS"), stderr)
+                image = summary["image_plane"]
+                self.assertEqual((image["observation_id"], image["targets_observation_ids"],
+                                  image["targets_measure_on_this_plane"], image["position_along_axis_mm"]),
+                                 ("monitor", ["image"], False, 205.0), plane)
+                for text in ("'monitor'", "'image' at 200 mm", "not to the plane the targets read"):
+                    self.assertIn(text, image["note"])
+                report = (tmp / "out" / "report.md").read_text(encoding="utf-8")
+                self.assertIn("not the plane the Project's targets measure on", report)
+                self.assertIn("**Check the plane:**", report)
+                trajectory = json.loads((tmp / "out" / "trajectory.json").read_text(encoding="utf-8"))
+                self.assertEqual(trajectory["image_plane"]["note"], image["note"])
+
+    def test_a_cylindrical_lens_in_no_group_is_refused(self):
+        # os-optics-kit#50: the paraxial analysis takes a cylindrical element only with a section axis and refuses it
+        # alone with PARAXIAL_ELEMENT_UNSUPPORTED, the code it also gives a detector or an aperture; the zoom study
+        # skipped it, reported PASS for the groups, and the exported Project's beam crossed the cylinder
+        for where in ([160.0, 0.0, 0.0], [160.0, 0.5, 0.0]):
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}),
+                                                _with_cylindrical_lens(where))
+                self.assertEqual((code, error["code"], error["components"]), (4, "UNGROUPED_PATH_ELEMENT", ["CYL"]), where)
+                self.assertFalse((tmp / "out" / "trajectory.json").exists())
+
+    def test_a_cylindrical_lens_off_the_path_is_not_refused(self):
+        for where in ([260.0, 0.0, 0.0], [160.0, 40.0, 0.0]):  # behind the image plane; 40 mm beside the axis
+            with TempDir() as tmp:
+                code, summary, stderr = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}),
+                                                 _with_cylindrical_lens(where))
+                self.assertEqual((code, summary["status"]), (0, "PASS"), (where, stderr))
 
     def test_lenses_off_the_path_are_not_refused(self):
         for where in ([260.0, 0.0, 0.0], [160.0, 40.0, 0.0]):  # behind the image plane; 40 mm beside the axis
