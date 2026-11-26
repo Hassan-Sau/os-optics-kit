@@ -358,7 +358,11 @@ class AlignmentTests(unittest.TestCase):
 class CatalogVariantTests(unittest.TestCase):
     def test_beam_expander_spacing_moves_the_waist_not_the_radius(self):
         nominal = outcome(D.catalog_beam_expander())
-        self.assertEqual(nominal["status"], "PASS")
+        # os-optics 0.14.0, catalog 2026-10-28.1: both targets MET; the run status is UNKNOWN because the catalog
+        # states no bulk absorption for the lenses' N-BK7 at 780 nm, so the output power is not known (0.13: PASS).
+        self.assertEqual(nominal["status"], "UNKNOWN")
+        self.assertEqual(nominal["issues"], ["BULK_LOSS_NOT_ESTABLISHED"])
+        self.assertEqual({t["status"] for t in nominal["targets"].values()}, {"PASS"})
         self.assertIsNotNone(nominal["catalog_version"])
         shifted = outcome(D.catalog_beam_expander(l2_shift_mm=1.0))
         self.assertEqual(shifted["targets"]["expanded_waist"]["status"], "FAIL")

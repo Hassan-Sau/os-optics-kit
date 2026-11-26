@@ -45,5 +45,6 @@ metadata), piquasso Apache-2.0.
 | 3 mm window compensated by its phase delay only | indistinguishability 0.95 → 0.854 |
 | 0.25 ps photons in the 1 mm Mach-Zehnder | refused: `SINGLE_FREQUENCY_MODEL_INVALID` |
 
-The export's per-path group delay makes the window's 0.163 ps group-delay mismatch visible. Verified with
-os-optics 0.13.0 on Python 3.14.7 (perceval-quandela 1.3.1, piquasso 8.0.1).
+The export's per-path group delay makes the window's 0.163 ps group-delay mismatch visible. The quantum side
+ran with os-optics 0.13.0 on Python 3.14.7 (perceval-quandela 1.3.1, piquasso 8.0.1). The engine run is verified
+with os-optics 0.14.0, in vacuum (`environment.pressure_pa` 0), and gives the same values.

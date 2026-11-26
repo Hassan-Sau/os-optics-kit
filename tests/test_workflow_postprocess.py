@@ -92,6 +92,24 @@ class CompareTests(unittest.TestCase):
         path.write_text(path.read_text(encoding="utf-8").replace("PASS", "FAIL", 1), encoding="utf-8")
         result = wc.freshness(self.dir / "base.json", target)
         self.assertIn("RUN_UNVERIFIED", result["reasons"])
+        # its hashes still name the base Project, but a run whose files do not verify is never CURRENT
+        self.assertEqual(result["freshness"], "HISTORICAL")
+        self.assertEqual((result["integrity"]["checked"], result["integrity"]["consistent"]), (True, False))
+        self.assertTrue(result["problems"])
+        labelled = cr.compare([self.dir / "a" / "run", target], labels=["a", "tampered"],
+                              project=self.dir / "base.json")
+        labels = {r["label"]: r for r in labelled["runs"]}
+        self.assertEqual(labels["a"]["outcome_label"], labels["a"]["outcome"])  # CURRENT: no label
+        self.assertEqual(labels["tampered"]["freshness"]["freshness"], "HISTORICAL")
+        self.assertIn("RUN_UNVERIFIED", labels["tampered"]["freshness"]["reasons"])
+        self.assertTrue(labels["tampered"]["outcome_label"].startswith("HISTORICAL "))
+        # `edit --run` reuses only a CURRENT run: the edited copy is run again, not reported as the base's result
+        edited = self.dir / "tampered-edit"
+        shutil.copytree(target, edited)
+        rerun = ep.run_edited(self.dir / "base.json", edited)
+        self.assertFalse(rerun["reused"])
+        self.assertEqual(rerun["outcome"], labels["a"]["outcome"])
+        self.assertTrue(wc.read_saved_run(edited, require_integrity=True)[0]["integrity"]["consistent"])
         # compare labels the run that does not verify instead of aborting; an unreadable run is an ERROR entry
         broken = self.dir / "broken"
         shutil.copytree(self.dir / "a" / "run", broken)

@@ -1,7 +1,7 @@
 ---
 name: tolerance
-description: Seeded tolerance study - draw independent offsets from declared uniform or truncated-normal distributions, save the sample set before any run, run and count every sample, and report target distributions. Use it to estimate how often a design meets its targets.
-version: 0.3.0
+description: Seeded tolerance study - draw independent offsets from declared uniform or truncated-normal distributions, save the sample set before any run, run and count every sample, and report target distributions, optionally after solving compensators. Use it to estimate how often a design meets its targets.
+version: 0.4.0
 command: os-optics-kit tolerance
 requires: os-optics>=0.14,<0.15
 kind: tool
@@ -28,12 +28,14 @@ kind: tool
 - `parameters`: `{name, unit, ops, nominal? (omitted: the base value, as in sensitivity), distribution}` with distribution
   `{"kind": "uniform", "low", "high"}` or `{"kind": "normal", "sigma", "mean_offset"?, "truncate_sigma" | "bounds"}`
   (offsets from nominal, parameter unit). Optional `value_use` (`exact` default, or `reported`).
+- Optional `compensation`: compensators solved for every sample, with as-built and compensated results
+  (spec, checks, states, runs): `skills show tolerance compensation.md`.
 
 Options: `--out STUDY_DIR`, `--seed N`, `--samples N`, `--zero-tolerance` (all offsets 0),
 `--draw-only` (write the sample set and stop; not with `--plan-only`), `--verify-seed STUDY_DIR`,
-`--overwrite`, `--no-plots`, `--no-report`.
+`--overwrite`, `--no-plots`, `--no-report`, `--no-compensation` (same samples, as-built only).
 Execution (`study` skill): `--workers N|auto` (worker processes, same results as one), `--resume`
-(continue a planned or interrupted study), `--plan-only` (then `os-optics-kit study run DIR`),
+(continue a planned or interrupted study), `--plan-only` (then run the printed `next` command),
 `--time-limit-s`, `--max-memory-mib` (per evaluation), `--ray-data summary`. A larger `--samples` with `--resume` keeps
 the samples already run.
 
@@ -41,8 +43,9 @@ the samples already run.
 
 `sampling.json` and `samples.csv` (written before any run), `samples/`, `table.csv`, `summary.json`,
 `plots/`, `report/`. Stdout: counts per outcome with denominators, PASS fraction, per-target percentiles,
-unsuccessful samples. Exit 0 at least one PASS sample (or drawn, planned), 1 no PASS sample or a
-`--verify-seed` mismatch, 4 refused spec or invalid input, 130 cancelled (resumable).
+unsuccessful samples, the `compensation` block when declared. Exit 0 at least one PASS sample (or drawn,
+planned), 1 no PASS sample or a `--verify-seed` mismatch, 4 refused spec or invalid input, 130 cancelled
+(resumable).
 
 ## Minimal example
 
@@ -69,4 +72,5 @@ os-optics-kit tolerance --verify-seed tol
 
 ## Version
 
+0.4.0 (os-optics-kit 0.5.0): caller-declared compensation, for os-optics 0.14.
 0.3.0 (os-optics-kit 0.4.0), verified with os-optics 0.13.0 and catalog release 2026-10-28.1.

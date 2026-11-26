@@ -536,9 +536,10 @@ TABULATED_LENS = {"model_id": "metalens", "model": {
     "status": "DECLARED"}}
 
 
-def tabulated_lens_project(wavelengths_nm):
-    """Catalog-free tabulated thin lens (rows 500-560 nm) with one failing target at 530 nm: Gaussian source (20 um
-    waist at the lens) -> lens at x = 0 -> observation plane 0.3 mm behind, 50 mm above the design origin."""
+def tabulated_lens_project(wavelengths_nm, target_nm=530.0):
+    """Catalog-free tabulated thin lens (rows 500-560 nm) with one failing target ``spot_<target_nm>nm`` at
+    ``target_nm``: Gaussian source (20 um waist at the lens) -> lens at x = 0 -> observation plane 0.3 mm behind,
+    50 mm above the design origin."""
     from os_optics_kit.interop import pose
 
     height_mm, source_distance_mm = 50.0, 1.0
@@ -562,24 +563,27 @@ def tabulated_lens_project(wavelengths_nm):
         "observations": [{"observation_id": "after", "aperture": {"shape": "circle", "radius_mm": 1},
                           "pose": pose((0.3, 0.0, height_mm), (1, 0, 0))}],
     }
-    document["targets"] = [{"target_id": "spot_530nm", "metric": "waist_radius_x_mm", "observation_id": "after",
-                            "wavelength_nm": "530", "maximum": 1e-6, "unit": "mm"}]
+    document["targets"] = [{"target_id": f"spot_{target_nm:g}nm", "metric": "waist_radius_x_mm",
+                            "observation_id": "after", "wavelength_nm": f"{target_nm:g}", "maximum": 1e-6,
+                            "unit": "mm"}]
     return document
 
 
 @requires_engine
 class EngineOutOfModelIssueTests(unittest.TestCase):
-    """A tabulated thin lens outside its rows is a model-scope issue (MODEL_WAVELENGTH_OUTSIDE_BAND). The target that
-    depends on the lens keeps its value and bounds but is assessed INDETERMINATE with the scope code in
-    applicability_issue_codes, so the sample outcome is OUT_OF_MODEL while the run status stays FAIL for the unmet
-    numeric bound. The 530 nm reference run stays inside the model."""
+    """A tabulated thin lens outside its rows is a model-scope issue (MODEL_WAVELENGTH_OUTSIDE_BAND). A target that
+    reads the light outside the rows (450 nm) keeps its value and bounds but is assessed INDETERMINATE with the scope
+    code in applicability_issue_codes, so the sample outcome is OUT_OF_MODEL while the run status stays FAIL for the
+    unmet numeric bound. The Engine scopes the issue to the arrivals it affects: in the same run a target that reads
+    only the 530 nm light is assessed as usual (UNMET, FAIL). The 530 nm reference run stays inside the model."""
 
     @classmethod
     def setUpClass(cls):
         cls._tmp = TempDir()
         cls.dir = cls._tmp.__enter__()
         cls.inside = wc.run_sample(tabulated_lens_project([530.0]), cls.dir / "inside")
-        cls.outside = wc.run_sample(tabulated_lens_project([450.0, 530.0]), cls.dir / "outside")
+        cls.outside = wc.run_sample(tabulated_lens_project([450.0, 530.0], target_nm=450.0), cls.dir / "outside")
+        cls.unaffected = wc.run_sample(tabulated_lens_project([450.0, 530.0]), cls.dir / "unaffected")
 
     @classmethod
     def tearDownClass(cls):
@@ -596,11 +600,20 @@ class EngineOutOfModelIssueTests(unittest.TestCase):
         target = self.outside["targets"][0]
         self.assertEqual((target["assessment"], target["applicability_issue_codes"]),
                          ("INDETERMINATE", ["MODEL_WAVELENGTH_OUTSIDE_BAND"]))
+        self.assertGreater(target["value"], 0)
+        self.assertEqual(target["bounds"], {"maximum": 1e-6})
+        # the issue is reported for the run, but the 530 nm target does not read the light it affects
+        self.assertEqual([issue["code"] for issue in self.unaffected["model_scope_issues"]],
+                         ["MODEL_WAVELENGTH_OUTSIDE_BAND"])
+        self.assertFalse(self.unaffected["in_model_scope"])
+        target = self.unaffected["targets"][0]
+        self.assertEqual((self.unaffected["outcome"], target["assessment"], target["applicability_issue_codes"]),
+                         ("FAIL", "UNMET", []))
         self.assertEqual(target["value"], self.inside["targets"][0]["value"])
 
     def test_edit_run_exits_3(self):
-        wc.write_json(self.dir / "base.json", tabulated_lens_project([450.0, 530.0]))
-        wc.write_json(self.dir / "edit.json", [{"op": "set_target", "target_id": "spot_530nm",
+        wc.write_json(self.dir / "base.json", tabulated_lens_project([450.0, 530.0], target_nm=450.0))
+        wc.write_json(self.dir / "edit.json", [{"op": "set_target", "target_id": "spot_450nm",
                                                 "changes": {"maximum": 2e-6}}])
         code, out, err = invoke(ep.main, [str(self.dir / "base.json"), "--edits", str(self.dir / "edit.json"),
                                           "--out", str(self.dir / "edited.json"), "--run", str(self.dir / "edited")])
@@ -614,7 +627,8 @@ class EngineOutOfModelIssueTests(unittest.TestCase):
     def test_sweep_compare_and_report_use_the_same_rule(self):
         spec = {"parameters": [{"name": "short", "unit": "nm", "values": [530.0, 450.0]}], "max_evaluations": 3}
         summary = sp.run_sweep(spec, self.dir / "study",
-                               build=lambda p: tabulated_lens_project(sorted({p["short"], 530.0})))
+                               build=lambda p: tabulated_lens_project(sorted({p["short"], 530.0}),
+                                                                      target_nm=p["short"]))
         rows = {r["sample_id"]: r for r in summary["rows"]}
         self.assertEqual((rows["s0001"]["outcome"], rows["s0002"]["outcome"]), ("FAIL", "OUT_OF_MODEL"))
         self.assertEqual(rows["s0002"]["out_of_model_issues"], ["MODEL_WAVELENGTH_OUTSIDE_BAND"])

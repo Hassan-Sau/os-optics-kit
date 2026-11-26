@@ -23,12 +23,18 @@ def pose(z):
     return {"position_mm": [0, 0, z], "quaternion_wxyz": [1, 0, 0, 0]}
 
 
+# The medium of the design and of the independent ABCD reference: vacuum (air at zero pressure); without an
+# environment os-optics 0.14 propagates in standard air. The glass is stated lossless (absorption 0): os-optics 0.14
+# leaves the power of light through a material with no stated bulk loss unknown.
+ENVIRONMENT = {"pressure_pa": "0"}
+
+
 def build(config, out):
     """Use the public native builder for the real two-interface prescription."""
     f = config["focal_length_mm"]
     params = {
         "focal_length_mm": f, "design_wavelength_nm": 488,
-        "material": {"constant_index": "1.52", "valid_band_nm": [450, 650]},
+        "material": {"constant_index": "1.52", "valid_band_nm": [450, 650], "absorption_coefficient_per_mm": "0"},
         "diameter_mm": 12, "clear_aperture_diameter_mm": 10,
         "form": "PLANO_EXIT", "cylinder_axis": "X", "center_thickness_mm": 2,
         "ar_coating": {"reflectance": "0.005", "valid_aoi_deg": [0, 20]}, "model_id": "CYL",
@@ -58,7 +64,7 @@ def build(config, out):
         {"target_id": "sheet-range", "metric": "rayleigh_range_y_mm", "observation_id": "after",
          "minimum": config["min_range_mm"] / 2, "unit": "mm"},
     ]
-    return {"schema": "opensci.project", "project_schema_version": "2.0",
+    return {"schema": "opensci.project", "project_schema_version": "2.0", "environment": dict(ENVIRONMENT),
             "components": [source, lens], "optical_models": [native["optical_model"]],
             "model_materials": native["model_materials"], "model_coatings": native["model_coatings"],
             "observations": observations, "targets": targets}

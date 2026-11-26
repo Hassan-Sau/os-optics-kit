@@ -21,7 +21,9 @@ The released `lens.achromat` builder generated this original prescription with d
 Sellmeier coefficients. The [material sources and prescription](data/README.md) give its provenance. The model
 has spherical radii 32.732120, −32.732120 and −984.019095 mm, crown/flint centre thicknesses 3/2 mm, and a
 12.7 mm outer diameter. Its **6 mm clear diameter** bounds the pupil on all three surfaces; nominal f-number
-is 12.5. Interfaces use the Engine's uncoated Fresnel transmission, with zero declared bulk absorption.
+is 12.5. Interfaces use the Engine's uncoated Fresnel transmission, with zero declared bulk absorption
+(`absorption_coefficient_per_mm` 0), and the lens works in vacuum (`environment.pressure_pa` 0), the medium of its
+first record; os-optics 0.14 would otherwise use standard air.
 
 PSF/MTF require a bounded pupil. An unbounded model returns UNKNOWN with `PUPIL_NOT_BOUNDED`; give the
 design a physical aperture or explicitly bound the imaging launch with `launch_radius_beam_radii`.
@@ -88,7 +90,8 @@ The native `presentation.json` describes that 3D view; the full gallery register
 At the shared image plane the full-pupil RMS radii are 0.869/0.421/0.614 µm, and the 50% energy radii are
 approximately 3.27/3.92/4.39 µm. All five native targets are MET and the derived nominal checks pass.
 Moving the image plane by +0.15 mm keeps the same criteria and supplies an unmet derived comparison.
-The compact [numerical snapshot](data/snapshot.json) records values and Engine identity.
+The compact [numerical snapshot](data/snapshot.json) records values and Engine identity of the os-optics 0.13.0
+workflow run; os-optics 0.14.0 reproduces its native target values exactly.
 
 Diagnostic best focus minimizes **full-pupil geometric RMS**, using its squared radius at offsets −0.1, 0,
 +0.1 mm. A quadratic gives each minimum; an additional native evaluation verifies each prediction. The

@@ -19,7 +19,7 @@ os-optics-kit 基于 [OS Optics](https://github.com/JunLin615/os-optics) 引擎�
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | 引擎源代码、测试、文档与社区讨论 |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | 本仓库：工具、案例、技能与贡献 |
 
-**[Agent 指南（英文）](AGENT_GUIDE.md) · [本地查看器](docs/zh-CN/viewer.md) · [设计研究](docs/zh-CN/workflows.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
+**[Agent 指南（英文）](AGENT_GUIDE.md) · [本地查看器](docs/zh-CN/viewer.md) · [设计研究](docs/zh-CN/workflows.md) · [变焦研究](docs/zh-CN/zoom.md) · [测量数据](docs/zh-CN/measurements.md) · [斜边 SFR](docs/zh-CN/sfr.md) · [演示材料](docs/zh-CN/presentation.md) · [外部工具](docs/zh-CN/interop.md) · [工作流程步骤（英文）](docs/workflow-recipes.md) · [参与贡献（英文）](CONTRIBUTING.md)**
 
 ## 安装
 
@@ -98,6 +98,7 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 | [interop-metasurface](https://github.com/JunLin615/os-optics-kit/tree/main/cases/interop-metasurface) | 作为虚拟元件的超表面透镜 | 纳米光子学、衍射 | 小 | 否 |
 | [midwave-infrared-imager](https://github.com/JunLin615/os-optics-kit/tree/main/cases/midwave-infrared-imager) | 可制造厚度的五片中波红外成像镜头 | 成像、衍射 | 中 | 否 |
 | [sonnar-telephoto-lens](https://github.com/JunLin615/os-optics-kit/tree/main/cases/sonnar-telephoto-lens) | 六片 Sonnar，f/2.4，在完整入瞳上测量 | 成像、衍射 | 中 | 否 |
+| [three-group-zoom](https://github.com/JunLin615/os-optics-kit/tree/main/cases/three-group-zoom) | 像面固定的三组元变焦 | 成像 | 小 | 否 |
 
 ### 自由空间平台
 
@@ -155,8 +156,8 @@ os-optics-kit present bundle talk-zh --out talk-zh.zip
 
 ## 版本对应
 
-os-optics-kit 0.4.x 需要 `os-optics>=0.14,<0.15`，已在 os-optics 0.13.0 和目录版本 2026-10-28.1 上验证
-（[`baseline.json`](baseline.json)）。每个案例记录验证时使用的引擎和目录版本。见
+os-optics-kit 0.5.x 需要 `os-optics>=0.14,<0.15`。其案例已在 os-optics 0.14.0 和目录版本 2026-10-28.1 上验证
+（[`baseline.json`](baseline.json)）。Project 未声明环境时 os-optics 0.14 在标准空气中传播；最初在 os-optics 0.13.0 上记录的案例声明了其设计时的真空。每个案例记录验证时使用的引擎和目录版本。见
 [案例格式（英文）](docs/case-format.md)和[引擎对齐（英文）](docs/engine-alignment.md)。
 各版本的变更见[更新日志（英文）](CHANGELOG.md)。
 

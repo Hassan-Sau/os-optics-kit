@@ -60,6 +60,11 @@
       "selected_parameters": []
     }
   ],
+  "environment": {
+    "air_model": "EDLEN_1953_OPTICSTUDIO",
+    "pressure_pa": "0",
+    "temperature_c": "20"
+  },
   "materials": [],
   "model_coatings": [
     {
@@ -86,6 +91,7 @@
   ],
   "model_materials": [
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "Declared constant refractive index",
       "dispersion": {
         "kind": "CONSTANT_INDEX",
@@ -192,11 +198,11 @@
         "model_version": "2",
         "paraxial": {
           "axis": "Y",
-          "back_focal_length_mm": "48.684211",
-          "effective_focal_length_mm": "50",
-          "front_focal_length_mm": "50",
+          "back_focal_length_mm": "48.683849",
+          "effective_focal_length_mm": "49.999999",
+          "front_focal_length_mm": "49.999999",
           "front_principal_plane_z_mm": "0",
-          "rear_principal_plane_z_mm": "0.684211",
+          "rear_principal_plane_z_mm": "0.683849",
           "status": "DERIVED",
           "wavelength_nm": "488"
         },
@@ -206,7 +212,7 @@
             "clear_radius_mm": "5",
             "coating_id": "NATIVE-AR_450-650R0.005T0.995_AOI0-20",
             "cylinder_axis": "X",
-            "radius_mm": "26",
+            "radius_mm": "25.979142",
             "status": "DERIVED",
             "surface_id": "S1",
             "traced": "TRANSMITTED",

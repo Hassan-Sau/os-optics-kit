@@ -14,6 +14,8 @@
 
 不加 `--plan-only` 时，工具通过同样的函数一次完成全部步骤。任何一步都可以从上一步的文件开始：执行先前
 写好的规划、汇总已保存的样本、展示已保存的研究。执行之后的步骤都不运行引擎。
+`os-optics-kit zoom SPEC.json --out DIR --study` 把[变焦研究](zoom.md)求得的配置写成 `DIR/study` 中的扫描研究
+（参数 `efl_mm`）并执行它，因此下文的命令同样适用于它。
 
 ## 用多个工作进程运行研究
 
@@ -39,7 +41,8 @@ os-optics-kit sweep sweep.json --base project.json --out study --workers 4
 工作进程数 x 线程数不超过逻辑 CPU 数；超过时请求被拒绝。工作进程启动之前，命令先取得每个 Project 指定的
 目录版本，因此能串行运行的研究也能用工作进程运行。`--time-limit-s` 和 `--max-memory-mib` 限制每次评估：
 引擎的运行监视器在检查点（每次阶段切换以及长阶段内部）读取它们并在该处停止运行；超过时间限制五秒仍未返回
-的工作进程会被终止。两种情况下样本都记为 `CANCELLED`，错误代码为 `RUN_STOPPED`，原因（`TIME_LIMIT`、
+的工作进程会被终止（带补偿的公差样本最多进行 `compensation.max_evaluations + 2` 次引擎运行，按相应倍数的
+时间限制计算）。两种情况下样本都记为 `CANCELLED`，错误代码为 `RUN_STOPPED`，原因（`TIME_LIMIT`、
 `MEMORY_LIMIT`）作为问题代码。串行调度器没有其他抢占方式。
 
 ## 中断、查看与续跑
@@ -62,10 +65,10 @@ os-optics-kit study run study --resume         # 只运行没有完成记录的�
 每条样本记录在结果类别（`outcome`）之外还有一个作业状态 `state`：`COMPLETED`（引擎给出结果或拒绝了该
 设计）、`REFUSED`（规划时无法构建该样本）、`FAILED`、`CANCELLED`（被限制或取消停止）或 `NOT_RUN`，并记录
 产生它的评估器 `evaluator`。续跑时保留请求未变、已完成且由同一评估器产生的记录，读回已完成但缺少记录的
-运行目录，并运行其余样本；`journal.jsonl` 记录哪些样本被复用、哪些实际运行。评估器以其 `module:function`
+运行目录（仅限默认评估器：其他评估器的记录包含的不止该次运行，这样的样本会重新运行），并运行其余样本；`journal.jsonl` 记录哪些样本被复用、哪些实际运行。评估器以其 `module:function`
 名称标识；从 Python 传入、没有这种名称的函数（lambda、嵌套函数）没有标识，续跑会重新运行它产生的样本，
 `study status` 会在 `resume_note` 中说明这一点。请求由其 Project、所选目标、
-请求的输出和种子的 SHA-256 标识：用 `--resume` 和修改后的规格重新运行工具时，只运行请求发生变化的样本
+请求的输出和种子（带补偿的公差样本还包括其补偿的目标函数、补偿器和求解设置）的 SHA-256 标识：用 `--resume` 和修改后的规格重新运行工具时，只运行请求发生变化的样本
 （保留的记录采用新规划的标签）；公差研究在种子不变时增大 `--samples`，已运行的样本保留。随附的工具在规划
 时抽取所有随机值（公差研究：由规格中的 `seed` 抽取，写入每个样本的 Project），因此其请求的 `seed` 为 null；
 自行抽取随机数的评估器可用 `sample_seed(study_seed, sample_id)` 得到请求种子，它与执行顺序无关。用其他引擎构建
@@ -87,6 +90,32 @@ os-optics-kit study run study --resume         # 只运行没有完成记录的�
 `INCOMPLETE`，规划工具自身的状态记为 `analysis_status`，并给出没有结果的样本 `without_result` 和 `--resume`
 命令；在规划改变或新的执行开始之前，其他读取命令接受这份表格。`present build` 在使用该研究的素材上报告这些
 代码。失败、被拒绝、受时间或内存限制停止以及被 `stop_on` 停止的样本都算作有结果。
+
+## 带补偿的公差研究
+
+公差规格可以声明 `compensation`：若干补偿器（每个是一组带 `"$value"` 的编辑操作，以及单位、标称值和边界）和一个
+基于研究目标的目标函数。对每个样本，工具先运行装配后（as-built）的 Project，再在边界内求解使目标函数最小的补偿器
+偏移量，并运行补偿后的 Project。案例 [expansion-focus](../../cases/expansion-focus) 对其聚焦平面重新调焦：
+
+```bash
+os-optics-kit cases copy expansion-focus --dest .
+cd expansion-focus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus
+os-optics-kit tolerance studies/tolerance_expander_refocus.json --out refocus-plan --plan-only
+os-optics-kit study run refocus-plan --evaluator os_optics_kit.study.compensation:run_compensated
+```
+
+每个样本保留其装配后的记录，`table.csv` 另外列出补偿后的结果（`compensated:*` 列）和求解情况（`compensation:*`、
+`compensator:*`）。`counts`、目标分布和退出码都是装配后的结果；标准输出和 `summary.json` 中的 `compensation` 块
+给出装配后与补偿后的计数以及各次求解的状态 `states`：`SOLVED`；`FAILED` 并附原因（`NOT_CONVERGED`、`BOUNDS_HIT`、
+`WORSE_THAN_AS_BUILT` 等），该样本保留装配后的结果；或 `NOT_EVALUATED`。任何运行之前，补偿器的编辑操作先在偏移量
+0 和两个边界处应用一次；未通过的规格被拒绝（`SPEC_INVALID`、`NOMINAL_MISMATCH`、`COMPENSATOR_OVERLAP`），不写出
+研究。`--no-compensation` 只按装配后的状态运行同样的样本。
+
+求解在评估器 `os_optics_kit.study.compensation:run_compensated` 中进行，`study.json` 记录了它。`--plan-only` 给出的
+`next` 命令包含它；用 `study run` 运行或续跑该研究时，请以 `--evaluator` 传入它。`tolerance SPEC --resume` 会使用
+它。未经它执行的样本报告为 `NOT_EVALUATED`（`COMPENSATION_NOT_RUN`）。规格的键、求解器、检查和运行次数见
+`os-optics-kit skills show tolerance compensation.md`。
 
 ## 候选设计与外部搜索代码
 
@@ -127,9 +156,14 @@ if __name__ == "__main__":
 运行期间按 Ctrl-C），在调用其 `reset()` 之前不再运行任何作业：续跑时请使用新的调度器，或先对原调度器调用
 `reset()`。
 
+下一步取决于上一步结果的优化器（牛顿法或最小二乘迭代、线搜索）则每次调用评估一个设计：
+[评估适配器](evaluation-adapter.md)（`os_optics_kit.study.evaluation_adapter`）把一个 Project 变成以具名、有界的
+变量为自变量的函数，返回目标与约束的定长残差向量，以及其背后的每个数值、裕量和原因。只把相互独立的批次交给
+执行器。
+
 ## 何时值得并行
 
-工作进程只付出一次启动开销（创建进程并导入引擎）。下表是在有 12 个逻辑 CPU 的 Windows 台式机上用
+工作进程只付出一次启动开销（创建进程并导入引擎）。下表是在有 12 个逻辑 CPU 的 Windows 台式机上，以
 os-optics 0.13.0 运行 `python scripts/bench_study.py --workers 1,2,4 --samples 48` 的结果，每个工作进程数
 各运行一次：
 

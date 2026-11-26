@@ -255,7 +255,11 @@ def quantity(value, unit, path):
             if value["unit"] not in wc.UNITLESS:
                 raise wc.WorkflowError("UNIT_INCOMPATIBLE", f"{path}: the parameter has no unit; got "
                                        f"{value['unit']!r}", path=path, unit=value["unit"])
-            return float(value["value"])
+            number = value["value"]
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+                raise wc.WorkflowError("SPEC_INVALID", f"{path}: expected a finite number as the quantity value, got "
+                                       f"{number!r}", path=path)
+            return float(number)
         return float(wc.convert(value["value"], value["unit"], unit, path=path))
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise wc.WorkflowError("SPEC_INVALID", f"{path}: expected a finite number or a quantity, got {value!r}",

@@ -6,7 +6,7 @@ class: lens
 domain: imaging, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: summary
@@ -40,18 +40,17 @@ os-optics results imaging run --monitor image_plane --request imaging-request.js
 ## Targets
 
 Every target is `spot_rms_mm` on `image_plane`, bounded at 0.05 mm, one per field and wavelength
-(the metric is single-beam, so the source is named). All nine are MET, 0.0085-0.0436 mm. The status
-is WARNING because the engine's stray-light search runs out of paths; the main beams are traced in
-full and `in_model_scope` is true.
+(the metric is single-beam, so the source is named). All nine are MET, 0.0085-0.0436 mm. Status PASS
+(0.13.0: WARNING); the stray-light search still runs out of paths, the main beams are traced in full.
 
 ## Baseline
 
+os-optics 0.14.0, vacuum and lossless glass, as on 0.13.0; execution COMPLETED (0.13.0: PARTIAL).
 EFL 99.9878 mm (target 100), F/2 by the 25 mm stop semi-diameter, half field 3°.
 Strehl 0.908-0.982 at 4 and 5 µm, 0.315-0.514 at 3 µm. On axis at 4 µm the MTF is 0.561 at
 10.3 cycles/mm against a limit of 0.571.
-The run leaves 89.5 % of the input in `UNTRACED_REFLECTION`: each uncoated face loses its Fresnel
-reflection (Si at n=3.43 reflects 0.30 per face) instead of that branch being followed, while the
-imaging quantities are weighted by the amplitude those faces transmit.
+The run leaves 89.5 % of the input in `UNTRACED_REFLECTION` (each uncoated face's Fresnel reflection;
+Si at n=3.43 reflects 0.30 per face); imaging quantities are weighted by the transmitted amplitude.
 
 ## Files
 

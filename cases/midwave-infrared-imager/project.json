@@ -347,9 +347,15 @@
     "pupil_points_per_ring": 12,
     "pupil_ring_count": 8
   },
+  "environment": {
+    "air_model": "EDLEN_1953_OPTICSTUDIO",
+    "pressure_pa": "0",
+    "temperature_c": "20"
+  },
   "materials": [],
   "model_materials": [
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "Sellmeier dispersion formula of CAF2; copied from public optical catalog 2026-10-28.1",
       "dispersion": {
         "b": [
@@ -373,6 +379,7 @@
       }
     },
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "Sellmeier dispersion formula of SILICON; copied from public optical catalog 2026-10-28.1",
       "dispersion": {
         "b": [
@@ -396,6 +403,7 @@
       }
     },
     {
+      "absorption_coefficient_per_mm": "0",
       "basis": "Sellmeier dispersion formula of ZNSE; copied from public optical catalog 2026-10-28.1",
       "dispersion": {
         "b": [

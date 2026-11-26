@@ -30,12 +30,16 @@ run        executes the samples that still need a result and aggregates the stud
            --max-memory-mib apply per evaluation and stop it at the Engine's next checkpoint (state CANCELLED,
            error code RUN_STOPPED, problem code TIME_LIMIT / MEMORY_LIMIT; a worker process still busy 5 s after
            its time limit is terminated and recorded the same way); there is no other preemption. --evaluator
-           replaces the Engine call by a function f(request, sample_dir, limits) -> sample record. Ctrl-C (or a
+           replaces the Engine call by a function f(request, sample_dir, limits) -> sample record. A study whose
+           study.json records an evaluator (a compensated tolerance study records
+           os_optics_kit.study.compensation:run_compensated) runs with it when --evaluator is not given and
+           refuses another one before anything is written (EVALUATOR_MISMATCH, with recorded and given). Ctrl-C (or a
            cancellation through the Python API) cancels the running sample, starts no other, records the rest
            NOT_RUN and exits 130; the printed "next" command (run --resume) continues.
 status     plan size, record states, execution block (state RUNNING only while the executing process runs;
            INTERRUPTED when it ended without finishing), progress (NOT_RUN: no sample has a result; PARTIAL;
-           EXECUTED) with the next command, the samples a resume would run, last journal events;
+           EXECUTED) with the next command (naming the recorded evaluator, shown as "evaluator", when the study
+           records one), the samples a resume would run, last journal events;
            resume_note when the last execution's evaluator had no importable module:function name (a resume
            runs its samples again); never runs the Engine.
 aggregate  rewrites table.csv and summary.json (and the planning tool's analysis, plots and report) from the
@@ -198,8 +202,13 @@ def status(study_dir, events=8):
         states[record.get("state")] = states.get(record.get("state"), 0) + 1
         outcomes[record.get("outcome")] = outcomes.get(record.get("outcome"), 0) + 1
     last = study.get("execution") or {}
-    # the evaluator a resume is predicted for: the last execution's (None when it had no importable name)
-    evaluator = last.get("evaluator") if "evaluator" in last else evaluators.DEFAULT_EVALUATOR
+    # the evaluator a resume is predicted for: the one study.json records (the only one it accepts), else the last
+    # execution's (None when it had no importable name)
+    recorded = ex.recorded_evaluator(study)
+    if recorded is not None:
+        evaluator = recorded
+    else:
+        evaluator = last.get("evaluator") if "evaluator" in last else evaluators.DEFAULT_EVALUATOR
     rerun = [e["sample_id"] for e in entries if e["sample_id"] not in missing
              and store.reusable_record(study_dir, e, evaluator) is None]
     journal = store.read_journal(study_dir)
@@ -212,13 +221,14 @@ def status(study_dir, events=8):
     reached = progress.study_progress(study_dir) or {}
     described = {"status": "DESCRIBED", "kind": study.get("kind"), "samples": len(entries),
                  "progress": reached.get("state"), "next": None if running else reached.get("next"),
+                 **({"evaluator": recorded} if recorded is not None else {}),
                  "execution": execution, "owner": owner if running else None, "states": states, "outcomes": outcomes,
                  "without_record": wc.bounded(missing, TOP_ROWS),
                  "to_run_on_resume": wc.bounded(missing + rerun, TOP_ROWS),
                  "identity": study["identity"], "aggregated": summary_path.is_file(),
                  "journal": journal[-events:], "paths": {"study_dir": study_dir.as_posix(), "study": store.STUDY_FILE,
                                                          "plan": store.PLAN_FILE, "journal": store.JOURNAL_FILE}}
-    if "evaluator" in last and evaluator is None:
+    if recorded is None and "evaluator" in last and evaluator is None:
         described["resume_note"] = ("the last execution's evaluator has no importable module:function name: a "
                                     "resume keeps none of its records and runs those samples again (a module-level "
                                     "function of an importable module has a name, and a resume keeps its records)")
@@ -240,7 +250,8 @@ def _parser():
                           "with --workers auto runs serially")
     run.add_argument("--evaluator", metavar="module:function",
                      help="evaluate each request with this function instead of one Engine run (--resume keeps only "
-                          "the samples this evaluator produced)")
+                          "the samples this evaluator produced); default: the evaluator study.json records (another "
+                          "one is refused with EVALUATOR_MISMATCH), else one Engine run")
     show = commands.add_parser("status", help="plan, record states, execution and journal of a study (no Engine run)")
     show.add_argument("study_dir", type=Path, metavar="STUDY_DIR")
     again = commands.add_parser("aggregate", help="table, summary and the tool's analysis from saved records "

@@ -38,6 +38,9 @@ OUTPUT_X_MM = 700.0
 BOUNDS_MM = (150.0, 250.0)  # L1-L2 separation searched by the optimizers
 PLUS_X = [0.7071067811865476, 0.0, 0.7071067811865476, 0.0]  # local +Z along design +X
 METRIC = "divergence_half_angle_x_rad"
+# The medium the design was verified in: vacuum (air at zero pressure). Without an environment os-optics 0.14
+# propagates in standard air.
+ENVIRONMENT = {"pressure_pa": "0"}
 # A finite penalty guides the search; the returned optimum is selected only from
 # recorded evaluations with a valid objective and a met requirement.
 INFEASIBLE_PENALTY_RAD = 1.0
@@ -63,6 +66,7 @@ def base_project():
     """The baseline Project document (catalog-free; no download needed)."""
     return {
         "schema": "opensci.project", "project_schema_version": "2.0", "design_intent": "OPTICAL_SYSTEM",
+        "environment": dict(ENVIRONMENT),
         "optical_models": [ideal_lens("f50", F1_MM), ideal_lens("f150", F2_MM)],
         "components": [
             {"instance_id": "SRC", "optical_role": "source",

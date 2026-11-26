@@ -6,7 +6,7 @@ class: free-space
 domain: gaussian-beam
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: sweep, compare, plot, report, sensitivity, tolerance
@@ -17,9 +17,9 @@ license: MIT
 ## What it shows
 
 `project.json` is the nominal design of `workflow.py` (`os_optics_kit.optical_designs.expander_focus`, default
-inputs): source, L1 at 0 mm, L2 at f1 + f2, L3 100 mm after L2, planes `collimated` and `focus`. `workflow.py`
-rebuilds the design from any inputs, runs it and 21 one-parameter samples, checks every engine value against
-complex-q Gaussian propagation (63 of 63 agree), plots the targets and writes a report. Unmet and out-of-model
+inputs): source, L1 at 0 mm, L2 at f1 + f2, L3 100 mm after L2, planes `collimated` and `focus`, in vacuum.
+`workflow.py` rebuilds it from any inputs, runs it and 21 one-parameter samples, checks every engine value against
+complex-q propagation (63 of 63 agree), plots the targets, writes a report. Unmet and out-of-model
 samples stay: 1300 nm is outside the lens band (`MODEL_WAVELENGTH_OUTSIDE_BAND`), a 3 mm waist warns
 `GAUSSIAN_TRUNCATION`, 4 mm is out of model.
 
@@ -36,7 +36,7 @@ os-optics project update project.json --ops studies/compute_budget_limited.json 
 ```
 
 `wf/report/report.md` links every study. The tolerance study passes 92 of 100 seeded samples; the one-step
-compute budget gives a PARTIAL run with every target INDETERMINATE.
+compute budget gives a PARTIAL run, every target INDETERMINATE.
 
 ## Targets
 
@@ -48,12 +48,13 @@ compute budget gives a PARTIAL run with every target INDETERMINATE.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`).
-`os-optics-kit cases verify expansion-focus` repeats the run and compares it.
+os-optics 0.14.0, no catalog: run status PASS (`expected.json`).
+`os-optics-kit cases verify expansion-focus` reruns and compares it.
 
 ## Files
 
 - `project.json`, `expected.json`: the nominal design and its outcome.
 - `workflow.py`: the parameterized workflow (`--list-parameters`, `--study NAME=V1,V2`, `--no-studies`).
 - `studies/`: sensitivity, band-edge sensitivity, tolerance and compute-budget specs.
-- `README.md`, `README.zh-CN.md`: the illustrated pages; `images.json` records the system views in `images/`.
+- `adapter_example.py`: the evaluation adapter.
+- `README.md`, `README.zh-CN.md`: illustrated pages; `images.json`: their views.

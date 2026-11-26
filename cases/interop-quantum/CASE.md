@@ -6,7 +6,7 @@ class: free-space
 domain: quantum-optics, interference
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: none
@@ -44,7 +44,7 @@ python run_quantum.py q --inputs quantum_inputs.json
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`). The quantum side was verified on Python 3.14.7 with
+os-optics 0.14.0, no catalog, vacuum: run status PASS (`expected.json`). The quantum side ran with os-optics 0.13.0 on Python 3.14.7 with
 the pinned versions in `requirements-quantum.txt`.
 
 ## Files

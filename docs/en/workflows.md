@@ -7,7 +7,8 @@ parameters, compare saved runs, plot and report the results, and estimate sensit
 saves its projects and runs, prints a compact JSON summary and keeps the complete data in files. Three cases with
 parameterized workflows apply the same steps to beam expansion and focusing, polarization control and alignment.
 Sweeps, sensitivity and tolerance studies can run in parallel worker processes and be resumed; see
-[studies](studies.md).
+[studies](studies.md). A [zoom study](zoom.md) solves the positions of two moving groups over a focal-length range
+and can run the solved configurations as a study.
 
 ## Before you start
 
@@ -15,7 +16,7 @@ Sweeps, sensitivity and tolerance studies can run in parallel worker processes a
 python -m pip install "os-optics[protected]" "os-optics-kit[plot]"
 ```
 
-os-optics-kit 0.4.x works with os-optics 0.13; the numbers below come from os-optics 0.13.0 and, for catalog
+os-optics-kit 0.5.x requires `os-optics>=0.14,<0.15`; the numbers below come from os-optics 0.14.0 and, for catalog
 designs, catalog release `2026-10-28.1`. Each section copies a case with `os-optics-kit cases copy NAME --dest .`
 and runs its commands inside the case directory. Sections 1–3 use catalog components and need
 `os-optics catalog sync`; sections 4 and 5 use catalog-free ideal elements. Read each new run's own identities and
@@ -187,6 +188,10 @@ others miss the expanded-radius tolerance of 1.5 mm ± 2 % (sampled values 1.462
 is the fraction of simulated samples under these distributions. `--verify-seed` redraws the samples and confirms the
 same `samples.csv` bytes. In the third command every offset is zero, and all five samples reproduce the nominal
 project and result hashes exactly.
+
+[`studies/tolerance_expander_refocus.json`](../../cases/expansion-focus/studies/tolerance_expander_refocus.json)
+samples the same design and solves a refocus of the focus plane for every sample, reporting each sample as built and
+compensated: see [tolerance studies with compensation](studies.md#tolerance-studies-with-compensation).
 
 ## 5. Parameterized workflows
 

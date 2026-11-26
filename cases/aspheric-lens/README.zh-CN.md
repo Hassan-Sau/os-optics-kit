@@ -52,6 +52,10 @@ S10 被推到 R = −794 mm。非球面版的每个半径都落在 −96 mm 到 
 
 ## 怎么读引擎的判定
 
+已用 os-optics 0.14.0 验证：每个目标与成像量都与 os-optics 0.13.0 的数值相同。Project 声明了其 os-optics 0.13.0 记录隐含的两条假设：真空（`environment.pressure_pa` 为 0）与无吸收玻璃
+（`absorption_coefficient_per_mm` 为 0）；否则 os-optics 0.14 在标准空气中传播，并把穿过未声明损耗的玻璃的功率记为未知。执行结果为 COMPLETED（os-optics 0.13.0 为 PARTIAL）：未追踪光探针仍会耗尽路径预算（`budgets.exhausted` 为
+`max_paths`，阶段 `untraced_light`），但 os-optics 0.14 不再因该探针把运行判为 PARTIAL；它是独立于已追踪光束的模型。
+
 运行状态是 **FAIL**，`in_model_scope` 是 **false**，这两条都不是在说光学设计的好坏。引擎给出了
 两条发现：
 
@@ -65,8 +69,7 @@ S10 被推到 R = −794 mm。非球面版的每个半径都落在 −96 mm 到 
 引擎仍然给出的是成像链路本身：`results imaging` 为九个光源各返回 14 个量，**126 个里有 110 个是
 KNOWN**——像方 NA、光线弥散斑、波前 RMS 与 PV、Strehl 比、切向与弧矢衍射 MTF 及其极限、50% 与 80%
 包围圆半径。它拒绝的 16 个是八个视场的 `geometric_mtf_*` 一对量，理由是 `GEOMETRIC_REGIME_NOT_MET`：
-*"the wavefront error (0.0797 waves RMS) is below 1.0 wave: diffraction sets the MTF here, and the
-diffraction MTF is the one to read"*。这与[中波红外案例](../midwave-infrared-imager/README.zh-CN.md)
+*"diffraction sets the MTF here: read mtf_tangential"*（波前误差 0.0797 波 RMS，小于一个波长）。这与[中波红外案例](../midwave-infrared-imager/README.zh-CN.md)
 展示的是同一个边界，只是从另一侧看：一个好到达到衍射极限的镜头，没有有意义的光线 MTF。
 
 九条目标都是 `spot_rms_mm`、上限 0.05 mm：6 条 MET（轴上 1.00–5.42 µm，12.5° 9.80–11.08 µm），

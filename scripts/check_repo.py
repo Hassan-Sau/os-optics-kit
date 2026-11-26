@@ -5,7 +5,7 @@ python scripts/check_repo.py [--root DIR]
 Checks every tracked or new (not ignored) file:
   links       relative links and images in Markdown resolve inside the repository
   size        no file over 1 MiB; images at most 400 KiB
-  forbidden   no run outputs, 3D scenes, wheels, keys or catalog releases
+  forbidden   no run outputs, 3D scenes, wheels, keys, catalog releases or work logs (ROUND_LOG.md)
   paths       no absolute paths of a particular machine (home directories, drive-letter work folders)
   secrets     no access tokens or private keys
   json        every JSON file parses
@@ -13,7 +13,15 @@ Checks every tracked or new (not ignored) file:
               of tools/os_optics_kit/_engine.py
   pins        exact os-optics / os-optics-kit pins in documents equal the baseline; no retired host or name
   ranges      every os-optics range written out (os-optics>=A,<B) equals the baseline's engine.requirement
-  changelog   CHANGELOG.md has a section "## X.Y.Z" for the baseline's kit_version, newest first
+  statements  README.md, README.zh-CN.md, AGENT_GUIDE.md, CONTRIBUTING.md and docs/: every os-optics series
+              named ("os-optics 0.14", "OS Optics 0.14") is inside engine.requirement, every os-optics-kit series
+              ("os-optics-kit 0.4.x") is the kit_version's, every "verified with os-optics X.Y.Z" (and its
+              Chinese forms) names engine.verified_version, and every catalog release named is catalog.version
+  cases       each case's CASE.md front matter and expected.json record engine.verified_version (or, while one
+              is set, engine.candidate_version: a case that needs the candidate engine, recorded on it in both)
+              and the same catalog (catalog.version, or none); its Baseline line and "Verified with" text name those
+  changelog   CHANGELOG.md has a section "## X.Y.Z" for the baseline's kit_version, newest first, after an
+              optional first section "## Unreleased"
   pairs      English and Simplified Chinese documents come in pairs (README.md / README.zh-CN.md, docs/en / docs/zh-CN)
 
 Prints one compact JSON document; exit 0 when there is no problem, 1 otherwise.
@@ -47,6 +55,7 @@ FORBIDDEN_NAMES = {"simulation_result.json", "engine_request.json", "local_valid
                    "optical_scene.json", ".env", ".pypirc"}
 FORBIDDEN_SUFFIXES = {".glb", ".gltf", ".whl", ".pem", ".key", ".p12", ".pfx", ".pyc"}
 FORBIDDEN_PATTERN = re.compile(r"public_optical_catalog", re.I)
+WORK_LOGS = {"round_log.md"}
 
 MACHINE_PATHS = (
     re.compile(r"(?<![\w])[A-Za-z]:(?:\\\\?|/)(?:Users|Documents and Settings|working|cache|apps|data|tmp|temp)"
@@ -79,10 +88,19 @@ ENGINE_RANGE = re.compile(r"(?<![\w-])os-optics(?:\[[\w,\s-]+\])?\s*((?:>=|<=|~=
                           r"(?:\s*,\s*(?:>=|<=|~=|!=|==|>|<)\s*\d[\w.]*)*)")
 # Install pins are checked everywhere except here: tests and these scripts use made-up versions on purpose.
 PIN_EXEMPT = ("tests/", "scripts/")
+# Version and catalog statements in the kit's own documents (cases record their own; skills keep their history).
+STATEMENT_DOCUMENTS = ("README.md", "README.zh-CN.md", "AGENT_GUIDE.md", "CONTRIBUTING.md")
+ENGINE_SERIES = re.compile(r"(?<![\w-])(?:os-optics|OS Optics)\s+(\d+\.\d+)(?:\.x)?(?!\w|\.\d)")
+KIT_SERIES = re.compile(r"(?<![\w-])os-optics-kit\s+(\d+\.\d+)(?:\.x)?(?!\w|\.\d)")
+VERIFIED_ENGINE = re.compile(r"(?:(?i:verified\s+with|come\s+from|recorded\s+with)\s+|(?:已在|来自|已用|上用)\s*)"
+                             r"(?:os-optics|OS Optics)\s+(\d+\.\d+\.\d+)(?!\w|\.\d)")
+CASE_BASELINE_LINE = re.compile(r"^os-optics\s+(\d+\.\d+\.\d+),", re.M)
+CATALOG_RELEASE = re.compile(r"(?<![\w.-])(20\d\d-\d\d-\d\d\.\d+)(?!\w|\.\d)")
 CHANGELOG = "CHANGELOG.md"
 # The changelog records the ranges of earlier releases; it is the one document allowed to state another range.
 RANGE_EXEMPT = (CHANGELOG,)
 RELEASE_HEADING = re.compile(r"^## (\S+)[ \t]*$", re.M)
+UNRELEASED = "Unreleased"
 RELEASE_VERSION = re.compile(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+|\.post\d+|\.dev\d+)?")
 
 LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
@@ -179,7 +197,10 @@ def check_size(root: Path, name: str, problems: Problems) -> None:
 def check_forbidden(name: str, problems: Problems) -> None:
     path = PurePosixPath(name)
     folders = path.parts[:-1]
-    if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES \
+    if path.name.lower() in WORK_LOGS:
+        problems.add("forbidden", name, "work log; record changes in CHANGELOG.md, commit messages and pull "
+                                        "requests instead")
+    elif path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES \
             or FORBIDDEN_PATTERN.search(path.name):
         problems.add("forbidden", name, "generated output, binary package, key or catalog release; keep it out of "
                                         "the repository")
@@ -236,6 +257,124 @@ def check_ranges(name: str, text: str, baseline: dict, problems: Problems) -> No
                          line_of(text, match.start()))
 
 
+def in_statement_scope(name: str) -> bool:
+    return name in STATEMENT_DOCUMENTS or (name.startswith("docs/") and name.endswith(".md"))
+
+
+def check_statements(name: str, text: str, baseline: dict, problems: Problems) -> None:
+    """Version and catalog statements of the kit's own documents agree with baseline.json (``statements``)."""
+    engine = baseline.get("engine") or {}
+    requirement, verified = engine.get("requirement"), engine.get("verified_version")
+    kit = baseline.get("kit_version")
+    catalog = (baseline.get("catalog") or {}).get("version")
+    if isinstance(requirement, str):
+        for match in ENGINE_SERIES.finditer(text):
+            try:
+                inside = satisfies(match.group(1), requirement)
+            except ValueError:
+                inside = False
+            if not inside:
+                problems.add("statements", name, f"names os-optics {match.group(1)}, outside baseline.json "
+                                                  f"engine.requirement {requirement}", line_of(text, match.start()))
+    if isinstance(kit, str):
+        series = ".".join(kit.split(".")[:2])
+        for match in KIT_SERIES.finditer(text):
+            if match.group(1) != series:
+                problems.add("statements", name, f"names os-optics-kit {match.group(1)}; baseline.json kit_version "
+                                                  f"is {kit}", line_of(text, match.start()))
+    if isinstance(verified, str):
+        for match in VERIFIED_ENGINE.finditer(text):
+            if match.group(1) != verified:
+                problems.add("statements", name, f"states verification with os-optics {match.group(1)}; "
+                                                  f"baseline.json engine.verified_version is {verified}",
+                             line_of(text, match.start()))
+    if isinstance(catalog, str):
+        for match in CATALOG_RELEASE.finditer(text):
+            if match.group(1) != catalog:
+                problems.add("statements", name, f"names catalog release {match.group(1)}; baseline.json "
+                                                  f"catalog.version is {catalog}", line_of(text, match.start()))
+
+
+def front_matter(text: str) -> dict[str, str]:
+    """``key: value`` lines of a leading ``---`` block (the scalar fields a case states)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fields = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, colon, value = line.partition(":")
+        if colon and key and not key.startswith((" ", "\t", "-")):
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def check_cases(root: Path, names: list[str], baseline: dict, problems: Problems) -> None:
+    """Each case states one engine and catalog: front matter, expected.json and prose agree with each other and
+    with baseline.json (``cases``).
+
+    The engine is ``engine.verified_version``, or ``engine.candidate_version`` while one is set: a case that needs
+    the candidate engine (a feature the verified one lacks) is recorded on it, which its CASE.md front matter and
+    its expected.json must both state."""
+    verified = (baseline.get("engine") or {}).get("verified_version")
+    candidate = (baseline.get("engine") or {}).get("candidate_version")
+    catalog = (baseline.get("catalog") or {}).get("version")
+    present = set(names)
+    for case_file in sorted(n for n in names if re.fullmatch(r"cases/[^/]+/CASE\.md", n)):
+        folder = case_file[:-len("CASE.md")]
+        text = read_text(root / case_file) or ""
+        fields = front_matter(text)
+        engine, case_catalog = fields.get("engine"), fields.get("catalog")
+        expected_name = folder + "expected.json"
+        expected = None
+        if expected_name in present:
+            try:
+                expected = json.loads((root / expected_name).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass  # reported by the json check
+        if engine is not None and isinstance(verified, str) and engine != verified:
+            if isinstance(candidate, str) and engine == candidate:
+                # Accepted only with its record: an expected.json that disagrees is reported below.
+                if not isinstance(expected, dict):
+                    problems.add("cases", case_file, f"engine {engine} is baseline.json engine.candidate_version; a "
+                                                     f"case recorded on the candidate engine needs an expected.json "
+                                                     f"that records it too")
+            else:
+                allowed = f"engine.verified_version {verified}" + (
+                    f" or engine.candidate_version {candidate}" if isinstance(candidate, str) else "")
+                problems.add("cases", case_file, f"engine {engine} differs from baseline.json {allowed}; re-verify "
+                                                 f"the case or keep the baseline")
+        if case_catalog not in (None, "none") and isinstance(catalog, str) and case_catalog != catalog:
+            problems.add("cases", case_file, f"catalog {case_catalog} differs from baseline.json catalog.version "
+                                             f"{catalog}")
+        if expected_name in present:
+            if isinstance(expected, dict):
+                if engine is not None and expected.get("engine") != engine:
+                    problems.add("cases", expected_name, f"engine {expected.get('engine')!r} differs from CASE.md "
+                                                         f"engine {engine}")
+                stated = None if case_catalog in (None, "none") else case_catalog
+                if case_catalog is not None and expected.get("catalog") != stated:
+                    problems.add("cases", expected_name, f"catalog {expected.get('catalog')!r} differs from CASE.md "
+                                                         f"catalog {case_catalog}")
+        for document in (case_file, folder + "README.md", folder + "README.zh-CN.md"):
+            if document not in present:
+                continue
+            prose = read_text(root / document) or ""
+            if engine is not None:
+                for pattern in (CASE_BASELINE_LINE, VERIFIED_ENGINE):
+                    for match in pattern.finditer(prose):
+                        if match.group(1) != engine:
+                            problems.add("cases", document, f"names os-optics {match.group(1)} as the verified "
+                                                            f"engine; the case records {engine}",
+                                         line_of(prose, match.start()))
+            if case_catalog is not None:
+                for match in CATALOG_RELEASE.finditer(prose):
+                    if match.group(1) != case_catalog:
+                        problems.add("cases", document, f"names catalog release {match.group(1)}; the case records "
+                                                        f"{case_catalog}", line_of(prose, match.start()))
+
+
 def check_changelog(root: Path, baseline: dict, problems: Problems) -> None:
     """A section ``## X.Y.Z`` per release, newest first; the newest is the baseline's ``kit_version``."""
     path = root / CHANGELOG
@@ -247,7 +386,11 @@ def check_changelog(root: Path, baseline: dict, problems: Problems) -> None:
     previous = None
     seen = set()
     releases = []
-    for version, line in headings:
+    for index, (version, line) in enumerate(headings):
+        if version == UNRELEASED:  # changes merged since the last release, above every release
+            if index:
+                problems.add("changelog", CHANGELOG, f"section '## {UNRELEASED}' comes before every release", line)
+            continue
         if not RELEASE_VERSION.fullmatch(version):
             problems.add("changelog", CHANGELOG, f"section heading {version!r} is not a release version", line)
             continue
@@ -438,6 +581,9 @@ def run_checks(root: Path) -> dict:
         if in_pin_scope(name):
             check_pins(name, text, baseline, problems)
             check_ranges(name, text, baseline, problems)
+        if in_statement_scope(name):
+            check_statements(name, text, baseline, problems)
+    check_cases(root, names, baseline, problems)
     check_changelog(root, baseline, problems)
     check_pairs(names, problems)
     items = sorted(problems.items, key=lambda item: (item["check"], item["path"], item["line"] or 0))

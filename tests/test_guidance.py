@@ -3,6 +3,7 @@
 the case README templates come in both languages with one placeholder set, and AGENT_GUIDE.md keeps its budget."""
 
 import math
+from pathlib import Path
 import re
 import unittest
 
@@ -98,6 +99,112 @@ class PublicPagesTests(unittest.TestCase):
                 text = read(rel)
                 self.assertIn("cases images", text)
                 self.assertIn("--no-browser --snapshot", text)
+
+
+FENCED = re.compile(r"^```.*?^```", re.M | re.S)
+MD_LINK = re.compile(r"\]\(([^)\s]+)\)")
+ADAPTER_MODULE = "os_optics_kit.study.evaluation_adapter"
+ADAPTER_GUIDE = "docs/en/evaluation-adapter.md"
+STUDY_PAGES = {"en": "docs/en/studies.md", "zh-CN": "docs/zh-CN/studies.md"}
+WORKFLOW_PAGES = {"en": "docs/en/workflows.md", "zh-CN": "docs/zh-CN/workflows.md"}
+COMPENSATION_HEADINGS = {"en": "Tolerance studies with compensation", "zh-CN": "带补偿的公差研究"}
+CANDIDATE_HEADINGS = {"en": "Candidate designs and external search code", "zh-CN": "候选设计与外部搜索代码"}
+
+
+def heading_anchors(text: str) -> set[str]:
+    """GitHub's anchors of the Markdown headings of ``text``: lower case, punctuation dropped, spaces to hyphens."""
+    return {re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+            for heading in re.findall(r"^#{1,6} (.+)$", FENCED.sub("", text), re.M)}
+
+
+def page_links(text: str) -> list[str]:
+    """The Markdown link targets of ``text`` outside fenced code."""
+    return MD_LINK.findall(FENCED.sub("", text))
+
+
+class StudyDiscoveryTests(unittest.TestCase):
+    """The evaluation adapter, tolerance compensation and zoom studies are reachable from the study skill and the
+    study and workflow guides, in both languages."""
+
+    def test_study_skill_names_the_adapter_where_a_sequential_optimiser_looks(self):
+        text = read("skills/study/SKILL.md")
+        not_to_use = section(text, "When not to use")
+        self.assertIn("sequential optimiser", not_to_use)
+        self.assertIn(ADAPTER_MODULE, not_to_use)
+        self.assertIn(ADAPTER_GUIDE, not_to_use)
+        python = next(line for line in section(text, "Inputs").split("\n- ") if line.startswith("Python:"))
+        self.assertIn("evaluation_adapter", python)
+        self.assertIn("`zoom --study`", section(text, "Inputs"))
+        self.assertIn(ADAPTER_MODULE, read("skills/study/recipe.md"))
+
+    def test_named_guide_and_module_exist(self):
+        self.assertTrue((ROOT / ADAPTER_GUIDE).is_file())
+        self.assertTrue((ROOT / "tools" / Path(*ADAPTER_MODULE.split("."))).with_suffix(".py").is_file())
+
+    def test_studies_guides_link_the_adapter_from_the_candidates_section(self):
+        for language, rel in STUDY_PAGES.items():
+            with self.subTest(language=language):
+                body = section(read(rel), CANDIDATE_HEADINGS[language])
+                self.assertIn("evaluation-adapter.md", page_links(body))
+                self.assertIn(ADAPTER_MODULE, body)
+
+    def test_studies_guides_describe_compensation_and_its_evaluator(self):
+        from os_optics_kit.study import compensation
+
+        for language, rel in STUDY_PAGES.items():
+            with self.subTest(language=language):
+                body = section(read(rel), COMPENSATION_HEADINGS[language])
+                self.assertTrue(body, f"no compensation section in {rel}")
+                for needle in ("skills show tolerance compensation.md", "tolerance_expander_refocus.json",
+                               f"--evaluator {compensation.EVALUATOR}", "--plan-only", "--no-compensation",
+                               "NOT_EVALUATED", "COMPENSATION_NOT_RUN", "compensated:*"):
+                    self.assertIn(needle, body)
+        # the page it points to is the tolerance skill's own reference page
+        self.assertTrue((ROOT / "skills" / "tolerance" / "compensation.md").is_file())
+        self.assertTrue((ROOT / "cases" / "expansion-focus" / "studies" / "tolerance_expander_refocus.json").is_file())
+
+    def test_study_and_workflow_guides_link_zoom(self):
+        for pages in (STUDY_PAGES, WORKFLOW_PAGES):
+            for language, rel in pages.items():
+                with self.subTest(page=rel):
+                    self.assertIn("zoom.md", page_links(read(rel)))
+
+    def test_workflow_guides_point_to_the_compensation_section(self):
+        for language, rel in WORKFLOW_PAGES.items():
+            with self.subTest(language=language):
+                anchor = "studies.md#" + next(iter(heading_anchors("## " + COMPENSATION_HEADINGS[language])))
+                self.assertIn(anchor, page_links(read(rel)))
+
+    def test_english_and_chinese_pages_link_the_same_pages(self):
+        for pages in (STUDY_PAGES, WORKFLOW_PAGES):
+            files = {language: sorted(link.split("#", 1)[0] for link in page_links(read(rel))
+                                      if "://" not in link and not link.startswith("#"))
+                     for language, rel in pages.items()}
+            # the language switch line links the other language's page
+            files["en"].remove("../zh-CN/" + Path(pages["en"]).name)
+            files["zh-CN"].remove("../en/" + Path(pages["zh-CN"]).name)
+            files["en"].remove("../../README.md")
+            files["zh-CN"].remove("../../README.zh-CN.md")
+            with self.subTest(page=pages["en"]):
+                self.assertEqual(files["en"], files["zh-CN"])
+
+    def test_document_anchors_resolve(self):
+        pages = sorted((ROOT / "docs").rglob("*.md")) + [ROOT / name for name in
+                                                         ("README.md", "README.zh-CN.md", "AGENT_GUIDE.md")]
+        for page in pages:
+            for link in page_links(page.read_text(encoding="utf-8")):
+                if "://" in link or "#" not in link:
+                    continue
+                path, fragment = link.split("#", 1)
+                target = (page.parent / path) if path else page
+                if target.suffix != ".md" or not target.is_file():
+                    continue
+                with self.subTest(page=page.relative_to(ROOT).as_posix(), link=link):
+                    self.assertIn(fragment, heading_anchors(target.read_text(encoding="utf-8")))
+
+    def test_heading_anchor_rule(self):
+        self.assertEqual(heading_anchors("## 2. Sweep the lens spacing\n## 带补偿的公差研究\n```\n# not a heading\n```"),
+                         {"2-sweep-the-lens-spacing", "带补偿的公差研究"})
 
 
 class CaseReadmeTemplateTests(unittest.TestCase):

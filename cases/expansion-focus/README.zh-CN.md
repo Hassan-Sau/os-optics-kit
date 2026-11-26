@@ -3,7 +3,7 @@
 [English](README.md) · [智能体案例说明](CASE.md)
 
 波长 780 nm、束腰半径 0.5 mm 的高斯光束由两片理想薄透镜（f = 50 mm 与 150 mm）扩束三倍，再由第三片透镜
-（f = 100 mm）聚焦。该设计不需要目录且完全参数化：`workflow.py` 按你的输入重建设计，并逐一研究各参数。
+（f = 100 mm）聚焦，光路处于真空中。该设计不需要目录且完全参数化：`workflow.py` 按你的输入重建设计，并逐一研究各参数。
 
 ![三维视图：光源 SRC、扩束透镜 L1 与 L2、`collimated` 面、聚焦透镜 L3、`focus` 面与追迹光束](images/iso.png)
 
@@ -40,4 +40,7 @@ python workflow.py --out wf
 | `waist_radius_mm` | 0.25 … 4 | 3 | 1 | 1（严重截断） |
 
 `studies/` 另含灵敏度研究、波段边缘灵敏度研究、带种子的公差研究（100 个样本中 92 个通过）以及两个计算预算编辑。
-已用 os-optics 0.13.0 验证；运行状态 PASS。
+已用 os-optics 0.14.0 验证；运行状态 PASS。
+
+`adapter_example.py` 通过[评估适配器](../../docs/zh-CN/evaluation-adapter.md)把同一设计当作重新调焦偏移的函数来评估：
+光斑半径为目标，束腰位置为约束，每个候选得到定长残差向量，超出边界的那个候选得到结构化原因。

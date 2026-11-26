@@ -6,7 +6,7 @@ class: lens
 domain: nanophotonics, diffraction
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: none
@@ -50,7 +50,7 @@ Steps 1–4 take about 24 minutes; steps 1 and 2 never import the engine.
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status WARNING (`expected.json`). Steps 1–4 ran on Python 3.14.7 with the
+os-optics 0.14.0, no catalog, vacuum: run status WARNING (`expected.json`). Steps 1–4 ran with os-optics 0.13.0 on Python 3.14.7 with the
 pinned versions in `requirements-metasurface.txt`.
 
 ## Files

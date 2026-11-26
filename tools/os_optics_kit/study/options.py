@@ -81,13 +81,14 @@ def execution_arguments(args):
 
 
 def planned_summary(study_dir, kind, extra=None):
-    """The document of a study that was planned and not executed (``--plan-only``)."""
+    """The document of a study that was planned and not executed (``--plan-only``); ``next`` names the evaluator
+    ``study.json`` records."""
     study_dir = Path(study_dir)
     entries = store.read_plan(study_dir)
     study = store.read_study(study_dir)
     return {"status": "PLANNED", "kind": f"{kind}-plan", "samples": len(entries),
             "identity": study["identity"], **(extra or {}),
-            "next": run_command(study_dir, resume=False),
+            "next": run_command(study_dir, resume=False, evaluator=study.get("evaluator")),
             "paths": {"study_dir": study_dir.as_posix(), "study": store.STUDY_FILE, "plan": store.PLAN_FILE,
                       "requests": store.REQUESTS_DIR}}
 

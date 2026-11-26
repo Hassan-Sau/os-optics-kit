@@ -1,0 +1,11 @@
+{
+  "catalog": null,
+  "engine": "0.14.0",
+  "execution": "COMPLETED",
+  "schema": "os-optics-kit.case-expected",
+  "schema_version": 2,
+  "targets": {
+    "axis_power": "MET",
+    "axis_spot": "MET"
+  }
+}

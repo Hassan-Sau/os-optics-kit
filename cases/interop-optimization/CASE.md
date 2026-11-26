@@ -6,7 +6,7 @@ class: free-space
 domain: gaussian-beam
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: none
@@ -44,7 +44,7 @@ The strict requirement leaves no feasible design: outcome NO_FEASIBLE_RESULT, ex
 
 ## Baseline
 
-os-optics 0.13.0, no catalog: run status PASS (`expected.json`). The optimization was verified on Python 3.14.7 with
+os-optics 0.14.0, no catalog, vacuum (`environment.pressure_pa` 0, as on 0.13.0): run status PASS (`expected.json`). The optimization ran with os-optics 0.13.0 on Python 3.14.7 with
 the pinned versions in `requirements-optimization.txt`. `os-optics-kit cases verify interop-optimization` repeats
 the engine run.
 

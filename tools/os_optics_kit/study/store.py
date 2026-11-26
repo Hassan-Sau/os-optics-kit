@@ -22,9 +22,12 @@ sees half a file and ``samples/<id>/sample.json`` marks a finished sample. Every
 or a request is checked before it names a path.
 
 ``identity`` = ``{plan_hash, engine {version, build_id}, catalog {version, sha256}, kit_version}``. A sample is
-reused on resume when its ``sample.json`` carries the plan's ``request_hash``, its ``state`` is ``COMPLETED`` or
-``REFUSED`` and the same evaluator produced it; a changed Engine build or catalog release refuses the run or the
-resume. A record kept for an unchanged request takes the labels of the current plan.
+reused on resume when its ``sample.json`` carries the plan's ``request_hash`` (which covers the evaluator settings a
+request carries in its ``evaluation_sha256`` label, ``requests.py``), its ``state`` is ``COMPLETED`` or ``REFUSED``
+and the same evaluator produced it; a changed Engine build or catalog release refuses the run or the resume. A record
+kept for an unchanged request takes the labels of the current plan. A sample interrupted after its Engine run (an
+attempt marker and a complete run directory, no ``sample.json``) is read back from the run directory only for the
+default evaluator, whose record is that run; any other evaluator runs it again.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ import uuid
 
 from .. import workflow_common as wc
 from .._version import __version__
+from .evaluators import DEFAULT_EVALUATOR
 from .requests import valid_sample_id, validate_request
 
 STUDY_SCHEMA = "os-optics-kit.study"
@@ -459,10 +463,17 @@ def read_attempt(study_dir, sample_id):
         return None
 
 
+#: Evaluators whose sample record is exactly the record of the sample's run directory (``run/``), so an evaluation
+#: interrupted after the Engine wrote it can be read back. Another evaluator's record holds more than that run (a
+#: compensated tolerance sample: the solve and the compensated run), so its interrupted samples run again.
+READ_BACK_EVALUATORS = (DEFAULT_EVALUATOR,)
+
+
 def recoverable_run(study_dir, entry, evaluator):
     """True when the sample has no record but a complete run directory written for this request by ``evaluator``
-    (an evaluation that was interrupted after the Engine finished; never for an evaluator without a name)."""
-    if evaluator is None or read_record(study_dir, entry["sample_id"]) is not None:
+    (an evaluation that was interrupted after the Engine finished), and ``evaluator`` is one whose record that run
+    directory holds completely (``READ_BACK_EVALUATORS``)."""
+    if evaluator not in READ_BACK_EVALUATORS or read_record(study_dir, entry["sample_id"]) is not None:
         return False
     attempt = read_attempt(study_dir, entry["sample_id"])
     if (not isinstance(attempt, dict) or attempt.get("request_hash") != entry["request_hash"]
@@ -474,7 +485,7 @@ def recoverable_run(study_dir, entry, evaluator):
 def resume_selection(study_dir, entries, evaluator):
     """Split a plan into ``(reused, recoverable, pending)`` for an execution with ``evaluator`` (its
     ``module:function`` name): entries with a final record of the same request by the same evaluator, entries whose
-    complete run directory can be read back, and entries that have to run."""
+    complete run directory can be read back (``recoverable_run``), and entries that have to run."""
     reused, recoverable, pending = [], [], []
     for entry in entries:
         if reusable_record(study_dir, entry, evaluator) is not None:

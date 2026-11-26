@@ -141,12 +141,14 @@ def summarize_results(results, *, artifacts=None, details=False):
     return summary
 
 
-def summarize_run(directory, *, details=False):
-    """Read and verify a native local run; do not modify its files."""
+def summarize_run(directory, *, details=False, verify=True):
+    """Read a native local run and, with ``verify`` (the default), check its files against their recorded hashes
+    (``integrity``); do not modify its files. ``verify=False`` reads the run as stored: ``integrity.checked`` is
+    then false."""
     from os_optics.results import load_run
 
     directory = Path(directory)
-    results = load_run(directory)
+    results = load_run(directory, verify=bool(verify))
     artifacts = {"run_directory": directory, "manifest": directory / "manifest.json"}
     artifacts.update({item["role"]: directory / item["name"]
                       for item in results.describe()["files"]})

@@ -6,7 +6,7 @@ class: lens
 domain: gaussian-beam, beam-shaping
 provenance: self-built
 publication: own-work
-engine: 0.13.0
+engine: 0.14.0
 catalog: none
 project: project.json
 tools: summary, present
@@ -16,7 +16,7 @@ license: MIT
 
 ## What it shows
 
-A constant-index n=1.52, 2 mm thick cylindrical lens creates a thin y waist while x stays wide. At f=50 mm the waist FWHM is 9.14456 um and the full sqrt(2)-thickness range is 0.776659 mm. At f=40 mm these become 7.31569 um and 0.497068 mm.
+A constant-index n=1.52, 2 mm thick cylindrical lens creates a thin y waist while x stays wide. At f=50 mm the waist FWHM is 9.13723 um and the full sqrt(2)-thickness range is 0.775414 mm. At f=40 mm these become 7.30983 um and 0.496271 mm.
 
 ## Run
 
@@ -38,7 +38,7 @@ Native `thin-waist`: waist_radius_y_mm <= 0.008493218, equivalent to FWHM <=10 u
 
 ## Baseline
 
-Engine 0.13.0 and kit 0.4.0; no catalog. Source 488 nm, 10 mW, 1 mm waist. Cylinder entrance radius 26 mm, plane exit, 10 mm clear diameter, 0.995 power transmission per surface. Paraxial separable Gaussian model, M²=1.
+os-optics 0.14.0 and kit 0.5.0; no catalog; vacuum and lossless glass (`environment.pressure_pa` 0, `absorption_coefficient_per_mm` 0), as the 0.13.0 record and the ABCD reference assume. Source 488 nm, 10 mW, 1 mm waist. Cylinder entrance radius 25.979142 mm (0.13.0: 26 mm; the 0.14 `lens.singlet` builder solves f in standard air), plane exit, 10 mm clear diameter, 0.995 power transmission per surface. Paraxial separable Gaussian model, M²=1.
 
 ## Files
 

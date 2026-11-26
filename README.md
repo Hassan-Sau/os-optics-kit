@@ -23,7 +23,7 @@ which any coding agent can load.
 | [`os-optics`](https://github.com/JunLin615/os-optics) | GitHub | Engine source, tests, documentation and discussions |
 | [`os-optics-kit`](https://github.com/JunLin615/os-optics-kit) | GitHub | This repository: tools, cases, skills and contributions |
 
-**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Local viewer](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/viewer.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
+**[Agent guide](https://github.com/JunLin615/os-optics-kit/blob/main/AGENT_GUIDE.md) · [Local viewer](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/viewer.md) · [Design studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/workflows.md) · [Zoom studies](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/zoom.md) · [Measurements](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/measurements.md) · [SFR](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/sfr.md) · [Presentation](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/presentation.md) · [External tools](https://github.com/JunLin615/os-optics-kit/blob/main/docs/en/interop.md) · [Workflow recipes](https://github.com/JunLin615/os-optics-kit/blob/main/docs/workflow-recipes.md) · [Contributing](https://github.com/JunLin615/os-optics-kit/blob/main/CONTRIBUTING.md)**
 
 ## Install
 
@@ -106,6 +106,7 @@ fonts, comparisons, animations and handoff.
 | [interop-metasurface](https://github.com/JunLin615/os-optics-kit/tree/main/cases/interop-metasurface) | Metasurface lens as a virtual component | Nanophotonics, Diffraction | Small | no |
 | [midwave-infrared-imager](https://github.com/JunLin615/os-optics-kit/tree/main/cases/midwave-infrared-imager) | A five-element 3-5 µm imager with manufacturable element thicknesses | Imaging, Diffraction | Medium | no |
 | [sonnar-telephoto-lens](https://github.com/JunLin615/os-optics-kit/tree/main/cases/sonnar-telephoto-lens) | Six-element Sonnar at f/2.4, measured across the full entrance pupil | Imaging, Diffraction | Medium | no |
+| [three-group-zoom](https://github.com/JunLin615/os-optics-kit/tree/main/cases/three-group-zoom) | Three-group zoom with a fixed image plane | Imaging | Small | no |
 
 ### Free-space platform
 
@@ -166,9 +167,11 @@ importable (`import os_optics_kit`), and `python -m os_optics_kit <command>` run
 
 ## Version alignment
 
-os-optics-kit 0.4.x requires `os-optics>=0.14,<0.15` and was verified with os-optics 0.13.0 and catalog release
-2026-10-28.1 ([`baseline.json`](https://github.com/JunLin615/os-optics-kit/blob/main/baseline.json)). Each case records the engine and catalog release it was verified
-with. See [case format](https://github.com/JunLin615/os-optics-kit/blob/main/docs/case-format.md) and [engine alignment](https://github.com/JunLin615/os-optics-kit/blob/main/docs/engine-alignment.md).
+os-optics-kit 0.5.x requires `os-optics>=0.14,<0.15`. Its cases were verified with os-optics 0.14.0 and catalog release
+2026-10-28.1 ([`baseline.json`](https://github.com/JunLin615/os-optics-kit/blob/main/baseline.json)). os-optics 0.14
+propagates in standard air when a Project states no environment; the cases first recorded on os-optics 0.13.0 state
+the vacuum they were designed in.
+Each case records the engine and catalog release it was verified with. See [case format](https://github.com/JunLin615/os-optics-kit/blob/main/docs/case-format.md) and [engine alignment](https://github.com/JunLin615/os-optics-kit/blob/main/docs/engine-alignment.md).
 What each release changed: [CHANGELOG.md](https://github.com/JunLin615/os-optics-kit/blob/main/CHANGELOG.md).
 
 ## Contributing

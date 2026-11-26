@@ -137,21 +137,25 @@ A check that could not run is `SKIPPED` with the category of the check that bloc
 
 ## In CI
 
-- **CI** (`.github/workflows/ci.yml`, every pull request, push to `main` and merge-queue run): the engine job first
-  asks PyPI for `engine.verified_version`. When it is not published yet, the job says so in its summary and passes
-  without running engine checks. When it is published, the job runs this runner on it with the catalog snapshot and
-  `--skip cases-verify`, then verifies the cases in one step, `os-optics-kit cases verify ... --jobs 4`, with the
-  runner's environment and catalog store. The step writes `cases-verify.json` and one summary line (cases and
-  MATCH/MISMATCH/ERROR counts, or why nothing was verified); any case that is not MATCH fails the job. The step
-  fails on a non-zero `cases verify` exit code and also when the exit code is 0 but `cases-verify.json` is missing
-  or its status is not MATCH.
+- **CI** (`.github/workflows/ci.yml`, every pull request, push to `main` and merge-queue run): the gate
+  (`scripts/engine_gate.py`) selects the engine under test from `baseline.json`: `engine.candidate_version` while one
+  is set, otherwise `engine.verified_version`; it must lie in `engine.requirement`. It resolves exactly
+  `os-optics==VERSION` on PyPI. When that release is not published yet, the job says so in its summary and passes
+  without running engine checks. When it is published, the job runs this runner on exactly that version
+  (`--engine VERSION`) with the catalog snapshot and `--skip cases-verify`; the step "Installed engine" writes the
+  installed version, wheel and SHA-256 to the job summary and fails with `ENGINE_INSTALLED_MISMATCH` unless they are
+  the gate's version and PyPI artifact. Then it verifies the cases in one step,
+  `os-optics-kit cases verify ... --jobs 4`, with the runner's environment and catalog store. The step writes
+  `cases-verify.json` and one summary line (cases and MATCH/MISMATCH/ERROR counts, or why nothing was verified); any
+  case that is not MATCH fails the job. The step fails on a non-zero `cases verify` exit code and also when the exit
+  code is 0 but `cases-verify.json` is missing or its status is not MATCH.
   - Selection (`scripts/changed_cases.py`): a pull request verifies the case directories its diff touches (a deleted
     case is not verified), or every case when it changes a file that `cases verify` or the selection depends on:
     `baseline.json`, `pyproject.toml`, `alignment-checks.json`, `.github/workflows/ci.yml`,
-    `scripts/changed_cases.py`, `scripts/verified_tree.py`, `scripts/check_alignment.py` and
-    `scripts/requirements-alignment.txt` (they build the step's environment and catalog store), and `__init__.py`,
-    `__main__.py`, `_version.py`, `cli.py` (the command's entry point and exit code), `cases.py`,
-    `case_taxonomy.py`, `_engine.py`, `_frontmatter.py`, `_resources.py` under `tools/os_optics_kit/`. A push to
+    `scripts/changed_cases.py`, `scripts/verified_tree.py`, `scripts/check_alignment.py`, `scripts/engine_gate.py`
+    and `scripts/requirements-alignment.txt` (they select the engine and build the step's environment and catalog
+    store), and `__init__.py`, `__main__.py`, `_version.py`, `cli.py` (the command's entry point and exit code),
+    `cases.py`, `case_taxonomy.py`, `_engine.py`, `_frontmatter.py`, `_resources.py` under `tools/os_optics_kit/`. A push to
     `main` and the merge queue verify every case.
   - Once per tree (`scripts/verified_tree.py`): a run that verified every case with every case MATCH uploads the
     artifact `cases-verified-TREE` (TREE is `git rev-parse HEAD^{tree}` of the checked-out commit; for a pull
@@ -159,7 +163,7 @@ A check that could not run is `SKIPPED` with the category of the check that bloc
     verifying, a push to `main` or a merge-queue run looks for that artifact with the job's read-only token
     (`actions: read`) and skips verification, naming the verifying run in its summary, only when the artifact is
     not expired, comes from a run of this repository (not a fork), and its record names the same tree, every case
-    MATCH, and the engine version and catalog SHA-256 of `baseline.json`. Anything else, an API or download error
+    MATCH, and the engine under test and catalog SHA-256 of `baseline.json`. Anything else, an API or download error
     included, means the cases are verified.
 - **Scheduled checks** (`.github/workflows/scheduled.yml`, weekly and on demand): the verified engine on Linux,
   Windows and macOS with every Python version in `baseline.json`, all cases through the default check
@@ -227,9 +231,10 @@ changed with the pull request.
 
 ### The engine job must have run
 
-While `engine.verified_version` is not on PyPI, the CI job "Engine checks (published os-optics)" passes without
-running anything and says so in its summary. For this pull request that is not a result. Merge it only after the
-engine release is on PyPI and a CI run of the final head shows the job ran: `baseline.json` changed, so every case
+While the engine under test of `baseline.json` is not installable from PyPI, the CI job "Engine checks (published
+os-optics)" runs nothing and says so in its summary; on a pull request that changes `engine.verified_version` or
+the `catalog` of `baseline.json` it fails with `BASELINE_MOVED_WITHOUT_ENGINE`. Merge such a pull request only
+after the engine release is on PyPI and a CI run of the final head shows the job ran: `baseline.json` changed, so every case
 is verified against the published release. The release workflow enforces the same rule: a kit release whose
 verified engine is not on PyPI fails to build.
 

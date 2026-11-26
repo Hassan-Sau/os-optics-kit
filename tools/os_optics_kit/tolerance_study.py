@@ -26,7 +26,15 @@ SPEC.json (keys; quantities are a bare number in the parameter's unit or {"value
       {"name": "hwp_angle", "unit": "deg", "ops": [...],
        "distribution": {"kind": "normal", "sigma": 2, "mean_offset": 0,
                         "truncate_sigma": 3}}    # or "bounds": [low, high] (offsets, parameter unit)
-    ]
+    ],
+    "compensation": {                            # optional: solve compensators for every sample
+      "enabled": true,                           # default true when the object is given
+      "objective": [{"target": "spot_radius", "goal": 0, "scale": 0.02}],   # goal, scale in the target unit
+      "compensators": [{"name": "refocus", "unit": "mm", "nominal": 0, "bounds": [-2, 2], "tolerance": 0.002,
+                        "ops": [{"op": "transform", "selector": {"ids": ["focus"]}, "frame": "design",
+                                 "translation_mm": ["$value", 0, 0]}]}],   # bounds: offsets from as-built
+      "max_evaluations": 100, "max_sweeps": 4, "cost_tolerance": 1e-6        # per sample
+    }
   }
 
 Distributions of the offset from nominal (parameter unit): uniform(low, high) (low <= high; low == high is a fixed
@@ -60,10 +68,30 @@ selected. Counts use every requested sample as denominator; the PASS fraction am
 is listed separately. These are simulated sample fractions for the stated
 independent distributions. Per-target statistics use finite exact values with applicable dependencies; bounded
 or unavailable values and unrelated diagnostics remain visible in the sample records.
+
+Compensation (optional; --no-compensation ignores it and gives the same samples): every sample is recorded in three
+stages, nominal (s0000), as_built (the sample record) and compensated (the as-built Project with the compensator
+offsets that minimise sum(((value - goal) / scale)^2) over exact objective target values, found by coordinate
+descent with golden-section line searches within the bounds, starting at offset 0). Before any run the compensator
+ops must apply at offset 0 and both bounds (SPEC_INVALID), leave the base Project unchanged at offset 0
+(NOMINAL_MISMATCH) and leave every as-built sample unchanged at offset 0 (COMPENSATOR_OVERLAP: a set_* compensator on
+a field a parameter perturbs). Each sample's solve state is SOLVED, FAILED with a reason (AS_BUILT_ERROR,
+EVALUATION_ERROR, NOT_CONVERGED, BOUNDS_HIT, RUN_STOPPED, WORSE_THAN_AS_BUILT; the as-built result is kept) or
+NOT_EVALUATED (COMPENSATION_NOT_RUN: run without the compensation evaluator). The study records its evaluator,
+os_optics_kit.study.compensation:run_compensated; --plan-only prints the study run command with it. Runs: the
+top-level max_evaluations caps nominal + samples; each sample adds at most compensation.max_evaluations trials and one
+compensated run (runs_max = 1 + samples * (compensation.max_evaluations + 2)); --time-limit-s and --max-memory-mib
+apply to each Engine run, and a worker process (--workers) is terminated only when a sample passes the time limit
+times its compensation.max_evaluations + 2 runs, plus 5 s. counts, the exit code and target_distributions are the
+as-built outcomes; the compensation block (summary.json and stdout) holds the stage counts, solve states and failure
+reasons. --resume runs the compensated samples again when the objective, a compensator (ops, nominal, bounds,
+tolerance, unit, name) or a solver setting changed, and keeps them when only a description changed; a sample
+interrupted during its solve runs again.
+
 Stdout: one compact JSON document (counts with denominators, target distributions, samples whose runs carry
-warnings, unsuccessful samples, execution). Exit 0 completed with at least one PASS sample (or drawn, planned), 1
-no PASS sample (or a --verify-seed mismatch), 4 refused spec or invalid input, 130 cancelled (the study can be
-resumed).
+warnings, unsuccessful samples, execution, compensation when declared). Exit 0 completed with at least one PASS
+sample (or drawn, planned), 1 no PASS sample (or a --verify-seed mismatch), 4 refused spec or invalid input, 130
+cancelled (the study can be resumed).
 """
 
 from __future__ import annotations
@@ -76,7 +104,8 @@ import time
 from . import workflow_common as wc
 from . import sweep_parameters as sweep
 from . import sensitivity_analysis as sa
-from .study import aggregate as agg, options as opts, store
+from .study import aggregate as agg, compensation as comp_mod, evaluators, options as opts, progress, store
+from .study import requests as rq
 
 PROG = "os-optics-kit tolerance"
 KIND = "opensci-example.tolerance-study"
@@ -355,7 +384,8 @@ def zero_offset_check(rows, nominal_row, targets):
 
 # --------------------------------------------------------------------------------------------- study
 
-def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_tolerance, plots, report):
+def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_tolerance, plots, report,
+          compensation=True):
     """Validate ``spec`` and draw its samples: ``(normalized, document, header, targets, drawn)``."""
     document, base_info = sa.resolve_base(spec, spec_dir=spec_dir, base=base, base_path=base_path, build=build)
     normalized = normalize_spec(spec, build=build, base=document, seed=seed, samples=samples,
@@ -366,7 +396,16 @@ def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_toleran
     checked = sa.check_base(document, parameters, build=build)
     targets = sa.selected_targets(document, normalized["targets"])
     units = sa.target_units(document)
+    plan = comp_mod.normalize(spec.get("compensation"), document=document, targets=list(units), units=units,
+                              parameter_names=[p["name"] for p in parameters], enabled=compensation)
     drawn = draw_samples(parameters, normalized["samples"], normalized["seed"])  # ops validated by check_base
+    budget = {"max_evaluations": normalized["max_evaluations"], "samples": normalized["samples"] + 1}
+    compensated = {}
+    if plan is not None:
+        normalized["compensation"] = plan
+        comp_mod.check_documents(plan, document, _sample_documents(document, parameters, drawn, build), parameters)
+        budget["runs_max"] = comp_mod.runs_max(plan, normalized["samples"])
+        compensated["evaluator"] = comp_mod.EVALUATOR
     header = store.study_header(
         KIND, spec=spec,
         options={"seed": normalized["seed"], "samples": normalized["samples"],
@@ -377,25 +416,39 @@ def _draw(spec, *, base, build, base_path, spec_dir, seed, samples, zero_toleran
                       "engine_input_hash": checked["engine_input_hash"],
                       "document_sha256": wc.canonical_digest(document)},
         seed=normalized["seed"], sampling=GENERATOR, assumptions=list(ASSUMPTIONS),
-        budget={"max_evaluations": normalized["max_evaluations"], "samples": normalized["samples"] + 1},
-        stop_on=[], analysis={"target_units": units}, present={"plots": bool(plots), "report": bool(report)})
+        budget=budget, stop_on=[], analysis={"target_units": units},
+        present={"plots": bool(plots), "report": bool(report)}, **compensated)
     return normalized, document, header, targets, drawn
+
+
+def _sample_documents(document, parameters, drawn, build):
+    """``[(sample_id, as-built Project)]`` of the drawn samples (a refused one is left out: it is never run)."""
+    out = []
+    for sample_id, offsets in drawn:
+        try:
+            out.append((sample_id, sa.offset_document(document, parameters, offsets, build=build)))
+        except wc.WorkflowError:
+            continue
+    return out
 
 
 def plan_tolerance(spec, study_dir, *, base=None, build=None, base_path=None, spec_dir=None, overwrite=False,
                    seed=None, samples=None, zero_tolerance=False, resume=False, plots=True, report=True,
-                   outputs=None):
+                   outputs=None, compensation=True):
     """Validate ``spec``, draw the samples and write the planned study: samples.csv and sampling.json, then s0000
     nominal and one request per drawn sample, all before any run. Returns ``(study_dir, normalized, digest)``."""
     normalized, document, header, targets, drawn = _draw(
         spec, base=base, build=build, base_path=base_path, spec_dir=spec_dir, seed=seed, samples=samples,
-        zero_tolerance=zero_tolerance, plots=plots, report=report)
+        zero_tolerance=zero_tolerance, plots=plots, report=report, compensation=compensation)
     parameters = normalized["parameters"]
+    plan = normalized.get("compensation")
+    sample_labels = {"role": "sample"} if plan is None else {
+        "role": "sample", comp_mod.PLAN_LABEL: plan, rq.EVALUATION_LABEL: comp_mod.plan_identity(plan)}
     requests = [sa.offset_request("s0000", document, parameters, {}, build=None, targets=targets,
                                   labels={"role": "nominal"}, outputs=outputs)]
     for sample_id, offsets in drawn:
         requests.append(sa.offset_request(sample_id, document, parameters, offsets, build=build, targets=targets,
-                                          labels={"role": "sample"}, outputs=outputs))
+                                          labels=sample_labels, outputs=outputs))
     study_dir, resuming = sa.prepare_dir(study_dir, overwrite, resume)
     store.plan_study(study_dir, header, requests, resume=resuming)
     digest = write_samples(study_dir, normalized, drawn)
@@ -424,12 +477,22 @@ def draw_tolerance(spec, study_dir, *, base=None, build=None, base_path=None, sp
 def run_tolerance(spec, study_dir, *, base=None, build=None, base_path=None, spec_dir=None, overwrite=False,
                   seed=None, samples=None, zero_tolerance=False, draw_only=False, plots=True, report=True,
                   workers=1, scheduler=None, evaluator=None, limits=None, resume=False, plan_only=False, outputs=None,
-                  on_progress=None):
+                  on_progress=None, compensation=True):
     """Draw, save, run and analyse the tolerance samples of ``spec`` (module docstring); returns the summary.
 
     ``base`` / ``build`` as in sensitivity_analysis.run_sensitivity (``build(values)`` gets nominal + offset of
     every parameter). ``seed`` / ``samples`` override the spec; ``draw_only`` writes the sample set (study.json,
-    samples.csv, sampling.json) and stops (it does not take ``resume`` or ``plan_only``). Execution arguments as in ``sweep_parameters.run_sweep``."""
+    samples.csv, sampling.json) and stops (it does not take ``resume`` or ``plan_only``). Execution arguments as in ``sweep_parameters.run_sweep``.
+    ``compensation``: False ignores the spec's ``compensation`` object (``study.compensation``); with one, the
+    study records and uses the evaluator ``study.compensation.run_compensated`` (``EVALUATOR_MISMATCH`` for the
+    default ``run_project``, which would skip the compensation)."""
+    raw = spec.get("compensation") if compensation else None
+    if (isinstance(raw, dict) and raw.get("enabled", True) is not False and evaluator is not None
+            and evaluators.evaluator_name(evaluator) == evaluators.DEFAULT_EVALUATOR):
+        raise wc.WorkflowError("EVALUATOR_MISMATCH", "a compensated tolerance study is evaluated by "
+                               f"{comp_mod.EVALUATOR}; {evaluators.DEFAULT_EVALUATOR} runs the as-built samples only "
+                               "(use --no-compensation for that)", recorded=comp_mod.EVALUATOR,
+                               given=evaluators.DEFAULT_EVALUATOR)
     if draw_only:
         if resume:
             raise wc.WorkflowError("BAD_ARGUMENT", "--draw-only writes a new sample set and does not take --resume; "
@@ -442,9 +505,16 @@ def run_tolerance(spec, study_dir, *, base=None, build=None, base_path=None, spe
     study_dir, normalized, digest = plan_tolerance(
         spec, study_dir, base=base, build=build, base_path=base_path, spec_dir=spec_dir, overwrite=overwrite,
         seed=seed, samples=samples, zero_tolerance=zero_tolerance, resume=resume, plots=plots, report=report,
-        outputs=outputs)
+        outputs=outputs, compensation=compensation)
+    if evaluator is None and normalized.get("compensation") is not None:
+        evaluator = comp_mod.EVALUATOR
     if plan_only:
-        return opts.planned_summary(study_dir, KIND, {"samples_csv_sha256": digest})
+        planned = opts.planned_summary(study_dir, KIND, {"samples_csv_sha256": digest})
+        if normalized.get("compensation") is not None:
+            planned["next"] = progress.run_command(study_dir, resume=False, evaluator=comp_mod.EVALUATOR)
+            planned["evaluator"] = comp_mod.EVALUATOR
+            planned["runs_max"] = comp_mod.runs_max(normalized["compensation"], normalized["samples"])
+        return planned
     return sa.execute(study_dir, KIND, aggregate=aggregate_tolerance, workers=workers, scheduler=scheduler,
                       evaluator=evaluator, limits=limits, resume=resume, on_progress=on_progress)
 
@@ -462,6 +532,7 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
     units = study["analysis"]["target_units"]
     digest = wc.read_json(study_dir / "sampling.json").get("samples_csv_sha256")
     zero = {p["name"]: 0.0 for p in parameters}
+    plan = normalized.get("compensation")
     nominal, nominal_row, rows, offsets_by_sample = None, None, [], []
     for entry, record in agg.collect_records(study_dir):
         sample_id = entry["sample_id"]
@@ -474,7 +545,11 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
         row = agg.row_from_record(sample_id, offsets, parameters, record, study_dir)
         for p in parameters:
             row[f"param:{p['name']}:value"] = p["nominal"] + offsets[p["name"]]
+        if plan is not None:
+            row.update(comp_mod.row_fields(record, plan))
         rows.append(row)
+    if plan is not None:
+        nominal_row["result_stage"] = "nominal"
     sweep.select_best(rows, [{"outcome": ["PASS"]}], None)
     counts = agg.counts(rows)
     counts["pass_fraction"]["definition"] = (
@@ -514,6 +589,10 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
                   "samples": "samples"},
         "seconds": None,
     }
+    if plan is not None:
+        summary["compensation"] = comp_mod.summarize(
+            rows, plan, targets, units, nominal_row,
+            next_command=progress.run_command(study_dir, resume=True, evaluator=comp_mod.EVALUATOR))
     agg.write_summary(study_dir, summary)
     skipped = sa.matplotlib_missing() if plots else "plots disabled"
     if skipped is None:
@@ -525,7 +604,8 @@ def aggregate_tolerance(study_dir, *, plots=None, report=None):
         summary["report"] = sa.append_report(
             study_dir, plots=[study_dir / "plots"] if skipped is None else None, title="Tolerance sampling",
             lines=report_lines(summary), extra={"tolerance": {k: summary[k] for k in (
-                "sampling", "parameters", "nominal", "counts", "target_distributions", "zero_offset_check")}},
+                "sampling", "parameters", "nominal", "counts", "target_distributions", "zero_offset_check",
+                *(("compensation",) if summary.get("compensation") else ()))}},
             artifacts=[(study_dir / "samples.csv", "sampled offsets"),
                        (study_dir / "sampling.json", "sampling record")])
         summary["paths"]["report"] = "report/report.md"
@@ -614,6 +694,8 @@ def report_lines(summary):
                      f"{check['same_result_hash']}; maximum absolute target difference: "
                      f"{wc.canonical_json(check['max_abs_difference'])} (tolerance 0).")
         lines.append("")
+    if summary.get("compensation"):
+        lines += [""] + comp_mod.report_lines(summary["compensation"], sa.sweep_table)
     lines.append("Reproduce the sample set: `os-optics-kit tolerance --verify-seed <study dir>`.")
     return lines
 
@@ -625,20 +707,23 @@ def compact(summary, limit=5):
                  "offsets": {p["name"]: r.get(f"param:{p['name']}") for p in summary["parameters"]}}
                 for r in summary["rows"] if r["outcome"] in ("ERROR", "OUT_OF_MODEL", "UNKNOWN")]
     shown = wc.bounded(problems, limit)
-    return {"status": summary["status"], "sampling": summary["sampling"],
-            "samples_with_warnings": wc.warning_summary(summary["rows"]),
-            "parameters": [{"name": p["name"], "unit": p["unit"], "nominal": p["nominal"],
-                            "distribution": p["description"]} for p in summary["parameters"]],
-            "nominal": {k: summary["nominal"][k] for k in ("outcome", "targets")},
-            "counts": summary["counts"], "target_distributions": summary["target_distributions"],
-            "zero_offset_check": summary["zero_offset_check"],
-            "unsuccessful_samples": shown["shown"], "unsuccessful_omitted": shown["omitted"],
-            "identity": {"engine_version": summary["identity"]["engine"]["engine_version"],
-                         "engine_build_id": summary["identity"]["engine"]["engine_build_id"],
-                         "catalog_version": summary["identity"]["catalog_version"]},
-            "seconds": summary["seconds"],
-            "execution": opts.execution_brief((summary.get("paths") or {}).get("study_dir")),
-            "paths": summary["paths"]}
+    out = {"status": summary["status"], "sampling": summary["sampling"],
+           "samples_with_warnings": wc.warning_summary(summary["rows"]),
+           "parameters": [{"name": p["name"], "unit": p["unit"], "nominal": p["nominal"],
+                           "distribution": p["description"]} for p in summary["parameters"]],
+           "nominal": {k: summary["nominal"][k] for k in ("outcome", "targets")},
+           "counts": summary["counts"], "target_distributions": summary["target_distributions"],
+           "zero_offset_check": summary["zero_offset_check"],
+           "unsuccessful_samples": shown["shown"], "unsuccessful_omitted": shown["omitted"],
+           "identity": {"engine_version": summary["identity"]["engine"]["engine_version"],
+                        "engine_build_id": summary["identity"]["engine"]["engine_build_id"],
+                        "catalog_version": summary["identity"]["catalog_version"]},
+           "seconds": summary["seconds"],
+           "execution": opts.execution_brief((summary.get("paths") or {}).get("study_dir")),
+           "paths": summary["paths"]}
+    if summary.get("compensation"):
+        out["compensation"] = comp_mod.brief(summary["compensation"])
+    return out
 
 
 def main(argv=None):
@@ -658,6 +743,8 @@ def main(argv=None):
         parser.add_argument("--overwrite", action="store_true", help="Replace the files this command writes in --out")
         parser.add_argument("--no-plots", action="store_true", help="Do not write plots")
         parser.add_argument("--no-report", action="store_true", help="Do not write report/")
+        parser.add_argument("--no-compensation", action="store_true",
+                            help="Ignore the spec's compensation object (as-built samples only)")
         opts.add_execution_options(parser)
         args = parser.parse_args(argv)
         if args.verify_seed is not None:
@@ -669,7 +756,8 @@ def main(argv=None):
         summary = run_tolerance(spec, args.out, base=base, base_path=args.base, spec_dir=args.spec.parent,
                                 overwrite=args.overwrite, seed=args.seed, samples=args.samples,
                                 zero_tolerance=args.zero_tolerance, draw_only=args.draw_only,
-                                plots=not args.no_plots, report=not args.no_report, **opts.execution_arguments(args))
+                                plots=not args.no_plots, report=not args.no_report,
+                                compensation=not args.no_compensation, **opts.execution_arguments(args))
         return summary if summary["status"] in ("DRAWN", *opts.EXIT_CODES) else compact(summary)
 
     return wc.emit(workflow, EXIT_CODES)
