@@ -47,10 +47,8 @@ is re-recorded on os-optics 0.14.0.
   25.979142 mm) and its table re-recorded.
 - `study run DIR` uses the evaluator the study records (a compensated tolerance study records its own); a different
   `--evaluator` is refused with `EVALUATOR_MISMATCH`, and printed `next` commands name the recorded evaluator.
-- The kit requires `os-optics>=0.14,<0.15`. The cases keep their records from os-optics 0.13.0 and catalog release
-  2026-10-28.1 (`baseline.json`) until they are verified on os-optics 0.14; `three-group-zoom` and
-  `expansion-focus` are recorded on os-optics 0.14.0, the candidate engine of `baseline.json`, which
-  `scripts/check_repo.py` accepts when the case's CASE.md and expected.json both record it.
+- The kit requires `os-optics>=0.14,<0.15`.
+- The four interop cases' requirement files ask for `os-optics-kit>=0.5,<0.6`, which installs with os-optics 0.14.
 
 ### Fixed
 

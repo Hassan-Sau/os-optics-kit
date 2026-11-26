@@ -133,7 +133,7 @@ os-optics results configurations zoom/run                            # the confi
 With `--study` the command also runs every configuration through the sweep machinery (parameter `efl_mm`; an
 unsolved sample is a refused sample), so the study tools apply: `--workers`, `--resume`,
 `os-optics-kit plot sweep zoom/study --y target:axis_spot`, `os-optics-kit compare zoom/study`,
-`os-optics-kit report zoom/study --project zoom/project.json`, and `present init RUN zoom/study --animate
+`os-optics-kit report zoom/study --project zoom/project.json`, and `present init zoom/run/configurations/wide zoom/study --animate
 --set assets.playback-study.y=target:axis_spot` for a playback of the samples that plots the spot radius. In the example the on-axis spot radius on the image plane grows as λf / (πw₀) from
 0.00705 mm at 35 mm to 0.02115 mm at 105 mm: the traced beam stays focused on the fixed plane.
 
@@ -145,5 +145,7 @@ unsolved sample is a refused sample), so the study tools apply: `--workers`, `--
   where two anchors disagree, the samples their marches reach are `UNVERIFIED`.
 - The groups are the whole path: an element before the image plane that is in no group is refused when its aperture
   (the native model's clear or edge radius) reaches the axis or is not stated; an element whose aperture stays clear
-  of the axis is not looked at. The image plane is checked the same way against the Project's observations.
+  of the axis is not looked at; an optical element the paraxial analysis cannot take on its own (tilted, cylindrical
+without a section axis) is judged by its declared pose and aperture. The image plane is checked the same way against
+the Project's observations.
 - Clearance is axial: vertex positions plus the declared envelopes.

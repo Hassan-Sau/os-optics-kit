@@ -446,7 +446,8 @@ class EngineModel:
         an element the groups leave out would change the EFL and the focus of the exported Project unseen. An element
         is on the path when the Engine's paraxial analysis accepts it on the axis together with the groups, or when its
         aperture (the native model's clear or edge radius) reaches the axis; an element whose aperture is not stated
-        counts as on the path."""
+        counts as on the path. An optical element the analysis cannot take on its own (tilted, cylindrical without a
+        section axis) is judged by its declared pose and aperture the same way."""
         grouped = set(self.components)
         along = {e["instance_id"]: _dot(e["entrance_vertex_mm"], self.axis) for e in reversed(reply["elements"])}
         extra = []
@@ -455,7 +456,20 @@ class EngineModel:
             if iid in grouped or component.get("optical_role") == "source":
                 continue
             alone = self._paraxial(self.base, [iid])
-            if not alone.get("ok"):  # not an optical element with a simulation model (a detector, an aperture...)
+            if not alone.get("ok"):
+                codes = {p.get("code") for p in ((alone.get("error") or {}).get("problems") or [])}
+                if not codes or codes <= {"PARAXIAL_ELEMENT_UNSUPPORTED"}:
+                    continue  # not an optical element with a simulation model (a detector, an aperture...)
+                # an optical element the paraxial analysis cannot take alone (tilted, decentred beyond its tolerance,
+                # cylindrical without a section axis): its declared pose decides whether it lies in the light's path
+                pose = [float(v) for v in ((component.get("nominal_pose") or {}).get("position_mm") or [])]
+                if len(pose) != 3:
+                    extra.append((iid, self.image_s))
+                    continue
+                s = _dot(pose, self.axis)
+                if s < self.image_s and _covers_axis(_off_axis(pose, self.origin, self.axis),
+                                                     _component_reach(self.base, component)):
+                    extra.append((iid, s))
                 continue
             element = alone["elements"][0]
             s = min(_dot(element["entrance_vertex_mm"], self.axis), _dot(element["exit_vertex_mm"], self.axis))

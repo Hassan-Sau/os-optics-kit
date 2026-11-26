@@ -38,7 +38,7 @@ Native `thin-waist`: waist_radius_y_mm <= 0.008493218, equivalent to FWHM <=10 u
 
 ## Baseline
 
-os-optics 0.14.0 and kit 0.4.0; no catalog; vacuum and lossless glass (`environment.pressure_pa` 0, `absorption_coefficient_per_mm` 0), as the 0.13.0 record and the ABCD reference assume. Source 488 nm, 10 mW, 1 mm waist. Cylinder entrance radius 25.979142 mm (0.13.0: 26 mm; the 0.14 `lens.singlet` builder solves f in standard air), plane exit, 10 mm clear diameter, 0.995 power transmission per surface. Paraxial separable Gaussian model, M²=1.
+os-optics 0.14.0 and kit 0.5.0; no catalog; vacuum and lossless glass (`environment.pressure_pa` 0, `absorption_coefficient_per_mm` 0), as the 0.13.0 record and the ABCD reference assume. Source 488 nm, 10 mW, 1 mm waist. Cylinder entrance radius 25.979142 mm (0.13.0: 26 mm; the 0.14 `lens.singlet` builder solves f in standard air), plane exit, 10 mm clear diameter, 0.995 power transmission per surface. Paraxial separable Gaussian model, M²=1.
 
 ## Files
 

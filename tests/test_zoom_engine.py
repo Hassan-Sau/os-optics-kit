@@ -508,6 +508,23 @@ class ExportedProjectTests(unittest.TestCase):
                                                 project)
                 self.assertEqual((code, error["code"]), (4, "IMAGE_PLANE_MISMATCH"), lateral)
 
+    def test_a_tilted_lens_in_no_group_is_refused(self):
+        # the paraxial analysis refuses a tilted lens (PARAXIAL_NOT_COAXIAL); it still lies in the light's path
+        for degrees in (10.0, 0.01, 0.001):
+            project = _with_extra_lens([160.0, 0.0, 0.0])
+            extra = next(c for c in project["components"] if c["instance_id"] == "EXTRA")
+            half = math.radians(degrees) / 2.0
+            w1, x1, y1, z1 = math.cos(half), 0.0, 0.0, math.sin(half)
+            w2, x2, y2, z2 = extra["nominal_pose"]["quaternion_wxyz"]
+            extra["nominal_pose"]["quaternion_wxyz"] = [w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                                                         w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                                                         w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                                                         w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2]
+            with TempDir() as tmp:
+                code, summary, error = _refused(tmp, _case_spec(efl_mm={"values": [35, 70, 105]}), project)
+                self.assertEqual((code, error["code"], error["components"]), (4, "UNGROUPED_PATH_ELEMENT", ["EXTRA"]),
+                                 degrees)
+
     def test_lenses_off_the_path_are_not_refused(self):
         for where in ([260.0, 0.0, 0.0], [160.0, 40.0, 0.0]):  # behind the image plane; 40 mm beside the axis
             with TempDir() as tmp:
